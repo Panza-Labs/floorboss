@@ -1,0 +1,17 @@
+{
+  "name": "floorboss",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code plugin: book meetings at an event.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "FLOORBOSS_TEST=1 node --test --import ./test/fixtures/isolated-home.mjs \"test/**/*.test.mjs\"",
+    "unit": "FLOORBOSS_TEST=1 node --test --import ./test/fixtures/isolated-home.mjs \"test/*.test.mjs\"",
+    "sims": "FLOORBOSS_TEST=1 node --test --import ./test/fixtures/isolated-home.mjs \"test/sims/*.test.mjs\"",
+    "self-check": "node scripts/self-check.mjs"
+  }
+}

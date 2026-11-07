@@ -1,0 +1,14 @@
+{
+  "name": "floorboss",
+  "description": "Book meetings at an event: triage the contact list, propose real times, draft timed outreach with an independent critic, and stage it for you to send, or send what you approved.",
+  "owner": {
+    "name": "Panza Labs"
+  },
+  "plugins": [
+    {
+      "name": "floorboss",
+      "source": "./",
+      "description": "Book meetings at an event: triage the contact list, propose real times, draft timed outreach with an independent critic, and stage it for you to send."
+    }
+  ]
+}

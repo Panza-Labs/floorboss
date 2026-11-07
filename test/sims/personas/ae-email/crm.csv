@@ -1,0 +1,41 @@
+First Name,Last Name,Title,Account Name,Email,Contact Owner,Lead Source,Stage,Last Activity,Email Opt Out,Do Not Call
+Daniel,Herrera,VP Fraud Strategy,Merriton Bank,daniel.herrera@merritonbank.example,Marcus Bell,Trade Show - Midway 2026,Negotiation,09/30/2026,0,0
+Priyanka,Desai,"Director, AML Technology",Merriton Bank,priyanka.desai@merritonbank.example,Marcus Bell,Webinar,Discovery,08/14/2026,0,0
+Gregory,Lindqvist,Chief BSA/AML Officer,Merriton Bank,greg.lindqvist@merritonbank.example,Dan Whitfield,Executive Referral,Prospecting,06/03/2026,0,0
+Angela,Moretti,"VP, Enterprise Risk",Northfield Credit Union,angela.moretti@northfieldcu.example,Priya Raman,Partner Referral,Closed Won,09/23/2026,0,0
+Omar,Haddad,"SVP, Fraud Prevention",Sterling Rock Bank,omar.haddad@sterlingrockbank.example,Marcus Bell,Outbound,Customer,10/02/2026,0,0
+Jessica,Tran,"Director, Fraud Operations",Harborview Bank,jessica.tran@harborviewbank.example,Priya Raman,Trade Show - Midway 2026,Nurture,11/17/2026,1,0
+Robert,Nakamura,Chief Risk Officer,Bluewater Bancorp,robert.nakamura@bluewaterbancorp.example,Marcus Bell,Inbound,Closed Lost,04/07/2026,1,1
+Michelle,Grant,"Manager, Fraud Operations",Corvane Federal Credit Union,michelle.grant@corvanefedcu.example,Marcus Bell,Trade Show - Midway 2025,Prospecting,02/10/2026,0,0
+Samuel,Ortiz,Head of Financial Crimes,Veylin Bank,sortiz@veylinbank.example,Priya Raman,Trade Show - Midway 2026,Nurture,05/19/2026,0,0
+David,Kim,Director of Compliance,Lakeshore Credit Union,david.kim@lakeshorecu.example,Priya Raman,Inbound,Closed Lost,01/09/2026,0,0
+Teresa,Wong,"Director, Payments Fraud",Keystone Commerce Bank,teresa.wong@keystonecommercebank.example,Marcus Bell,Outbound,Closed Lost,03/12/2026,0,0
+Brandon,Lee,Fraud Operations Manager,Ridgeline Credit Union,brandon.lee@ridgelinecu.example,Marcus Bell,Inbound,Disqualified,07/22/2026,0,0
+Nina,Castellanos,Head of Fraud,Lumen Neobank,nina.castellanos@lumenneobank.example,Kelsey Ortiz,Outbound,Qualification,09/02/2026,0,0
+Harriet,Coles,CRO,Pacific Rim Savings,harriet.coles@pacificrimsavings.example,Marcus Bell,Trade Show - Midway 2026,Customer,08/28/2026,0,0
+Victor,Ibanez,VP Fraud,Desert Sun Credit Union,victor.ibanez@desertsuncreditunion.example,Priya Raman,Outbound,Closed Won,07/15/2026,0,0
+Lydia,Marsh,Director AML,Old Harbor Bank,lydia.marsh@oldharborbank.example,Dan Whitfield,Trade Show - Midway 2026,Negotiation,09/29/2026,0,1
+Femi,Adebayo,Head of Payments Risk,Swiftlane Pay,femi.adebayo@swiftlanepay.example,Marcus Bell,Partner Referral,Discovery,09/18/2026,0,0
+Gordon,Hale,BSA Officer,Prairie Gold Bank,gordon.hale@prairiegoldbank.example,Kelsey Ortiz,Webinar,Prospecting,05/05/2026,0,0
+Caroline,Ng,VP Risk Ops,Bayou Federal,caroline.ng@bayoufederal.example,Priya Raman,Webinar,Nurture,11/30/2026,1,1
+Ted,Brannigan,SVP Operations,Allegheny Trust,ted.brannigan@alleghenytrust.example,Marcus Bell,Inbound,Closed Lost,10/13/2026,0,0
+Shirin,Farahani,Fraud Manager,Coastal Pacific CU,shirin.farahani@coastalpacificcu.example,Kelsey Ortiz,Outbound,Qualification,09/25/2026,0,0
+Paolo,Ricci,Head of Compliance,Verdant Neobank,paolo.ricci@verdantneobank.example,Dan Whitfield,Inbound,Discovery,08/02/2026,0,0
+Aimee,Laurent,"Director, Fraud Strategy",Northern Plains Bank,aimee.laurent@northernplainsbank.example,Marcus Bell,Inbound,Prospecting,06/20/2026,0,1
+Kenneth,Ward,Chief Compliance Officer,Riverside Bancshares,kenneth.ward@riversidebancshares.example,Priya Raman,Inbound,Customer,09/09/2026,0,0
+Jada,Simmons,AML Manager,Lone Star Payments,jada.simmons@lonestarpayments.example,Kelsey Ortiz,Partner Referral,Nurture,03/30/2026,1,1
+Ruben,Castro,VP Financial Crimes,Gullhaven Bank,ruben.castro@gullhavenbank.example,Marcus Bell,Webinar,Negotiation,10/05/2026,0,0
+Natalie,Ferris,Fraud Analyst,Greenfield CU,natalie.ferris@greenfieldcu.example,Kelsey Ortiz,Webinar,Disqualified,02/14/2026,0,1
+Howard,Lim,Director Risk,Pacific Rim Savings,howard.lim@pacificrimsavings.example,Marcus Bell,Inbound,Customer,08/28/2026,0,0
+Beatrice,Osei,Head of Fraud Ops,Unity Neobank,beatrice.osei@unityneobank.example,Dan Whitfield,Outbound,Prospecting,01/22/2026,0,1
+Glen,McAllister,EVP Risk,Heritage Plains Bank,glen.mcallister@heritageplainsbank.example,Marcus Bell,Trade Show - Midway 2026,Closed Won,12/11/2026,0,1
+Sasha,Volkova,Sanctions Lead,Atlantic Crossing Bank,sasha.volkova@atlanticcrossingbank.example,Priya Raman,Inbound,Discovery,09/16/2026,0,0
+Ian,Fletcher,VP Disputes,Cardinal Card Co,ian.fletcher@cardinalcardco.example,Marcus Bell,Trade Show - Midway 2026,Nurture,11/29/2026,0,1
+Maya,Rosen,Director AML Tech,Hudson Valley Savings,maya.rosen@hudsonvalleysavings.example,Kelsey Ortiz,Webinar,Qualification,09/27/2026,0,0
+Oscar,Delgado,CISO,Sunbelt Federal,oscar.delgado@sunbeltfederal.example,Dan Whitfield,Webinar,Closed Lost,07/01/2026,0,0
+Amara,Eze,Head of Fraud,Kinnick Pay,amara.eze@kinnickpay.example,Marcus Bell,Inbound,Prospecting,04/18/2026,0,0
+Lorraine,Pike,Compliance Director,Granite Peak Bank,lorraine.pike@granitepeakbank.example,Priya Raman,Outbound,Negotiation,10/01/2026,0,0
+Hugo,Brandt,Fraud Ops Lead,Trimoor CU,hugo.brandt@trimoorcu.example,Kelsey Ortiz,Outbound,Prospecting,08/08/2026,0,1
+Wendy,Cho,VP Enterprise Risk,Seaboard Financial,wendy.cho@seaboardfinancial.example,Marcus Bell,Trade Show - Midway 2026,Discovery,09/21/2026,0,0
+Raymond,Ellis,BSA/AML Officer,Riverbend Community Bank,raymond.ellis@riverbendcommunityba.example,Dan Whitfield,Webinar,Nurture,02/27/2026,0,0
+Tara,Quinn,Head of Risk,Lighthouse Neobank,tara.quinn@lighthouseneobank.example,Marcus Bell,Webinar,Customer,09/30/2026,0,0

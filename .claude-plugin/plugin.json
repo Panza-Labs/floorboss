@@ -1,0 +1,19 @@
+{
+  "name": "floorboss",
+  "version": "0.1.0",
+  "description": "Book meetings at an event: triage the contact list, propose real times, draft timed outreach with an independent critic, and stage it for you to send, or send what you approved.",
+  "author": {
+    "name": "Panza Labs",
+    "url": "https://panzalabs.com"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "conference",
+    "events",
+    "meetings",
+    "outreach",
+    "sales",
+    "networking"
+  ],
+  "homepage": "https://panzalabs.com"
+}

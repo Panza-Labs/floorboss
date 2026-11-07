@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The whole suite (unit and simulations) takes about half an hour on a hosted runner.
+    timeout-minutes: 60
+    strategy:
+      # Every Node version reports, even when one fails.
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      # Three test files at a time: node runs one at a time on a 2-core runner, and each test has its own home.
+      - run: FLOORBOSS_TEST=1 node --test --test-concurrency=3 --import ./test/fixtures/isolated-home.mjs "test/**/*.test.mjs"
+      # The claims SECURITY.md asks a reader to check for themselves.
+      - run: npm run self-check
+        if: matrix.node == 22
+
+  # Time-zone maths must not depend on the machine's zone (the unit tests hold it).
+  time-zones:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [Asia/Kolkata, Pacific/Kiritimati]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: TZ=${{ matrix.tz }} FLOORBOSS_TEST=1 node --test --test-concurrency=3 --import ./test/fixtures/isolated-home.mjs "test/*.test.mjs"
+
+  privacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash scripts/privacy-check.sh
