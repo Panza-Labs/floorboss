@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Third verify after round 7: a dropped or revised touch never sends its old approval, a text the critic
 // failed can't be skipped past the critic, a confirmation carries no link, and the "failed twice" hold is

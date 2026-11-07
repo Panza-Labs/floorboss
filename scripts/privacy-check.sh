@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 Panza Labs
+# Copyright 2026 Potrero Ventures LLC
 # SPDX-License-Identifier: Apache-2.0
 # Fails if the repo's files contain local paths, secrets, private words, or email addresses outside reserved and
 # noreply domains and Panza Labs's own hello@panzalabs.com. gmail.com addresses are allowed only with a local part ending in ".example" (the Gmail dot/plus

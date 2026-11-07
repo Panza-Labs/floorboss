@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // With a CRM connected, everyone about to get a first email who isn't in it is added first, so the CRM's mailbox
 // sync files their replies on a record floorboss reads by id. The create tool only adds a person; the guard lets

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Plan: create the event, turn free times into slots, remove slots the user can't do.
 import { run, need } from '../../../lib/args.mjs';

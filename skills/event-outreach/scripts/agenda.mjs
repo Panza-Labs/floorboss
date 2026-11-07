@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The meeting agenda: for every booked meeting, when and where, who they are, how the user knows them, what was
 // said, what floorboss knows about their company and what's new, and what to talk about. Built the day before

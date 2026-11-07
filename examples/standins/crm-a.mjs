@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Stand-in CRM, HubSpot-like shape: string properties, epoch-ms dates, owners by id.
 import { serve, loadData, str, BadInput, trap, newId } from './lib/server.mjs';

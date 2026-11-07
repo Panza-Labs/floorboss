@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Message structures. One recipe for every message reads as a template across a batch, and across senders.
 // Each first message and follow-up is given a structure, rotated by rank so neighbours differ, never the one

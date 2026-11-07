@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // A stand-in browser with one website open: "Meetwell", a fictional event app in the style of the
 // matchmaking apps events use (people search, a profile per attendee with a message box and a meeting

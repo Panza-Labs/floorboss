@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // What the user's Claude setup already has, found before onboarding asks anything: skills, agents, plugins
 // and configured MCP servers, sorted into what floorboss cares about (outbound writing, voice and brand,

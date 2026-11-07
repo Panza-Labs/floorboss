@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Parse typed free times like "Tue 9–11, 14–17; Wed 9:30–12; Wed 19:30–22:00 dinner 150".
 import { weekdayOf } from '../../../lib/tz.mjs';

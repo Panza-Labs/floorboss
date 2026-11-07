@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Column mapping for a file the user gives (an attendee list, a CRM export): what each column means, what
 // each status value means, and which cells say "stop". floorboss proposes from column names and sample

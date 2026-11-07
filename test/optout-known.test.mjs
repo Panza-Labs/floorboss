@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The opt-out line on emails to people the user already knows is the user's call, asked in setup: "only on
 // cold emails" leaves it off for warm readers (customers, open deals, anyone marked warm) and keeps it for

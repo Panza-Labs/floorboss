@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Mail helpers shared by mail-a and mail-b: drafts kept in memory and on disk, replies matched from data.
 import { loadData, loadDrafts, saveDraft, newId, BadInput } from './server.mjs';

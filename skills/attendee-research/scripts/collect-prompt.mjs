@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The collection prompt: generic instructions the user runs in their own browser agent.
 import { CONSTANTS } from '../../../lib/config.mjs';

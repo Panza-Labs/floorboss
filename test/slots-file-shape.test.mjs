@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The outreach commands that never read the times work whatever slots.json holds: the slot lookup is built
 // only when a command asks for it.

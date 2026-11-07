@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Busy blocks (from a calendar connector or an .ics export) into free ranges for buildSlots: for each event
 // day, working hours minus whatever is busy, as wall minutes in the event's zone.

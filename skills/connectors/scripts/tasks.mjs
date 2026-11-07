@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Connector tasks: what floorboss asks a connected tool to do, the format the answer must take, and the
 // screen that keeps any tool that sends, posts or deletes from ever being mapped.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Talk to one stand-in server over stdio, the way an MCP client would.
 // Usage: node call.mjs <server> list

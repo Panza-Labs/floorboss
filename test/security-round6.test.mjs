@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Sixth security review: a proof row can't break the what-you-bring table and a control character can't start a
 // new line in it; the people-data server's read-only set refuses company and employee lookups too; a task title

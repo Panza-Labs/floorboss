@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Give each shortlisted contact up to two slots: different days, else 2h apart the same day,
 // else one slot, else an open ask. Higher ranks pick first; no slot exceeds its capacity.

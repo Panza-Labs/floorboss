@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The flow: `next` says the one thing to do now; `answer` saves what the user said where it belongs.
 // Claude never chooses where an answer is saved: each question id has one saver here.

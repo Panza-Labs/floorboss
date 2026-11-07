@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Turn free-time ranges into meeting slots in the event's time zone.
 import { wallParts, dateKey, labelInZone, pad, toMin, instant } from '../../../lib/tz.mjs';

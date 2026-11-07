@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Who writes each message. Onboarding finds out what outbound tooling the user already has and records one
 // of three modes:

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // A stand-in for a Gmail MCP that can send, built on the stand-in lib. Same read tools as
 // mail-a (create_draft, get_thread, search_threads, list_drafts) plus a send_message that records what it

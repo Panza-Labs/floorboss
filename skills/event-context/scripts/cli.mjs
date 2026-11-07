@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Setup helpers: disclaimer acknowledgement, settings, context profiles and the context check.
 import { switchEvent, writeAnswers, EVENT_SETTINGS, EVENT_DEFAULTS, isMockEvent, mockTarget } from '../../../lib/scope.mjs';

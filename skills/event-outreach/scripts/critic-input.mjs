@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The only material the critic sees. Built from a whitelist; attendee notes are never included.
 import { noteText, blockText } from '../../../lib/normalize.mjs';

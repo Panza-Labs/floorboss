@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Everything about an event, computed on read from the inputs, the confirmed mappings and the ledger: the
 // contacts (duplicates merged, ids from the ledger), who each person is to the sender, the shortlist and the

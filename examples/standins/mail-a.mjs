@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Stand-in mail, Gmail-like shape: drafts with r-/m-/t- ids, threads by threadId.
 import { serve, trap, loadData } from './lib/server.mjs';

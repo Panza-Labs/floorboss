@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Seventh security review: a "no" at the mapping is never "no opt-out column"; a task's due date and contact
 // can't carry prompt text; an uncertain match to an opted-out record is settled before any reach; two meanings

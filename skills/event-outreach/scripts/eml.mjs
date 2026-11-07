@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // One message as an .eml file (RFC 5322) that mail apps open as an editable draft.
 // X-Unsent: 1 makes Outlook open it ready to send; Apple Mail and Thunderbird open it as a message to edit or resend.

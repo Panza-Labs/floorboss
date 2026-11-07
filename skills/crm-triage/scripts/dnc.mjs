@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Do-not-contact entries: email, domain, company or name, each with an optional "until" date.
 // Parsing fails closed: every address on a line counts, and a bare date is never read as an expiry.

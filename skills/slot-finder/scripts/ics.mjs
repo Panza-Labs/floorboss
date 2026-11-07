@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Read busy times from a calendar export (.ics, RFC 5545): Google, Outlook or Apple.
 // Covers the common cases: UTC, TZID and floating times, all-day events, DURATION,

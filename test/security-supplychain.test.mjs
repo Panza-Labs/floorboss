@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Supply-chain audit fixes (2026-10-31): writes through a link in the data folder, the built-in web tools
 // during a run, shell operators after a floorboss script, --*-file reads from the working folder, the outbox

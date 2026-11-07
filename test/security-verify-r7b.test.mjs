@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The second verify after round 7: each block is one of its findings, and fails without the fix it names.
 import { test } from 'node:test';

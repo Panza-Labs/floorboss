@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Load the mock event into floorboss's data folder, with dates relative to today.
 // Usage: node load.mjs --goal buyers|investors [--start-in 22] [--now <ISO>]

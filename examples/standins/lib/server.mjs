@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Shared plumbing for the stand-in MCP servers: stdio JSON-RPC, call log, fake data, recurrence.
 // These fake real connectors for tests and simulations. They are never shipped as real connectors.

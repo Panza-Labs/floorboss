@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Stand-in calendar, Outlook-like shape: getSchedule with local times (no offset) in the asked zone.
 import { serve, loadData, expandEvents, BadInput, window, trap } from './lib/server.mjs';

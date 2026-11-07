@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Research profiles: one markdown file per contact, every claim with a source URL.
 import { existsSync, readFileSync } from 'node:fs';

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Draft: status paste-back, drafting jobs, checks, critic input and verdicts, the gate, the outbox.
 import { optoutFor, optoutForReader } from '../../../lib/config.mjs';

@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // One person, one contact. Rows of the attendee list that are the same person (two registrations, a work
 // and a personal address, "Jon" and "Jonathan", an initial, a typo) are merged before anything else looks at

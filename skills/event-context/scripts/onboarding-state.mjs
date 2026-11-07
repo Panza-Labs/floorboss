@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The state the onboarding tree reads, gathered from the home folder: the scan, the settings, the event, the
 // answers so far, the slots and the list. Shared by the onboarding-plan verb and the flow's `next`.

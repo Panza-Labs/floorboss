@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Lead time drives tone, follow-up spacing and how many touches fit.
 import { addDays, daysBetween, todayKeyIn, parseDateKey, weekdayOf, MONTHS } from '../../../lib/tz.mjs';

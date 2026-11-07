@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Research cost estimate shown before the user picks a scale.
 import { CONSTANTS } from '../../../lib/config.mjs';

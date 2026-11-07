@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Stand-in calendar, Google-like shape: freebusy in UTC, events with dateTime/date.
 import { serve, loadData, expandEvents, instant, window, trap, newId } from './lib/server.mjs';

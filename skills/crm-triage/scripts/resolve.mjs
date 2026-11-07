@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Who a person is to the sender, decided in one place from the evidence gathered about them. One ladder,
 // first rung wins; every later rung that would also have fired is kept as an alternative, so "check these"

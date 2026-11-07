@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // How many people at one company hear from the user, by the company's size. Writing to three people at a
 // four-person shop reads as spam; three at a bank of 200,000 is ordinary account work. The size comes from a

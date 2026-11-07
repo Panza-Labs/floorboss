@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // UserPromptSubmit hook: when the user reports what happened with outreach ("I sent Ana and Raj",
 // "he moved it to 3:40", "cut the agencies") while floorboss is tracking an event, remind Claude to

@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The shortlist: everyone resolved as warm or reach, ranked, trimmed by the user's "keep N" and the company
 // caps. Must-meet people and people the user decided to reach are pinned: no limit or cap removes them (they

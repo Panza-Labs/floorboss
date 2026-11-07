@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The outbox: one self-contained offline page with every message, Copy buttons and status ticks.
 import { createHash } from 'node:crypto';

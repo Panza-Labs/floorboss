@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Recording what happened, from the user's own words: "I sent Ana and Tomas", "Tomas moved it to Monday
 // 3:40pm", "cut the agencies", "add the Northwind CEO". Claude writes the user's report as items

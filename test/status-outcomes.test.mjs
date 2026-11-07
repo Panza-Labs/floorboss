@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // What the status outputs say about how things stand: a cancellation read from the mailbox frees the time (and
 // says so when nothing was booked); someone away is shown as away, not as due, until the day they're back; and

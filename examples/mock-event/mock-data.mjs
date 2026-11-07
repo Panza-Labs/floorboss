@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The mock event: a fictional expo, a fictional company (Lanecraft) and invented people.
 // Every name, company and address is made up; domains are reserved (.example, .test).

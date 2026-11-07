@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 //
 // `npm run self-check`: checks, on your own copy, the claims SECURITY.md makes about what floorboss is and what

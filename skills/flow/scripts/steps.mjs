@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The one thing to do next, worked out from the home folder, the event's inputs and its ledger. Every step
 // has exactly one action: run (a command), ask (a question, saved by `flow answer`), judge (Claude's own

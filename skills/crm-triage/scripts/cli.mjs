@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Triage verbs: give floorboss a file, confirm what its columns mean, load, take fit judgements and the
 // user's decisions, show the shortlist. Every decision is a line in the ledger; everything shown is computed

@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The verify after round 7 and the supply-chain fixes: each block is one of its findings, and fails without
 // the fix it names.

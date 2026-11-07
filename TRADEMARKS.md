@@ -2,7 +2,7 @@
 
 The code in this repository is licensed under the Apache License 2.0. The license covers the code. It doesn't
 cover the **floorboss** name, the floorboss pit boss mark and icons, or the **Panza Labs** name and windmill
-mark.
+mark, which belong to Potrero Ventures LLC.
 
 ## You're welcome to
 

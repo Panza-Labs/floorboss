@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // PreToolUse guard for MCP calls, for Claude's own file tools (Read, Grep, Glob, Write, Edit, MultiEdit,
 // NotebookEdit), and for the shell and subagent tools (Bash, PowerShell, Monitor, Agent, Task: see the main path);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Connector discovery: list the tasks, screen tools, validate what a tool returned, save and show recipes.
 import { allowedPath, home, configPath, assertSlug, readChecked } from '../../../lib/paths.mjs';

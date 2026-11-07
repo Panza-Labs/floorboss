@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The user's answers on check-these, one person per line: "c012 same-person crm:3", "c020 reach because she
 // asked; we met in May". A reason may hold ; and , of its own, so a line ends at a new line, or at a ; or ,

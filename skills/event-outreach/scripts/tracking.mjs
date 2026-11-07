@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Tracking across channels. Email is read from the mailbox; meetings from the calendar; everything that has
 // no connector (event-app messages, LinkedIn, colleague notes, decisions for the user) becomes a CRM task,

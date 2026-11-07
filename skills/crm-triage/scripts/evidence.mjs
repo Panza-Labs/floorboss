@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Everything known about one contact, gathered in one place before anyone decides: CRM rows that may be
 // them, account rules for their company, the do-not-contact list, the user's own contacts and mailbox,

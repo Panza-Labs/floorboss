@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Deterministic checks on a draft before the critic sees it.
 import { relativeWordsIn } from './leadtime.mjs';

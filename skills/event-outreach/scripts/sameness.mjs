@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Batch sameness: drafts that each pass but read as one mail merge. Looks at the whole batch at once.
 

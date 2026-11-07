@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Stand-in people-data tool, Apollo-like shape: one person matched by name and company (or LinkedIn URL), with a
 // work email and its status when the data has one. Every match counts a "credit" in the data's log, so tests can

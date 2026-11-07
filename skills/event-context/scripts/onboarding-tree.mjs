@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Onboarding as a decision tree. After the scan, every question has a condition: it's asked only when it
 // applies to this user's setup and earlier answers, and anything skipped says why. Rounds go in order:

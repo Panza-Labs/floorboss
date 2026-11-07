@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // What came in between sessions, recorded by hand: an out-of-office holds follow-ups until the day they're back
 // (it isn't a reply); a cancellation that asks for another time is put to the user to agree a new one (nothing

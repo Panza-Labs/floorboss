@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // A column-mapping correction said in words ("Lifecycle is the status column. Customer means customer, Open Deal
 // is warm. And there's no opt-out column."), read clause by clause into the same changes a corrected JSON makes.

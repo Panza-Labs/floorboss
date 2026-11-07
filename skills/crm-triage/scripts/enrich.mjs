@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Contact details for people floorboss wants to reach by email or LinkedIn but whose list row has neither.
 // The CRM is checked first, for free: an email or LinkedIn link already on their record is used as is.

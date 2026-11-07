@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Two companies written in a non-Latin script never share a brief file, so one company's research can't stand in
 // for another's; accented Latin names keep the plain file name they always had.

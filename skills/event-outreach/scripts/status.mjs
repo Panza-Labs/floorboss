@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // The outbox status line: what the user sent, booked, heard back from, or was told to stop.
 // floorboss-status v1 event=<slug> at=<ISO UTC>

@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // A contacts export the user gives (LinkedIn Connections.csv, Gmail or Outlook contacts): people they already
 // talk to. Each becomes { name, email, emails_seen, company, company_key, date, stopped, source }.

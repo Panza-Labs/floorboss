@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Company briefs: one per shortlisted company, written before the first draft. A draft's angle comes from
 // what the company sells, how it relates to the sender's company and what it would want from them; without

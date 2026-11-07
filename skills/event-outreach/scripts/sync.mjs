@@ -1,4 +1,4 @@
-// Copyright 2026 Panza Labs
+// Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // What the mailbox or the CRM shows happened with shortlisted people since floorboss planned them, turned
 // into log entries. This catches what the user did outside floorboss: an email rewritten and sent from
