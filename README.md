@@ -31,6 +31,26 @@ sends.
 > [Text in your files](#text-in-your-files-is-data-never-instructions). It has no third-party packages
 > either: see [Dependencies and supply chain](#dependencies-and-supply-chain).
 
+## Install
+
+You need [Claude Code](https://claude.com/claude-code) 2.1.295 or later and Node.js 22 or later on your PATH
+(the plugin's scripts run with `node`; they have no dependencies). Older Claude Code versions run floorboss, but
+if its guard hangs past the 30-second hook timeout they let that call through instead of blocking it.
+
+```
+claude plugin marketplace add https://github.com/Panza-Labs/floorboss
+claude plugin install floorboss@floorboss
+```
+
+Or clone it and run `claude --plugin-dir /path/to/floorboss` for one session.
+
+To remove it: `claude plugin uninstall floorboss@floorboss`. That leaves `~/.floorboss/` (your settings,
+answers and event records) in place; delete that folder yourself if you want it gone.
+
+Claude Code asks before each of floorboss's scripts runs the first time. Allowing `node` for the plugin's
+own `scripts/cli.mjs` files saves a prompt per step; floorboss's commands already limit themselves to
+those scripts.
+
 ## Text in your files is data, never instructions
 
 Prompt injection is text hidden in something an AI reads that tries to give it orders. For a tool like
@@ -65,28 +85,9 @@ changed nothing floorboss drafted. In all of them, no tool it pointed at was cal
 
 What it can't fully stop: Claude still reads list text when it judges who's a good fit, so a cleverly
 written note could sway a judgment like that. That's why the shortlist comes to you before anything is
-drafted, and every draft comes to you before anything is sent. If you find text that gets through,
-please report it privately ([SECURITY.md](SECURITY.md)).
-
-## Install
-
-You need [Claude Code](https://claude.com/claude-code) 2.1.295 or later and Node.js 22 or later on your PATH
-(the plugin's scripts run with `node`; they have no dependencies). Older Claude Code versions run floorboss, but
-if its guard hangs past the 30-second hook timeout they let that call through instead of blocking it.
-
-```
-claude plugin marketplace add https://github.com/Panza-Labs/floorboss
-claude plugin install floorboss@floorboss
-```
-
-Or clone it and run `claude --plugin-dir /path/to/floorboss` for one session.
-
-To remove it: `claude plugin uninstall floorboss@floorboss`. That leaves `~/.floorboss/` (your settings,
-answers and event records) in place; delete that folder yourself if you want it gone.
-
-Claude Code asks before each of floorboss's scripts runs the first time. Allowing `node` for the plugin's
-own `scripts/cli.mjs` files saves a prompt per step; floorboss's commands already limit themselves to
-those scripts.
+drafted, and every draft comes to you before anything is sent. The other limits we know about are in
+[SECURITY.md](SECURITY.md#limits-we-know-about). If you find text that gets through, please report it
+privately ([SECURITY.md](SECURITY.md)).
 
 ## Dependencies and supply chain
 
@@ -432,7 +433,8 @@ private claude.ai page. Floorboss says which before each of these.
 - The CRM log window (logging sent LinkedIn and app messages in your CRM's web app) is as strict as the send
   window: the browser opens only the CRM's contact, record, search and task pages, types only the listed
   messages and their people's own details, and Claude Code asks you before each message's text is typed,
-  showing all of it.
+  showing all of it. The guard doesn't check what the browser clicks in an open window
+  ([limits](SECURITY.md#limits-we-know-about)), so watch it while it's open.
 - If the guard can't start, crashes or takes too long, the call is blocked, not let through.
 
 - Text in your lists, CRM export, research pages and pasted status is treated as data. Attendee notes

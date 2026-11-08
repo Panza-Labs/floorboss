@@ -93,6 +93,11 @@ The first public version.
   talk about), as a page, a short version and an `.ics` file. It names the companies before any web search.
 
 ### Connections and safety
+- From a third full audit (4 confirmed findings, all low; the two that touch the run lock are fixed here, each with
+  regression tests, and the other two are planned for 0.1.1): during a run, saving a connection to a server setup
+  didn't find, or moving one to another server, asks you first, and forgetting one always asks; a subagent can do
+  none of these; a change goes through only as the guard saw it; a test call runs only on its own job's server. The
+  guard reads a floorboss script call the way bash and zsh read it.
 - The leads both audits left open, each closed with a regression test:
   - A web search opens only the hosts it returned, exactly as returned (never their subdomains), never one named in
     the search (also with its dots spaced out, doubled or written as other full stops), and never a known hosting suffix such as co.uk or github.io.

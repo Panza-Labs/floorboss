@@ -31,7 +31,7 @@ folder. WebFetch is gated during a run too: it opens only LinkedIn profiles, kno
 sites the user named, and no web address or search query may run past 300 characters, a line break or an
 email address, so WebFetch should not be on "always allow" in a floorboss session. Opening a browser window (to send notes in an event app or LinkedIn, or to log messages in your CRM) asks you at its first browser call, saying what the window lets the browser do; until you allow it, every call in it asks. The CRM log window is held to the same rules as the send window: only the CRM's contact, record,
 search and task pages, only the listed messages and their people's own details typed, and a prompt with the
-full text before each message goes in. Every send, test call, CRM task, new CRM contact, browser note and logged message asks
+full text before each message goes in. During a run, saving a connection to a server setup didn't find, moving one to another server, or forgetting one asks you first; a subagent can do none of these, and a test call runs only on its own job's server. Every send, test call, CRM task, new CRM contact, browser note and logged message asks
 the user, showing the full text; a batch of mailbox drafts asks once, listing who each is to. Names and notes from lists and CRMs are scrubbed before they appear in a permission prompt (letters and a little punctuation only, cut short, quoted, with the person's id and address beside them); the approved text is shown verbatim under its own label. A message floorboss already let through once says so at its next prompt, and a draft batch's yes puts each draft in once. A PostToolUse hook records an ask (a lookup counted, a draft batch confirmed, a window allowed) only after the call has run, so a declined prompt is asked again and never counts as a yes. If the guard can't start, crashes or runs past its own 20-second deadline, the call is blocked. A guard that hangs outright, past Claude Code's 30-second hook timeout, is blocked only on Claude Code 2.1.295 or later (the hooks set `onFailure: "block"`); older versions let that call through, so use 2.1.295 or later. The records live in
 files a session could write, so that prompt is the final check: never set a send tool to "always allow".
 
@@ -76,9 +76,10 @@ while a run is under way:
 
 ## Everything floorboss can write, and where
 
-Nothing below happens without your yes for that kind of write in setup, and each one asks you again at the
-moment it happens, showing what goes where. The guard holds every call to the saved recipe for that tool: the
-same server, the same tool, and only the fields listed here. Anything else is refused.
+Apart from floorboss's own files, nothing below happens without your yes for that kind of write in setup, and
+the "Asked" column says when it asks you again, showing what goes where. The guard holds every connected-tool
+call to the saved recipe for that tool: the same server, the same tool, and only the fields listed here.
+Anything else is refused.
 
 | What | Where it goes | What it can carry | Asked | Held by |
 |---|---|---|---|---|
@@ -91,9 +92,11 @@ same server, the same tool, and only the fields listed here. Anything else is re
 | A people-data lookup | your people-data tool (Apollo, Clay and the like) | the person's name and company, to find an email | the count first, then the calls | the lookup window, and only as many as you agreed |
 | Files | `~/.floorboss/` (or `FLOORBOSS_HOME`), and the temp folder | your event records, drafts, the outbox page | no | guard: Claude's file tools write nowhere else during a run; `test/security-supplychain.test.mjs` |
 
-floorboss never deletes or merges a record in a connected tool, never changes a field that has a value, never
+Through a connected tool, floorboss never deletes or merges a record, never changes a field that has a value, never
 changes who owns one, and never adds anyone to a list, sequence or campaign. The one update is the logged message's:
-with your yes in setup, it fills a person's LinkedIn address and title where their record has none.
+with your yes in setup, it fills a person's LinkedIn address and title where their record has none. Inside a browser
+window, floorboss has no step that does any of these, but the guard doesn't check clicks (see
+[Limits we know about](#limits-we-know-about)).
 
 ## Check it yourself
 
@@ -156,6 +159,16 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
 - **Inside the CRM log window.** Once you allow the window, the browser may type a listed person's own details
   (name, email, company) to find their record, and floorboss can't tell a search box from a new-contact form. It
   never types anything else there, and each message's text still asks.
+- **Clicks in a browser window.** Once you allow a window, the guard checks the pages it opens and the text it
+  types, but not what it clicks. For up to 20 minutes, a click on an allowed page (Delete on a CRM record, for
+  example) gets no further prompt from floorboss. Watch the window while it's open, and close it if the browser
+  does something you didn't ask for.
+- **What the researcher opens.** It's held to hosts its searches returned and to the domains of people on your
+  list, with their subdomains. Text that steers it could send it to a search only an attacker's page answers, and
+  an attendee can register with a domain they control. A link to such a site could carry what the researcher
+  holds: one contact's name, title and company, and your label for their segment. Email addresses are refused.
+- **Search during a run.** Claude's search shows matching lines only from floorboss's data folder, but it can
+  still list matching files elsewhere and open them, apart from the key files Read refuses by name.
 - **Screen-control tools.** A remote-devices server's browser tools are held as a browser, but its `computer_*`
   tools (clicks and keys on the whole screen) aren't: they get the limits any other server's tools get, and
   floorboss can't see which page or app they reach.
