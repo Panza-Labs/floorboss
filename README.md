@@ -59,8 +59,9 @@ research pages and replies written by strangers. Here is how it keeps that text 
   sending on, Claude Code asks you before each send and shows you the whole message.
 
 How it's tested: the test data plants instructions in an attendee note and in a connected mailbox's
-answers. In 20 simulated first-time users and in both side-by-side studies against plain Claude Code, the
-planted text changed nothing floorboss sent, and no tool it pointed at was called.
+answers. In 20 simulated first-time users, the planted text changed nothing floorboss sent. In both
+side-by-side studies against plain Claude Code (scored on the drafts, before review and approval), it
+changed nothing floorboss drafted. In all of them, no tool it pointed at was called.
 
 What it can't fully stop: Claude still reads list text when it judges who's a good fit, so a cleverly
 written note could sway a judgment like that. That's why the shortlist comes to you before anything is
@@ -69,8 +70,9 @@ please report it privately ([SECURITY.md](SECURITY.md)).
 
 ## Install
 
-You need [Claude Code](https://claude.com/claude-code) and Node.js 22 or later on your PATH (the
-plugin's scripts run with `node`; they have no dependencies).
+You need [Claude Code](https://claude.com/claude-code) 2.1.295 or later and Node.js 22 or later on your PATH
+(the plugin's scripts run with `node`; they have no dependencies). Older Claude Code versions run floorboss, but
+if its guard hangs past the 30-second hook timeout they let that call through instead of blocking it.
 
 ```
 claude plugin marketplace add https://github.com/Panza-Labs/floorboss
@@ -336,8 +338,8 @@ uses it. If a tool's answers stop passing that check, floorboss tells you and go
 
 **Status:** built and tested against stand-in servers that imitate Google-style and Microsoft-style
 calendars and mailboxes, HubSpot-style and Pipedrive-style CRMs, an Apollo-style people-data tool and an
-event app (`examples/standins/`). Not yet run against a live account of any of them. If you try one,
-please open an issue with what happened: a tool whose name floorboss doesn't recognise is refused, and the
+event app (`examples/standins/`). floorboss has been used at a real event with nothing connected; the
+connectors themselves have been tested only against those stand-ins. If you connect a real one, please open an issue with what happened: a tool whose name floorboss doesn't recognise is refused, and the
 manual step is offered instead.
 
 ## Where your data lives

@@ -1,5 +1,5 @@
 {
-  "description": "floorboss: every MCP call to a tool floorboss has a recipe for must match the recipe, and a staged draft must match a message floorboss listed. Claude's own file tools never read keys or credentials, never write floorboss's records, and write only floorboss's data folder and the temp folder while a run is under way. While a run is under way, WebFetch opens only the sites floorboss has a reason to, and no web address or search query may be long or span lines. The guard fails closed: if it can't start, crashes or runs past its time, the call is blocked. After an MCP call has run, the guard records what it asked about (a lookup counted, a batch of drafts confirmed), so a no at a prompt stops the rest. The run lock is tied to the session that runs floorboss and ends with it. When the user reports what happened with outreach for a live event, Claude is reminded to record it in floorboss.",
+  "description": "floorboss: every MCP call to a tool floorboss has a recipe for must match the recipe, and a staged draft must match a message floorboss listed. Claude's own file tools never read keys or credentials, never write floorboss's records, and write only floorboss's data folder and the temp folder while a run is under way. While a run is under way, WebFetch opens only the sites floorboss has a reason to, and no web address or search query may be long or span lines. The guard fails closed: if it can't start, crashes or runs past its own 20-second deadline, the call is blocked; a guard that hangs past the 30-second hook timeout is blocked too on Claude Code 2.1.295 or later (onFailure), while older versions let that call through. After an MCP call has run, the guard records what it asked about (a lookup counted, a batch of drafts confirmed), so a no at a prompt stops the rest. The run lock is tied to the session that runs floorboss and ends with it. When the user reports what happened with outreach for a live event, Claude is reminded to record it in floorboss.",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,7 +8,8 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\" || exit 2",
-            "timeout": 30
+            "timeout": 30,
+            "onFailure": "block"
           }
         ]
       },
@@ -18,7 +19,8 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\" || exit 2",
-            "timeout": 30
+            "timeout": 30,
+            "onFailure": "block"
           }
         ]
       },
@@ -28,7 +30,8 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\" other || exit 2",
-            "timeout": 30
+            "timeout": 30,
+            "onFailure": "block"
           }
         ]
       }

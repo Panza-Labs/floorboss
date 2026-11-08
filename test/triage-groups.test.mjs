@@ -148,8 +148,8 @@ test('crm_accounts apply: a coworker\'s active record or deal at a company holds
 
 test('the user\'s own customer stays theirs when a coworker also has a deal there; their cold contacts held for it are named on the card', () => {
   const H = setup({
-    attendees: 'Name,Title,Company,Email\nGoran Ach,Director of AML,Granite Pay,goran@granitepay.test\nKavya Del,Head of Payments Risk,Silverline Pay,kavya@silverline.test\n',
-    crm: 'Name,Email,Company,Owner,Status\nGoran Ach,goran@granitepay.test,Granite Pay,Sam Rivera,Customer\nBea Bsa,bea@granitepay.test,Granite Pay,Priya Raman,Customer\nKavya Del,kavya@silverline.test,Silverline Pay,Sam Rivera,Lead\nRon Rec,ron@silverline.test,Silverline Pay,Dan Whitfield,Opportunity\n',
+    attendees: 'Name,Title,Company,Email\nGoran Ach,Director of AML,Granmere Pay,goran@granmerepay.test\nKavya Del,Head of Payments Risk,Silverline Pay,kavya@silverline.test\n',
+    crm: 'Name,Email,Company,Owner,Status\nGoran Ach,goran@granmerepay.test,Granmere Pay,Sam Rivera,Customer\nBea Bsa,bea@granmerepay.test,Granmere Pay,Priya Raman,Customer\nKavya Del,kavya@silverline.test,Silverline Pay,Sam Rivera,Lead\nRon Rec,ron@silverline.test,Silverline Pay,Dan Whitfield,Opportunity\n',
     settings: { crm_accounts: 'apply', coworker_contacts: 'leave', colleagues: ['Priya Raman', 'Dan Whitfield'], status_map: { Customer: 'customer', Lead: 'ignore', Opportunity: 'warm' } },
   });
   const load = cli(H, 'crm-triage', ['load', '--event', H.slug]);

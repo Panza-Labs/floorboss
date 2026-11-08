@@ -2140,7 +2140,9 @@ export function afterCall(input, nowMs = clockNow()) {
 // A hook input from inside a subagent: an agent_id that is there and not blank, of any type.
 export const isSubagent = (input) => input?.agent_id != null && !!String(input.agent_id).trim();
 
-// Well inside the hook timeout in hooks.json (30 seconds), so a slow check ends blocked, never timed out.
+// Well inside the hook timeout in hooks.json (30 seconds), so a slow async check ends blocked rather than timed out.
+// Synchronous work that hangs can't reach this timer; that case relies on onFailure: "block" in hooks.json
+// (Claude Code 2.1.295 or later; older versions let a timed-out call through).
 export const GUARD_DEADLINE_MS = 20000;
 const squash = (x) =>
   String(x ?? '')
@@ -2153,7 +2155,7 @@ const KEY_OK =
   /^((cmd|ctrl|control|meta|command)\+)?(enter|return)$|^(enter|return|tab|escape|esc|backspace|delete|up|down|left|right|arrowup|arrowdown|arrowleft|arrowright|home|end|pageup|pagedown|space)$/i;
 
 if (isMain(import.meta.url)) {
-  // A check that hangs blocks the call before Claude Code's own hook timeout (hooks.json) would let it through.
+  // A check that hangs while waiting blocks the call before Claude Code's own hook timeout (hooks.json) would.
   setTimeout(() => {
     process.stderr.write(
       'floorboss blocked this call: its guard took too long to check it. Try again; if it keeps happening, this is for you, the user, to look at.\n'

@@ -32,7 +32,7 @@ sites the user named, and no web address or search query may run past 300 charac
 email address, so WebFetch should not be on "always allow" in a floorboss session. Opening a browser window (to send notes in an event app or LinkedIn, or to log messages in your CRM) asks you at its first browser call, saying what the window lets the browser do; until you allow it, every call in it asks. The CRM log window is held to the same rules as the send window: only the CRM's contact, record,
 search and task pages, only the listed messages and their people's own details typed, and a prompt with the
 full text before each message goes in. Every send, test call, CRM task, new CRM contact, browser note and logged message asks
-the user, showing the full text; a batch of mailbox drafts asks once, listing who each is to. Names and notes from lists and CRMs are scrubbed before they appear in a permission prompt (letters and a little punctuation only, cut short, quoted, with the person's id and address beside them); the approved text is shown verbatim under its own label. A message floorboss already let through once says so at its next prompt, and a draft batch's yes puts each draft in once. A PostToolUse hook records an ask (a lookup counted, a draft batch confirmed, a window allowed) only after the call has run, so a declined prompt is asked again and never counts as a yes. If the guard can't start or check a call in time, the call is blocked. The records live in
+the user, showing the full text; a batch of mailbox drafts asks once, listing who each is to. Names and notes from lists and CRMs are scrubbed before they appear in a permission prompt (letters and a little punctuation only, cut short, quoted, with the person's id and address beside them); the approved text is shown verbatim under its own label. A message floorboss already let through once says so at its next prompt, and a draft batch's yes puts each draft in once. A PostToolUse hook records an ask (a lookup counted, a draft batch confirmed, a window allowed) only after the call has run, so a declined prompt is asked again and never counts as a yes. If the guard can't start, crashes or runs past its own 20-second deadline, the call is blocked. A guard that hangs outright, past Claude Code's 30-second hook timeout, is blocked only on Claude Code 2.1.295 or later (the hooks set `onFailure: "block"`); older versions let that call through, so use 2.1.295 or later. The records live in
 files a session could write, so that prompt is the final check: never set a send tool to "always allow".
 
 ## Where your data can go
@@ -108,10 +108,12 @@ It changes nothing, installs nothing and makes no network call. It checks, and p
 
 - `package.json` has no dependencies and no install scripts, and there's no lockfile or `node_modules`;
 - every import is a Node.js built-in or one of floorboss's own files;
-- no script uses a network module, `fetch` or a remote import;
+- no script, and no test it runs, uses a network module, `fetch` or a remote import (a pattern search, not proof);
 - the only processes floorboss starts are Node.js running its own scripts, and your system's opener for the
   outbox page (it prints each place);
 - the hooks run only `hooks/guard.mjs` and `hooks/remind.mjs`;
+- floorboss's code creates its data folder private (0700 folders, 0600 files); this reads the code, not the
+  folder on your machine;
 - every GitHub Action in CI is pinned to a full commit, and no workflow can write to the code;
 - the security tests pass, in a throwaway home folder that isn't yours.
 

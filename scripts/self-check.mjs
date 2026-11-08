@@ -46,6 +46,21 @@ say(!bare.length, "every import is a Node.js built-in (node:) or one of floorbos
 const NET = /from\s+['"]node:(http|https|http2|net|tls|dgram|dns)['"]|\bfetch\s*\(|new\s+WebSocket|XMLHttpRequest|import\(\s*['"]https?:/;
 const net = code.filter((f) => NET.test(read(f)));
 say(!net.length, 'no network modules, fetch or remote imports in any script', net.join('\n'));
+// The tests it runs in step 7 too. Tests hold attack text with fetch( in it, and some define their own fetch()
+// helper (it asks the guard about a WebFetch call; nothing is fetched). So imports are checked as written, and
+// calls only outside strings, with fetch( skipped in a file that defines its own.
+const testCode = (function walkTests(dir) {
+  return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walkTests(join(dir, d.name)) : [join(dir, d.name)]));
+})('test').filter((f) => /\.(mjs|cjs|js)$/.test(f));
+const NET_IMPORT = /from\s+['"]node:(http|https|http2|net|tls|dgram|dns)['"]|import\(\s*['"](https?:|node:(http|https|http2|net|tls|dgram|dns)['"])|require\(\s*['"](node:)?(http|https|http2|net|tls|dgram|dns)['"]/;
+const strip = (t) => t.replace(/'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`/g, "''");
+const testNet = testCode.filter((f) => {
+  const t = read(f);
+  const calls = strip(t);
+  const fetchCall = !/(?:const|let|function)\s+fetch\b/.test(t) && /\bfetch\s*\(/.test(calls);
+  return NET_IMPORT.test(t) || fetchCall || /new\s+WebSocket|XMLHttpRequest/.test(calls);
+});
+say(!testNet.length, 'no network modules, fetch or remote imports in the tests', testNet.join('\n'));
 
 // 3. The only processes it starts: Node.js running floorboss's own scripts, and your system's opener for the
 // outbox page.
@@ -87,9 +102,9 @@ say(!loose.length, 'every GitHub Action is pinned to a full commit', loose.join(
 const writes = wf.filter((f) => /contents:\s*write|write-all/.test(read(f)));
 say(!writes.length, 'no workflow can write to the code', writes.join('\n'));
 
-// 6. Data folder permissions in the code: private files and folders.
+// 6. Data folder permissions in the code: private files and folders. This reads lib/paths.mjs, not ~/.floorboss.
 const perms = read('lib/paths.mjs');
-say(/0o700/.test(perms) && /0o600/.test(perms), 'the data folder is created private (0700 folders, 0600 files)');
+say(/0o700/.test(perms) && /0o600/.test(perms), "floorboss's code creates the data folder private (0700 folders, 0600 files); this reads the code, not your folder");
 
 // 7. The security tests, in a throwaway home.
 const tests = readdirSync(join(ROOT, 'test'))
