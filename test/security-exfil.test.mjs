@@ -160,6 +160,7 @@ test('9. the test task is only before its recipe, in floorboss\'s own words', ()
   });
   assert.match(r.stdout + r.stderr, /set up already/);
   const fresh = home();
+  writeFileSync(join(fresh, 'inventory.json'), JSON.stringify({ setup_servers: ['hubspot'], found: { crm: ['mcp:hubspot'] } }));
   const ok = spawnSync('node', [join(ROOT, 'skills/connectors/scripts/cli.mjs'), 'test-allow', '--task', 'crm.create_task', '--server', 'hubspot', '--tool', 'create_task'], {
     env: { ...process.env, FLOORBOSS_HOME: fresh, FLOORBOSS_TEST: '1' },
     encoding: 'utf8'

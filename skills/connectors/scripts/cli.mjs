@@ -2,10 +2,11 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Connector discovery: list the tasks, screen tools, validate what a tool returned, save and show recipes.
-import { allowedPath, home, configPath, assertSlug, readChecked } from '../../../lib/paths.mjs';
+import { allowedPath, expandHome, home, configPath, assertSlug, readChecked } from '../../../lib/paths.mjs';
 import { normEmail } from '../../../lib/normalize.mjs';
 import { sameServer } from '../../../lib/security.mjs';
-import { existsSync } from 'node:fs';
+import { anySessionHeld } from '../../../lib/runlock.mjs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { run, need } from '../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../lib/jsonio.mjs';
@@ -125,12 +126,29 @@ function validate(opts) {
   return { ok: true };
 }
 
+// While a session is held to a run, the guard notes the whole command and recipe it looked at: only that changes a
+// connection, even if the file changed since, and a command it never saw doesn't. The note is used once.
+const SEEN_MS = 15 * 60 * 1000;
+function guardSaw(server = null, tool = null) {
+  const path = join(home(), 'recipe-seen.json');
+  const seen = readJson(path, null);
+  if (seen) unlinkSync(path);
+  if (!anySessionHeld()) return null;
+  const age = Date.now() - Date.parse(seen?.at);
+  const words = (argv) => JSON.stringify(argv.map((w) => expandHome(String(w))));
+  if (Array.isArray(seen?.argv) && age >= 0 && age < SEEN_MS && words(seen.argv) === words(process.argv.slice(2)) && (seen.server ?? null) === server && (seen.tool ?? null) === tool) return null;
+  return "floorboss's guard hasn't checked this exact command, and a Claude session is held to a floorboss run: run it again from Claude Code as a plain command, or end that session first.";
+}
+
 // recipe-file: {server, tool, args, reading, opt_out_source?, test_draft_seen?}. probe-file: the probe call's
 // result translated into floorboss's format (read tasks). The probe is validated here, not taken on trust.
 function saveRecipe(opts) {
   need(opts, 'task', 'recipe-file');
   const task = opts.task;
+  if (!Object.hasOwn(TASKS, task)) throw new Error(`There's no task called ${task}.`);
   const recipe = readFileJson(opts['recipe-file']);
+  const unseen = guardSaw(recipe?.server ?? null, recipe?.tool ?? null);
+  if (unseen) return { saved: false, errors: [unseen] };
   if (TASKS[task]?.kind === 'read') {
     if (!opts['probe-file']) throw new Error(`${task} needs --probe-file: the probe call's result in floorboss's format.`);
     const r = validateRead(task, readFileJson(opts['probe-file']), opts);
@@ -196,6 +214,8 @@ function saveRecipe(opts) {
 function forget(opts) {
   need(opts, 'task');
   if (!opts['user-confirmed']) throw new Error("Forgetting a connection needs the user's say: ask them, then run forget again with --user-confirmed.");
+  const unseen = guardSaw();
+  if (unseen) throw new Error(unseen);
   const cfg = loadConfig();
   const connectors = { ...(cfg.connectors || {}) };
   const had = !!connectors[opts.task];
@@ -285,6 +305,9 @@ function testAllow(opts) {
   // One test task, before its recipe exists, in floorboss's own words (the guard holds it to them).
   if (opts.task === 'crm.create_task' && cfg.connectors?.['crm.create_task'])
     throw new Error('crm.create_task is set up already: tasks go through its recipe, not a test.');
+  const crmLookup = cfg.connectors?.['crm.lookup'];
+  if (opts.task === 'crm.create_task' && crmLookup?.server && !sameServer(opts.server, crmLookup.server))
+    throw new Error(`The test task goes to your CRM's own server (${crmLookup.server}), the one crm.lookup reads, not ${opts.server}.`);
   // The first record is a real one: a person on the event's list to add (outreach contact-list), never anyone else.
   if (opts.task === 'crm.create_contact') {
     need(opts, 'event');

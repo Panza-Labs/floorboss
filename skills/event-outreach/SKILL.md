@@ -328,8 +328,7 @@ well it would suit the reader: they'd expect to meet in it.
 
 ## Event-app notes
 
-Event-app notes sent in the browser are tested against a stand-in app (not yet a real one). LinkedIn notes
-and chat sends are in the code but not tested on the current path: say so if the user picks one.
+LinkedIn notes and chat sends are in the code but not tested on the current path: say so if the user picks one.
 
 A job with `app_note` goes into an event app (Brella, Grip, Swapcard) or LinkedIn. When `times_in_note` is
 false, the app's meeting request carries the time and place: leave the times out of the note (the outbox

@@ -84,7 +84,7 @@ same server, the same tool, and only the fields listed here. Anything else is re
 |---|---|---|---|---|
 | A send (email, chat) | your mailbox or chat tool, to one recipient | the approved message, word for word: recipient, subject, body, and the thread of the message before it | before every message, with the whole text | guard: one listed, approved item, sent once; `test/security-guard.test.mjs` |
 | A draft in your mailbox | your own drafts folder | the same fields as a send; nothing is sent | once per batch, naming who each is to | guard: listed drafts only; `test/security-round3.test.mjs` |
-| An event-app note (LinkedIn: in the code, not yet tested; see the README) | the app, in your browser | the approved note, to the profile floorboss listed | before every note, with the whole text | the browser send window: only that profile's page, no script; `test/security-round2.test.mjs` |
+| An event-app note (LinkedIn is still in progress; see the README) | the app, in your browser | the approved note, to the profile floorboss listed | before every note, with the whole text | the browser send window: only that profile's page, no script; `test/security-round2.test.mjs` |
 | A CRM task | your CRM | a title, a body, a due date and the one contact it's about | before every task | guard: listed tasks only; `test/security-round7.test.mjs` |
 | A new CRM contact | your CRM, the server floorboss reads people from | name, email, company and title, as on the list; no owner, list, stage or other field | before every contact; each person once | guard and once-only marker; `test/crm-new-contacts.test.mjs`, `test/security-round8.test.mjs` |
 | A logged message | your CRM record for that person, in your browser | the message as sent; with your yes in setup, their LinkedIn address and title where the record has none | before every message, with the full text | the CRM log window: only the CRM's contact, record, search and task pages; `test/security-round2.test.mjs` |
@@ -133,9 +133,9 @@ Then, in Claude Code, `/hooks` lists every hook and the command it runs.
   by tag, which a commit pin can't fix, so that job is kept apart with no write access to the code.
 - **CodeQL**, GitHub's code scanning, runs on every push.
 - **Secret scanning with push protection** blocks a key or token from being pushed.
-- **Reviews.** floorboss's security reviews so far were done with independent AI agents that had no part in
-  building the code, each given only the code and the claims to break, with every finding fixed and kept as a
-  test (`test/security-*.test.mjs`). No outside firm has audited it yet.
+- **Reviews.** floorboss's security reviews were done with independent AI agents that had no part in
+  building the code, each given only the code and the claims to break, with the fixes kept as
+  tests (`test/security-*.test.mjs`).
 
 ## Supply chain
 

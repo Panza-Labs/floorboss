@@ -23,7 +23,7 @@
 import { readFileSync, readdirSync, existsSync, unlinkSync, writeFileSync, openSync, closeSync, mkdirSync, statSync, readSync } from 'node:fs';
 import { join, basename, resolve, sep, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { home, sensitiveKind, secretPlace, realPath, linkRefusal, recordFile, hardLinkRefusal, followed } from '../lib/paths.mjs';
+import { home, allowedPath, readChecked, sensitiveKind, secretPlace, realPath, linkRefusal, recordFile, hardLinkRefusal, followed } from '../lib/paths.mjs';
 import { readRun, readRunAnySession, stampRun, lockPath, endSession, touchSession, ranBefore } from '../lib/runlock.mjs';
 import {
   isBrowserCall,
@@ -1812,9 +1812,106 @@ export function companyHosts() {
 const SCRIPT_CALL =
   /(skills\/(flow|event-context|slot-finder|crm-triage|event-outreach|connectors|attendee-research)\/scripts\/cli\.mjs|examples\/mock-event\/load\.mjs)(?:["']?\s+([a-z][\w-]*))?/;
 export function floorbossScriptCall(command) {
-  const m = SCRIPT_CALL.exec(String(command || ''));
-  if (!m) return null;
-  return { sub: m[3] || null };
+  // The script is the word after node, read as the shell reads it (bashRefusal holds a script call to that form),
+  // so quotes in its path, or a script's name further along the command, can't make it look like another one.
+  const words = shellWords(command);
+  // The plain text must name a script too: that is what holds the command to bashRefusal's rules, so a name split
+  // by quotes ("con""nectors") is no script call, and in a held session is refused as any other command.
+  const m = words[0] === 'node' && SCRIPT_CALL.test(String(command || '')) ? SCRIPT_CALL.exec(words[1] ?? '') : null;
+  return m ? { sub: words[2] ?? null, skill: m[2] || null } : null;
+}
+// A command's words exactly as the shell reads them: "save-recipe" and sa''ve-recipe are both save-recipe, and a
+// backslash in double quotes stands only before $ ` " \ or a line break (which it removes).
+function shellWords(command) {
+  const words = [];
+  let word = null,
+    q = null;
+  const cmd = String(command || '');
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (q === "'") {
+      if (ch === "'") q = null;
+      else word += ch;
+    } else if (q === '"') {
+      if (ch === '"') q = null;
+      else if (ch === '\\' && cmd[i + 1] === '\n') i++;
+      else if (ch === '\\' && '$`"\\'.includes(cmd[i + 1] ?? ' ')) word += cmd[++i];
+      else word += ch;
+    } else if (ch === '"' || ch === "'") {
+      q = ch;
+      word ??= '';
+    } else if (/\s/.test(ch)) {
+      if (word !== null) words.push(word);
+      word = null;
+    } else if (ch === '\\') {
+      if (cmd[i + 1] === '\n') i++;
+      else word = (word ?? '') + (cmd[++i] ?? '');
+    } else word = (word ?? '') + ch;
+  }
+  if (word !== null) words.push(word);
+  return words;
+}
+
+// Saving or forgetting a connection in the session that ran floorboss. Setup does this mid-run, so it can't simply
+// be refused; but a saved read recipe makes its server "given" and lifts the run's limits on what its calls carry,
+// and the files behind it are ones the session writes. A subagent never does it. A connection on a server setup
+// didn't find, or one that moves a saved connection to another server, is the user's to allow. The guard notes
+// the whole command and the recipe it looked at, for any session, once it has decided, and the script runs only that.
+function connectorChange(command, sub, { held, subagent, config }) {
+  const words = shellWords(command);
+  const flag = (k) => {
+    const i = words.lastIndexOf(k);
+    return i >= 0 ? words[i + 1] : undefined;
+  };
+  const task = String(flag('--task') ?? '');
+  const note = (server, tool) => writeText(join(home(), 'recipe-seen.json'), JSON.stringify({ argv: words.slice(2), server, tool, at: new Date().toISOString() }));
+  if (held && subagent) return { refuse: "a subagent doesn't change floorboss's connections." };
+  if (held && !task) return { refuse: 'this names no connection: pass --task with the task itself.' };
+  const saved = config?.connectors?.[task];
+  if (sub === 'forget') {
+    note();
+    return held ? { ask: `floorboss: forget your ${promptLine(task)} connection${saved?.server ? ` (${promptLine(saved.server)}/${promptLine(saved.tool)})` : ''}?\n\nAllow only if you asked for this.` } : {};
+  }
+  let recipe;
+  try {
+    recipe = JSON.parse(readChecked(allowedPath(flag('--recipe-file'))));
+  } catch {
+    return held ? { refuse: "its guard couldn't read that recipe file, so it can't check which connection this saves." } : {};
+  }
+  if (typeof recipe?.server !== 'string' || typeof recipe?.tool !== 'string') {
+    if (held) return { refuse: "that recipe's server and tool aren't plain names." };
+    note();
+    return {};
+  }
+  const { server, tool } = recipe;
+  if (!held) {
+    note(server, tool);
+    return {};
+  }
+  const moved = saved?.server && !sameServer(saved.server, server);
+  const named = /^mcp__(.+?)__/.exec(tool);
+  const silent = foundServer(server) && !moved && !bareToolName(tool).includes('__') && (!named || sameServer(named[1], server));
+  note(server, tool);
+  if (silent) return {};
+  return {
+    ask: `floorboss: connect ${promptLine(task)} to ${promptLine(server)}/${promptLine(tool)}?${moved ? ` This replaces ${promptLine(saved.server)}/${promptLine(saved.tool)}.` : " Setup didn't find this as a connector of that name."} Once saved, floorboss's run can call it with what the session has read.\n\nAllow only if you're setting this connection up.`
+  };
+}
+
+// In the session that ran floorboss, a pending test passes only on the server it is a test of: the CRM for a task
+// or a contact, a mailbox or chat tool floorboss knows for the others. Otherwise it would take a call on any
+// connected server past the run's limits, under a prompt that names it a test.
+function testOnItsServer(pending, config) {
+  const inv = readJsonStrict(join(home(), 'inventory.json'), {});
+  const server = String(pending?.server ?? '');
+  // An inventory from before setup_servers existed counts what it had found, as foundServer does.
+  const atSetup = !Array.isArray(inv?.setup_servers) || inv.setup_servers.some((x) => sameServer(String(x), server));
+  const foundAs = (kind) => atSetup && (inv?.found?.[kind] || []).some((x) => String(x).startsWith('mcp:') && sameServer(String(x).slice(4), server));
+  const saved = (...tasks) => tasks.some((t) => config.connectors?.[t]?.server && sameServer(config.connectors[t].server, server));
+  if (['crm.create_task', 'crm.create_contact'].includes(pending?.task)) return config.connectors?.['crm.lookup']?.server ? saved('crm.lookup') : foundAs('crm');
+  if (['stage_draft', 'email.send'].includes(pending?.task)) return foundAs('email') || saved('stage_draft', 'email.send', 'email.history', 'email.messages', 'email.thread_has_reply');
+  if (pending?.task === 'chat.send') return foundAs('chat') || saved('chat.send');
+  return false;
 }
 
 // A Bash call that runs one of floorboss's scripts is held to an allowlist: outside quotes only letters,
@@ -1846,6 +1943,8 @@ export function bashRefusal(command) {
   // (env, exec, nice) could load other code into the script or run a different node.
   if (!/^node\s/.test(cmd.trimStart()))
     return `this runs a floorboss script with something before "node" (a setting like NODE_OPTIONS=, or another command). Run floorboss's script as "node" followed by the script, with nothing before it.`;
+  // zsh expands =name to a command's path, and an empty pair of quotes before it doesn't stop that.
+  if (/(^|\s)(''|"")+=/.test(cmd)) return plain('an equals sign after empty quotes');
   let q = null,
     wordStart = true;
   for (let i = 0; i < cmd.length; i++) {
@@ -1856,7 +1955,9 @@ export function bashRefusal(command) {
       continue;
     }
     if (ch === '$') {
-      const m = ROOT_VAR.exec(cmd.slice(i));
+      // Only as the start of the script's own path: anywhere else the guard would read a different command from
+      // the one the shell runs.
+      const m = /^\s*node\s+["']?$/.test(cmd.slice(0, i)) ? ROOT_VAR.exec(cmd.slice(i)) : null;
       if (m) {
         i += m[0].length - 1;
         wordStart = false;
@@ -1933,7 +2034,8 @@ function scriptWordRefusal(cmd) {
   }
   const bad = `this runs node with something other than floorboss's own script as its first word ("${word.slice(0, 80)}"). Run "node" followed directly by the script under the plugin folder, with no node option before it and no "." or ".." in its path.`;
   if (!word || word.startsWith('-')) return bad;
-  const m = ROOT_VAR.exec(word);
+  // A $ the shell won't expand (single quotes, \$) is a folder of that name, not the plugin.
+  const m = /^"?\$/.test(rest) ? ROOT_VAR.exec(word) : null;
   const given = m ? PLUGIN_ROOT + word.slice(m[0].length) : word;
   if (given.includes('$') || given.split('/').some((x) => x === '..' || x === '.')) return bad;
   // A relative path names the script in the folder the command runs in: it counts only if that is the plugin's.
@@ -2338,12 +2440,28 @@ if (isMain(import.meta.url)) {
           process.exit(2);
         }
       }
+      if (call?.skill === 'connectors' && ['save-recipe', 'forget'].includes(call.sub)) {
+        // A throw here is a refusal: only exit 2 stops the call.
+        let change;
+        try {
+          const connRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
+          const held = !!(connRun.active && (connRun.session || subagent));
+          change = connectorChange(input.tool_input?.command, call.sub, { held, subagent, config: readJsonStrict(join(home(), 'config.json'), {}) });
+        } catch (e) {
+          change = { refuse: `its guard couldn't check this connection change (${String(e?.message).slice(0, 80)}).` };
+        }
+        if (change.refuse) {
+          process.stderr.write(`floorboss blocked this call: ${change.refuse}\n`);
+          process.exit(2);
+        }
+        if (change.ask) ask(change.ask);
+      }
       try {
         if (call && session && !['run-end', 'record'].includes(call.sub)) stampRun({ session, transcript: input.transcript_path });
       } catch {
         /* best effort */
       }
-      process.exit(0);
+      allow();
     }
     try {
       if (READ_TOOLS.has(toolName) || WRITE_TOOLS.has(toolName)) {
@@ -2384,10 +2502,11 @@ if (isMain(import.meta.url)) {
       const pendingPath = join(home(), 'test-pending.json');
       if (!subagent && existsSync(pendingPath)) {
         const pending = readJsonStrict(pendingPath, null);
+        const offServer = !!(run.active && run.session && pending && !testOnItsServer(pending, config));
         // The first new contact passes only while that person is still on the list to add, as listed: once their
         // record is saved they're off it, so a test pass left over from setup can't create them again.
         const firstContact = pending?.task === 'crm.create_contact' ? testContactItem(input.tool_input, pending, listed('contact-list.json'), nowMs) : null;
-        if (testPasses(input, pending, nowMs) && (pending.task !== 'crm.create_contact' || firstContact)) {
+        if (!offServer && testPasses(input, pending, nowMs) && (pending.task !== 'crm.create_contact' || firstContact)) {
           unlinkSync(pendingPath);
           // The first new contact is a listed person: marked let through, as every later one is, so a lost answer
           // never leads to creating them twice.

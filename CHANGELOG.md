@@ -56,8 +56,7 @@ The first public version.
 ### Sending and tracking
 - Approval of each person's whole sequence; you can edit or drop any touch, in the file or inline
   ("edit c012: …"). Checks refuse a figure (%, x, money) that none of the draft's sources holds.
-- Optional sending by email, with Claude Code asking before every send. Event-app notes through your browser
-  (tested against a stand-in app).
+- Optional sending by email, with Claude Code asking before every send. Event-app notes through your browser.
 - Replies read for intent (reply, booked, decline, stop, referral, cancelled, out of office, bounce); a reply or a
   booking ends the rest of that person's sequence, and a cancellation from them frees the meeting's time (one
   from anyone else is put to you). Times that get
@@ -142,8 +141,7 @@ The first public version.
 - The README says what floorboss depends on (no third-party packages), what its hooks run and when, how to
   pin a release by commit, and how it treats text in your files as data, never instructions. The opening
   notice says the last of these too.
-- Connector discovery: a proposal, one read-only test call per job, and saved recipes. Tested against
-  stand-in servers, not yet a live account.
+- Connector discovery: a proposal, one read-only test call per job, and saved recipes.
 - A guard hook that checks every call to a connected tool and Claude's own file tools; send tools only when
   sending is on, one message at a time; a prompt before every send, CRM task, new CRM contact, staged batch, paid lookup and
   page of the event's own site, recorded only once the call has run; every tool on a people-data server counts

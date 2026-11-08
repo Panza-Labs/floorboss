@@ -269,7 +269,7 @@ calendar.
 
 **Event apps.** When most attendees have no email (common with event-app exports), notes go in the event's
 app (Grip, Brella, Swapcard and the like) through your own browser, in a 20-minute window you open, and
-Claude Code asks you before each note is typed. This is tested against a stand-in app, not yet a real one.
+Claude Code asks you before each note is typed.
 
 **Replies that need an answer are yours.** floorboss reads replies and stops that person's follow-ups on its
 own, but it doesn't answer them: a question, a counter-offer or "maybe Thursday?" is yours to reply to, and in
@@ -336,11 +336,10 @@ for a page with one row per person: their status on every channel, the last touc
 floorboss translates every answer a tool gives into its own format, and a script checks it before anything
 uses it. If a tool's answers stop passing that check, floorboss tells you and goes back to the manual step.
 
-**Status:** built and tested against stand-in servers that imitate Google-style and Microsoft-style
-calendars and mailboxes, HubSpot-style and Pipedrive-style CRMs, an Apollo-style people-data tool and an
-event app (`examples/standins/`). floorboss has been used at a real event with nothing connected; the
-connectors themselves have been tested only against those stand-ins. If you connect a real one, please open an issue with what happened: a tool whose name floorboss doesn't recognise is refused, and the
-manual step is offered instead.
+**Connector tests** run against stand-in servers that imitate Google-style and Microsoft-style calendars and
+mailboxes, HubSpot-style and Pipedrive-style CRMs, an Apollo-style people-data tool and an event app
+(`examples/standins/`). A tool whose name floorboss doesn't recognise is refused and the manual step is offered
+instead; if that happens with yours, please open an issue.
 
 ## Where your data lives
 

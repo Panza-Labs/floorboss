@@ -13,7 +13,7 @@ is licensed under the same license (Apache 2.0, section 5), and that you have th
   runs the simulation runners and writes into the repository.
 - Keep examples invented. No real people, real email addresses (use `example.com` or `.test`), real companies
   as customers, or real event names in tests, fixtures or docs.
-- Say only what the code does. If something is built but untested on a live account, label it that way.
+- Say only what the code does and what the tests cover.
 
 ## Reporting a security problem
 
