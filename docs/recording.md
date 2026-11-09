@@ -1,6 +1,6 @@
 # Recording the 60-second demo
 
-The README opens with a screen recording of the mock run. This is how to make it in one take.
+The README's GIF is now a scripted film on example data. This is how to record a real take of the mock run instead.
 
 ## Before you record
 

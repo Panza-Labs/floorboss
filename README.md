@@ -5,10 +5,9 @@
 A [Panza Labs](https://panzalabs.com) tool. Free and open source (Apache 2.0). It runs in your own Claude Code
 session, on your own accounts; nothing passes through Panza Labs.
 
-![floorboss in Claude Code: picking who to meet at a made-up event, flagging a planted instruction, and waiting for your approval](docs/demo.gif)
+![floorboss in Claude Code: connecting your tools, sorting an attendee list, researching people, writing a sequence across channels, asking before each send, and briefing you for the meeting](docs/demo.gif)
 
-*Text from a real Claude Code run on a made-up event, shortened. After installing, try it yourself: ask Claude to
-"set up a mock event with floorboss".*
+*Example data: a made-up event, companies and people.*
 
 floorboss is a Claude Code plugin for booking meetings at an event. You name the event and it gets the attendee list: from the event's app in your own browser on your yes, from a
 public page you link, or from a file you give it. It checks the list against your CRM, picks who's worth meeting and why, offers each person two real times,
