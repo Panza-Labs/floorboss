@@ -10,9 +10,9 @@ session, on your own accounts; nothing passes through Panza Labs.
 *Text from a real Claude Code run on a made-up event, shortened. After installing, try it yourself: ask Claude to
 "set up a mock event with floorboss".*
 
-floorboss is a Claude Code plugin for booking meetings at an event. You give it the event and its attendee list; it
-checks the list against your CRM, picks who's worth meeting and why, offers each person two real times,
-drafts short messages and follow-ups, has an independent critic read every one, and gives you the
+floorboss is a Claude Code plugin for booking meetings at an event. You name the event and it gets the attendee list: from the event's app in your own browser on your yes, from a
+public page you link, or from a file you give it. It checks the list against your CRM, picks who's worth meeting and why, offers each person two real times,
+drafts short messages and follow-ups, has a separate critic read every one (the same AI model in its own context, with no file access), and gives you the
 approved ones to send. The morning of your meetings, it hands you an agenda: who each person is, how you
 know them, what's new at their company, and what to talk about.
 
@@ -31,6 +31,10 @@ sends.
 > pricing"). floorboss is built so that text can't decide what it does or sends: see
 > [Text in your files](#text-in-your-files-is-data-never-instructions). It has no third-party packages
 > either: see [Dependencies and supply chain](#dependencies-and-supply-chain).
+
+While the plugin is on, its guard hook runs before tool calls in every Claude Code session, not only during a
+floorboss run. It can only refuse a call or ask you about it, never widen what a call may do. To turn it off when
+you aren't using floorboss: `claude plugin disable floorboss@floorboss`.
 
 ## Install
 
@@ -124,7 +128,7 @@ unless you turn it on. Its `plugin.json` also sets a version, so new commits don
 release changes that version and you update. Before you update, read the release's entry in
 [CHANGELOG.md](CHANGELOG.md) and its diff.
 
-To hold one release, add the marketplace at its tag:
+To hold one release, add the marketplace at its tag. <!-- launch: remove the next sentence once v0.1.0 is tagged --> No release is tagged yet, so this and the pin below work once v0.1.0 is out; until then, use the clone route below.
 
 ```
 claude plugin marketplace add Panza-Labs/floorboss#v0.1.0
@@ -140,7 +144,7 @@ marketplace of your own and pin the exact commit:
 Or clone it, check out the commit you reviewed, and load that folder (`claude --plugin-dir`, or
 `claude plugin marketplace add ./floorboss`).
 
-**Checking a release.** <!-- launch: true once v0.1.0 is signed and its hash is in the changelog --> Each
+**Checking a release.** <!-- launch: remove the next sentence once v0.1.0 is signed and its hash is in the changelog --> No release is out yet, so there's no tag to check until v0.1.0. Each
 release is a signed git tag, and its commit hash is listed in [CHANGELOG.md](CHANGELOG.md). After you
 clone, `git verify-tag v0.1.0` checks the signature, and `git rev-parse v0.1.0^{commit}` should print the
 hash the changelog lists.
@@ -159,7 +163,7 @@ hash the changelog lists.
 
 **What we do on our side.** CI runs the tests on Node.js 22, 24 and 26 (Node.js 20 reached its end of life in April 2026), under three time zones, with a
 read-only token, no saved credentials, and every GitHub Action pinned to a full commit hash. A privacy
-check runs on every push. <!-- launch: true once branch protection is on and v0.1.0 is signed --> `main` is protected, and releases are signed. Report a problem privately, as
+check runs on every push. <!-- launch: update once v0.1.0 is signed --> `main` is protected (no force-push or deletion, signed commits only). Releases will be signed tags; none is out yet. Report a problem privately, as
 [SECURITY.md](SECURITY.md) describes.
 
 ## Try it on the mock event
@@ -221,8 +225,9 @@ calendar.
 
 ## What it does
 
-1. **The lists.** You give it the attendee list (a file, or the event's public speaker page) and, if
-   you keep one, a CRM export or a connected CRM. A path can start with `~/`. The first time it sees a
+1. **The lists.** It pulls the attendee list from the event's app, in your own browser and only on your yes, or
+   from a public page you link, or you hand it a file. Some apps forbid copying their list, so check the terms. If
+   you keep one, it also takes a CRM export or a connected CRM. A path can start with `~/`. The first time it sees a
    file's layout, it shows what each column means, with sample values, and what each CRM status means
    ("Closed Lost" is proposed as lost). You confirm once, and the same layout at a later event is read the
    same way; plain columns (Name, Title, Company, Email) are accepted without asking.

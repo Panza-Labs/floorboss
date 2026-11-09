@@ -140,7 +140,7 @@ Then, in Claude Code, `/hooks` lists every hook and the command it runs.
   by tag, which a commit pin can't fix, so that job is kept apart with no write access to the code.
 - **CodeQL**, GitHub's code scanning, runs on every push.
 - **Secret scanning with push protection** blocks a key or token from being pushed.
-- **Reviews.** floorboss's security reviews were done with independent AI agents that had no part in
+- **Reviews.** floorboss's security reviews were done with AI agents that had no part in
   building the code, each given only the code and the claims to break, with the fixes kept as
   tests (`test/security-*.test.mjs`).
 

@@ -44,7 +44,7 @@ The first public version.
   structures (a rule of yours about the opening narrows them), two real times from your calendar, and checks
   on names, times, length and banned words. A draft you edited yourself is never rewritten by floorboss.
   People you know get a note that opens from the relationship, never a cold question.
-- An independent critic agent with no file or tool access reads every draft and can fail it. A draft that
+- A separate critic agent with no file or tool access reads every draft and can fail it. A draft that
   still fails floorboss's own checks after three tries is kept from the critic and named to you. You can skip
   the critic for named drafts ("skip review c012"); an edit sends a draft back to it.
 - Optional blind ratings before approval, with rewrites from your notes. A one-word note counts; praise is
