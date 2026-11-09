@@ -472,6 +472,10 @@ function scanCmd(opts) {
       : [...new Set([...mcpOf(Object.values(v?.found || {}).flat()), ...(v?.items || []).filter((x) => x?.type === 'mcp').map((x) => x.name)])];
   const setupServers = earlier ? baseline(earlier) : seenNow;
   const unconfirmed = seenNow.filter((n) => !setupServers.includes(n));
+  // What each of them was found to be is kept from the first scan the same way: "found" below comes from this scan's
+  // session file, which the model writes, so a rescan mid-run could call any server a CRM.
+  const mcpKinds = (f) => Object.fromEntries(Object.entries(f || {}).map(([k, l]) => [k, (Array.isArray(l) ? l : []).filter((x) => String(x).startsWith('mcp:'))]));
+  const setupFound = earlier ? (earlier.setup_found ?? mcpKinds(earlier.found)) : mcpKinds(inv.found);
   // Setup still offers whatever the scan found (a CRM connected after a restart included): only the guard's "may a
   // run read this server" answer is held to setup_servers.
   const found = inv.found || {};
@@ -488,6 +492,7 @@ function scanCmd(opts) {
     })),
     found,
     setup_servers: setupServers,
+    setup_found: setupFound,
     ...(unconfirmed.length ? { found_since_setup: unconfirmed } : {}),
     scanned_at: new Date().toISOString()
   };

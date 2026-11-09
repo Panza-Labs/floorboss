@@ -199,7 +199,8 @@ test('browser recognition: by server and tool, Playwright-style servers included
   assert.equal(isBrowserCall('pw', 'browser_click'), true, 'Playwright under any name');
   assert.equal(isBrowserCall('chrome-mail', 'send_email'), false);
   assert.equal(isBrowserCall('browserstack', 'list_builds'), false);
-  assert.match(check({ tool_name: 'mcp__pw__browser_click', tool_input: { element: 'Send', ref: 'e1' } }, { config: {}, active: RUN }) || '', /acts in the browser/);
+  assert.match(check({ tool_name: 'mcp__pw__browser_click', tool_input: { element: 'Send', ref: 'e1' } }, { config: {}, active: RUN }) || '', /isn't plainly a read/, 'a name alone: held as that server');
+  assert.match(check({ tool_name: 'mcp__playwright__browser_click', tool_input: { element: 'Send', ref: 'e1' } }, { config: {}, active: RUN }) || '', /acts in the browser/);
 });
 
 // 4. The run lock: tied to the session that ran floorboss, ended by SessionEnd, never lifted by Claude.

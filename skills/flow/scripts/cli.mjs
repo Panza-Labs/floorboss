@@ -26,7 +26,7 @@ import { zoneFrom } from '../../../lib/tz.mjs';
 import { parseDncReport } from '../../crm-triage/scripts/dnc.mjs';
 import { listSources } from '../../crm-triage/scripts/sources.mjs';
 import { saysNoOptOut } from '../../crm-triage/scripts/mapping-words.mjs';
-import { ownerMatch } from '../../../lib/names.mjs';
+import { ownerMatch, namedCompanies, unclearSkip } from '../../../lib/names.mjs';
 import { openingOf, OPENINGS } from '../../event-outreach/scripts/structures.mjs';
 import { asRule } from '../../event-outreach/scripts/sameness.mjs';
 import { DEFAULTS, OPTOUT_BUILT_IN } from '../../../lib/config.mjs';
@@ -1369,6 +1369,7 @@ const SAVERS = {
   // "skip Acme, Globex": those get a brief that says they weren't researched; the rest are looked up.
   company_research: (v, c) => {
     const t = String(typeof v === 'object' && v ? v.answer || '' : v).trim();
+    if (unclearSkip(t)) throw new Error('Name the companies to skip ("skip Acme, Globex"), or say "skip all".');
     const listed = nextStep(context(c.slug, {})).ask?.companies || [];
     // The people question asked in the same breath ("go, and people: top 5", "skip all research"): saved too, so
     // it isn't asked again.
@@ -1378,7 +1379,7 @@ const SAVERS = {
       ledger(c, { type: 'answered', who: 'user', ask: 'research_scale', value: scale, said: t.slice(0, 200) });
       return { research_scale: scale };
     };
-    const some = /^(skip|leave out|not)\b/i.test(t) ? listed.filter((co) => t.toLowerCase().includes(String(co).toLowerCase())) : [];
+    const some = /^(skip|leave out|not)\b/i.test(t) ? namedCompanies(t, listed) : [];
     if (some.length && some.length < listed.length) {
       cli('attendee-research', ['skip-companies', '--event', c.slug, '--companies', JSON.stringify(some)], c);
       return { ...ledger(c, { type: 'answered', who: 'user', ask: 'company_research', value: 'yes', said: t.slice(0, 200) }), skipped: some, ...people() };
@@ -1392,9 +1393,11 @@ const SAVERS = {
   agenda_news: (v, c) => {
     const t = String(typeof v === 'object' && v ? v.answer || '' : v).trim();
     // The companies the heads-up named (the step as it is when the agenda is asked for).
+    if (unclearSkip(t)) throw new Error('Name the companies to skip ("skip Acme, Globex"), or say "skip all".');
     const listed = nextStep(context(c.slug, { agenda: true })).ask?.companies || [];
-    const all = /^(skip|no|none|don'?t|not)\b/i.test(t) && !listed.some((co) => t.toLowerCase().includes(String(co).toLowerCase()));
-    const some = all ? listed : /^(skip|leave out|not)\b/i.test(t) ? listed.filter((co) => t.toLowerCase().includes(String(co).toLowerCase())) : [];
+    const named = namedCompanies(t, listed);
+    const all = /^(skip|no|none|don'?t|not)\b/i.test(t) && !named.length;
+    const some = all ? listed : /^(skip|leave out|not)\b/i.test(t) ? named : [];
     if (!some.length && !/^(yes|y|go|ok|sure|look)/i.test(t)) throw new Error('Say "go", "skip <companies>", or "skip the news".');
     for (const co of some) cli('event-outreach', ['agenda-news', '--event', c.slug, '--company', co, '--skipped'], c);
     return {

@@ -57,7 +57,7 @@ test('C2/C3: a later scan or an answer cannot add a server to the ones a run may
     assert.ok(Object.values(inv0.found).flat().includes('mcp:evilsrv'), 'setup still sees what the scan found (it can offer it)');
     // A CRM answer naming a server setup saw, but not as a CRM, adds nothing either.
     const inv = JSON.parse(readFileSync(join(H.HOME, 'inventory.json'), 'utf8'));
-    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ ...inv, setup_servers: [...inv.setup_servers, 'claude_ai_Slack'], found: { ...inv.found, chat: ['mcp:claude_ai_Slack'] } }));
+    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ ...inv, setup_servers: [...inv.setup_servers, 'claude_ai_Slack'], setup_found: { ...inv.setup_found, chat: ['mcp:claude_ai_Slack'] } }));
     const ob = join(H.HOME, 'onboarding.json');
     const o = existsSync(ob) ? JSON.parse(readFileSync(ob, 'utf8')) : {};
     writeFileSync(ob, JSON.stringify({ ...o, answers: { ...(o.answers || {}), enrich_server: 'claude_ai_Slack' } }));

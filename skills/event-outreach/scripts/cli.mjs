@@ -14,7 +14,7 @@ import { readJson, writeJson, writeText } from '../../../lib/jsonio.mjs';
 import { toCsv } from '../../../lib/csv.mjs';
 import { loadEvent, contextFor, nowFrom } from '../../../lib/event.mjs';
 import { todayKeyIn, addDays, wallParts, pad } from '../../../lib/tz.mjs';
-import { parseGate } from '../../../lib/gate.mjs';
+import { parseGate, gatePeople, unnamedWords } from '../../../lib/gate.mjs';
 import { namesToIds } from '../../../lib/names.mjs';
 import { slotLabel } from '../../slot-finder/scripts/slots.mjs';
 import { assignSlots, holdersBySlot } from '../../slot-finder/scripts/assign.mjs';
@@ -1720,13 +1720,9 @@ function gate(opts) {
   // A line that can't be read is refused on its own and the rest applied (said back in "refused"), except beside
   // "approve all", or when the refused line names someone another line approves: it may have been meant to hold
   // them back, so nothing is approved.
-  const g = parseGate(
-    namesToIds(
-      opts.answers,
-      t.jobs.map((j) => ({ id: j.id, name: c.byId[j.id]?.name || '' }))
-    ),
-    { kind: 'draft', knownIds: ids, partial: true }
-  );
+  const everyone = t.jobs.map((j) => ({ id: j.id, name: c.byId[j.id]?.name || '' }));
+  const byName = gatePeople(everyone);
+  const g = parseGate(namesToIds(opts.answers, byName), { kind: 'draft', knownIds: ids, partial: true, unnamed: unnamedWords(everyone, byName) });
   const approvedNamed = new Set(g.actions.filter((a) => a.verb === 'approve').flatMap((a) => a.ids.map((x) => x.replace(/:\d+$/, ''))));
   const refusedNames = g.refused.flatMap((r) => r.line.toLowerCase().match(/\bc\d{3,}\b/g) || []);
   if (

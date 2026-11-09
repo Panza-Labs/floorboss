@@ -93,6 +93,12 @@ The first public version.
   talk about), as a page, a short version and an `.ics` file. It names the companies before any web search.
 
 ### Connections and safety
+- From a fourth full audit (9 confirmed findings, all low; six fixed here, each with regression tests, and three planned
+  for 0.1.1): the guard reads a backslash in a script's path as the shell does; what the first setup scan found a
+  connector to be can't be changed by a later scan; a `browser_` tool on a server not known to be a browser is held as
+  that server, and browser reads take short values during a run; the mock event reaches no real connector; an attendee
+  named like a word of the answer ("Drop") can't change what it does; a company named like a word of the question
+  ("Companies", "News") can't turn "skip" into a yes for the others.
 - From a third full audit (4 confirmed findings, all low; the two that touch the run lock are fixed here, each with
   regression tests, and the other two are planned for 0.1.1): during a run, saving a connection to a server setup
   didn't find, or moving one to another server, asks you first, and forgetting one always asks; a subagent can do

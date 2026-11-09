@@ -570,6 +570,20 @@ const fold = (v) =>
 // A browser call: judged by the server's name and the tool's (lib/security.mjs), never by the name alone.
 const isBrowser = (server, tool) => isBrowserCall(server, tool);
 
+// What the first setup scan found each connector to be (setup_found). A later scan rebuilds "found" from a session
+// file the model writes, so it can only ever be shown, never trusted. An inventory from before setup_found counts
+// what it had found.
+const setupKinds = (inv) => (inv?.setup_found && typeof inv.setup_found === 'object' ? inv.setup_found : inv?.found || {});
+
+// A browser_* tool on a server nothing else says is a browser could be any server's: a browser's reads aren't held
+// to a server's limits, so it counts only on a server named as a browser (also through another server) or one the
+// first setup scan found to be one.
+function browserServerKnown(server, tool) {
+  if (isBrowserServer(server) || String(tool).split('__').slice(0, -1).some((x) => isBrowserServer(x))) return true;
+  const inv = readJsonStrict(join(home(), 'inventory.json'), {});
+  return (setupKinds(inv).browser || []).some((x) => String(x).startsWith('mcp:') && sameServer(String(x).slice(4), server));
+}
+
 // Is this server one floorboss was given, so the run lock limits it? Its recipes' servers, and the browser
 // while a run reads a list there.
 // A connector setup found (inventory.json, the scan's) or the user named for floorboss (onboarding.json: the CRM
@@ -580,6 +594,7 @@ export function foundServer(server) {
   // Only connectors the first scan saw count (setup_servers: a later scan can't add one), and a server named in an
   // answer counts only when it is one of those: free text never names a server into the run's reads.
   const mcp = (list) => (list || []).filter((x) => String(x || '').startsWith('mcp:')).map((x) => String(x).slice(4));
+  const kinds = setupKinds(inv);
   // An inventory from before setup_servers existed counts what it had found.
   const setup = (
     Array.isArray(inv?.setup_servers)
@@ -589,10 +604,10 @@ export function foundServer(server) {
     .map(String)
     .filter(Boolean);
   const atSetup = (n) => setup.some((x) => sameServer(x, n));
-  const found = mcp(Object.values(inv?.found || {}).flat()).filter(atSetup);
+  const found = mcp(Object.values(kinds).flat()).filter(atSetup);
   // A server named in an answer counts only as what setup found it to be: the CRM answer a CRM, the people-data
   // answer a people-data tool.
-  const kind = (k, n) => typeof n === 'string' && n && mcp(inv?.found?.[k]).some((x) => sameServer(x, n)) && atSetup(n);
+  const kind = (k, n) => typeof n === 'string' && n && mcp(kinds[k]).some((x) => sameServer(x, n)) && atSetup(n);
   const named = [
     kind('crm', ob?.answers?.crm_server) && ob.answers.crm_server,
     kind('enrichment', ob?.answers?.enrich_server) && ob.answers.enrich_server
@@ -851,11 +866,14 @@ export function check(
     // send window the user's approval opened (outreach browser-send), for its listed messages, or the CRM log
     // window (outreach open-log-window), for logging listed messages in the CRM's web app; and it opens only
     // pages floorboss has a reason to (navRefusal).
-    if (browser) {
+    // During a run a browser_* tool on a server not known to be a browser is that server's: the rules below decide it.
+    if (browser && (!run.active || browserServerKnown(m[1], m[2]))) {
       const nav = navRefusal(m[2], input.tool_input || {}, hosts, pages, asks);
       if (nav) return `${nav}${lockNote(run, hosts)}`;
       const logNav = crmLog && !browserSend ? logNavRefusal(m[2], input.tool_input || {}) : null;
       if (logNav) return logNav;
+      if (run.active && isBrowserReadTool(m[2]) && leaves(input.tool_input || {}).some(([, v]) => typeof v === 'string' && (v.length > URL_CAP || /[\r\n]/.test(v))))
+        return `${m[2]} was called with a value that is long or spans lines, and a floorboss run is under way: the browser's reads take short values only then.${note}`;
       if (windowOpen) return windowRefusal(m[2], input.tool_input || {});
       // Read tools keep their name with or without an _mcp suffix (tabs_context_mcp reads the open tabs).
       return isBrowserReadTool(m[2])
@@ -1158,7 +1176,17 @@ const refusedSends = [];
 // Today's send lists across events, each item checked against the record (approval fingerprint, draft,
 // contact, sending turned on, no stop or reply, not let through before). Items that fail are dropped: the
 // list is only a pointer, never the authority.
-function listedSends() {
+// The mock event, or a folder that can't be shown to be a real one (no event.json, or a damaged one): its lists are
+// never read, and a damaged file stops nothing else.
+const notRealEvent = (slug) => {
+  try {
+    const v = readJsonStrict(join(home(), 'events', slug, 'event.json'), null);
+    return !v || typeof v !== 'object' || Array.isArray(v) || v.mock === true;
+  } catch {
+    return true;
+  }
+};
+export function listedSends() {
   const dir = join(home(), 'events');
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((slug) => {
@@ -1166,7 +1194,10 @@ function listedSends() {
     if (!Array.isArray(v) || !v.length) return [];
     let settings;
     try {
-      settings = loadEvent(slug).settings;
+      // The mock event's made-up people never reach a real connector.
+      const loaded = loadEvent(slug);
+      if (loaded.event.mock === true) return [];
+      settings = loaded.settings;
     } catch {
       return [];
     }
@@ -1185,8 +1216,9 @@ function listedSends() {
 }
 
 // The approved app and LinkedIn notes of an event, each checked against the record like an email send.
-function browserItems(slug) {
+export function browserItems(slug) {
   const dir = join(home(), 'events', slug);
+  if (notRealEvent(slug)) return [];
   const v = readJsonStrict(join(dir, 'derived', 'browser-send-list.json'), []);
   if (!Array.isArray(v) || !v.length) return [];
   // The list only names the person for the prompt; the user sees the text and the page and decides.
@@ -1203,7 +1235,7 @@ const sameCall = (note, input) =>
   note.call ? note.call === String(input?.tool_use_id || '') : note.session === String(input?.session_id || '') && note.tool === String(input?.tool_name || '');
 function openWindow(nowMs) {
   const bs = readJsonStrict(join(home(), 'browser-send.json'), null);
-  if (!bs || bs.closed || !bs.event || !/^[a-z0-9-]+$/.test(bs.event)) return null;
+  if (!bs || bs.closed || !bs.event || !/^[a-z0-9-]+$/.test(bs.event) || notRealEvent(bs.event)) return null;
   const { entries } = eventRecord(join(home(), 'events', bs.event));
   const opened = entries.filter((e) => e.type === 'browser_send_opened' && e.until === bs.until && e.said).pop();
   if (!opened) return null;
@@ -1216,13 +1248,14 @@ function openWindow(nowMs) {
 // crm_log_opened entry in that event's log (with the user's words), at most 20 minutes ago.
 function openLogWindow(nowMs) {
   const w = readJsonStrict(join(home(), 'crm-log-window.json'), null);
-  if (!w || w.closed || !w.event || !/^[a-z0-9-]+$/.test(w.event)) return null;
+  if (!w || w.closed || !w.event || !/^[a-z0-9-]+$/.test(w.event) || notRealEvent(w.event)) return null;
   const { entries } = eventRecord(join(home(), 'events', w.event));
   const opened = entries.filter((e) => e.type === 'crm_log_opened' && e.until === w.until && e.said).pop();
   if (!opened) return null;
   return recent(opened.at, nowMs, 20 * 60000) && Date.parse(w.until) > nowMs && Date.parse(w.until) - nowMs <= 21 * 60000 ? w : null;
 }
 export function logItems(slug) {
+  if (notRealEvent(slug)) return [];
   const evDir = join(home(), 'events', slug);
   const v = readJsonStrict(join(evDir, 'crm-log-list.json'), []);
   // A sent message (c001:1), or a reply read in LinkedIn or the app (c001:r:<its id>), the user asked to log.
@@ -1301,10 +1334,11 @@ export function logTyping(texts, items, hosts = []) {
   return { bodies };
 }
 
-function listed(file, nowMs = Date.now()) {
+export function listed(file, nowMs = Date.now()) {
   const dir = join(home(), 'events');
   if (!existsSync(dir)) return [];
   return readdirSync(dir).flatMap((slug) => {
+    if (notRealEvent(slug)) return [];
     const v = readJsonStrict(join(dir, slug, file), []);
     if (!Array.isArray(v)) return [];
     if (file === 'contact-list.json' || file === 'task-list.json') return v.filter((x) => x && typeof x === 'object').map((x) => ({ ...x, _event: slug }));
@@ -1901,12 +1935,12 @@ function connectorChange(command, sub, { held, subagent, config }) {
 // In the session that ran floorboss, a pending test passes only on the server it is a test of: the CRM for a task
 // or a contact, a mailbox or chat tool floorboss knows for the others. Otherwise it would take a call on any
 // connected server past the run's limits, under a prompt that names it a test.
-function testOnItsServer(pending, config) {
+export function testOnItsServer(pending, config) {
   const inv = readJsonStrict(join(home(), 'inventory.json'), {});
   const server = String(pending?.server ?? '');
   // An inventory from before setup_servers existed counts what it had found, as foundServer does.
   const atSetup = !Array.isArray(inv?.setup_servers) || inv.setup_servers.some((x) => sameServer(String(x), server));
-  const foundAs = (kind) => atSetup && (inv?.found?.[kind] || []).some((x) => String(x).startsWith('mcp:') && sameServer(String(x).slice(4), server));
+  const foundAs = (kind) => atSetup && (setupKinds(inv)[kind] || []).some((x) => String(x).startsWith('mcp:') && sameServer(String(x).slice(4), server));
   const saved = (...tasks) => tasks.some((t) => config.connectors?.[t]?.server && sameServer(config.connectors[t].server, server));
   if (['crm.create_task', 'crm.create_contact'].includes(pending?.task)) return config.connectors?.['crm.lookup']?.server ? saved('crm.lookup') : foundAs('crm');
   if (['stage_draft', 'email.send'].includes(pending?.task)) return foundAs('email') || saved('stage_draft', 'email.send', 'email.history', 'email.messages', 'email.thread_has_reply');
@@ -2009,29 +2043,7 @@ const SCRIPT_REL = /^(?:skills\/[a-z][a-z-]*\/scripts\/[\w-]+\.mjs|examples\/moc
 function scriptWordRefusal(cmd) {
   const rest = cmd.trimStart().slice(4).replace(/^ +/, '');
   // The word, as the shell reads it (the loop above allowed only plain characters and plain quotes).
-  let word = '',
-    i = 0,
-    q = null;
-  for (; i < rest.length; i++) {
-    const ch = rest[i];
-    if (q === "'") {
-      if (ch === "'") q = null;
-      else word += ch;
-      continue;
-    }
-    if (q === '"') {
-      if (ch === '"') q = null;
-      else if (ch === '\\') word += rest[++i] ?? '';
-      else word += ch;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      q = ch;
-      continue;
-    }
-    if (ch === ' ') break;
-    word += ch;
-  }
+  const word = shellWords(rest)[0] ?? '';
   const bad = `this runs node with something other than floorboss's own script as its first word ("${word.slice(0, 80)}"). Run "node" followed directly by the script under the plugin folder, with no node option before it and no "." or ".." in its path.`;
   if (!word || word.startsWith('-')) return bad;
   // A $ the shell won't expand (single quotes, \$) is a folder of that name, not the plugin.

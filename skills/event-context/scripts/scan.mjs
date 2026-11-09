@@ -245,7 +245,8 @@ export function toolKinds(tools) {
     k.push('crm');
   if (has(/^(event|events|calendar|calendars|freebusy|availability|schedule)$/)) k.push('calendar');
   if (tools.some((t) => /whatsapp|telegram|signal|sms|imessage/i.test(t))) k.push('chat');
-  if (tools.some((t) => /^(navigate|read_page|get_page_text|computer|screenshot)$/.test(t))) k.push('browser');
+  // Playwright's tools carry a browser_ prefix: one that navigates, so a stray browser_find alone never counts.
+  if (tools.some((t) => /^(navigate|read_page|get_page_text|computer|screenshot|browser_navigate)$/.test(t))) k.push('browser');
   return k;
 }
 

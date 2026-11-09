@@ -113,7 +113,7 @@ export const groups = (H) => {
 export const idOf = (H, name) => JSON.parse(readFileSync(join(H.dir, 'derived', 'compat', 'contacts.json'), 'utf8')).contacts.find((c) => c.name === name)?.id;
 
 // Draft, PASS and approve everything todo hands out.
-export function draftApprove(H, now = NOW) {
+export function draftApprove(H, now = NOW, answers = 'approve all') {
   const r = todoJobs(H, now);
   const opt = r.t.optout_sentence;
   for (const j of r.jobs) {
@@ -125,7 +125,7 @@ export function draftApprove(H, now = NOW) {
     cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify(d)], now);
     if (j.kind !== 'coordinate') cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', 'PASS'], now);
   }
-  return { jobs: r.jobs, gate: cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all'], now) };
+  return { jobs: r.jobs, gate: cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', answers], now) };
 }
 
 export const outboxHas = (H, name) => readFileSync(join(H.dir, 'outbox.html'), 'utf8').includes(name);
