@@ -279,7 +279,7 @@ someone they know, not a cold intro:
 
 ## Follow-ups
 
-A follow-up (`followup: true`) is two or three sentences in the same thread. It stays on the first
+A follow-up (`followup: true`) is two or three sentences. When its channel changes from the last message (the route: email, event app, LinkedIn, email unless the user set another), `followup_note` says so: it isn't the same thread, and the reader may not have seen the earlier one, so it has to stand alone. Otherwise it's in the same thread. It stays on the first
 message's topic and adds one new thing about it: a detail, a number, a peer's experience, or a question
 (not a different insight on a new topic, and never the same proof point again). It offers the times in
 `slot_labels` and ends with the opt-out sentence when the job has one. It never says "just following up" or "bumping this".
@@ -380,7 +380,7 @@ Write the user's report to a file in `~/.floorboss/work/` (floorboss's data fold
 - `who`: the person's id, or their name as on the list. Add `company` when the name is common. A name
   that matches nobody, or more than one person, records nothing and says which; ask the user.
 - `what`: `sent`, `booked`, `moved`, `cancelled`, `replied`, `met`, `declined`, `stop`, `cut`, `added`,
-  `bounced` (with `new_email` when they gave one), `away`, `note_passed` or `unsent` (also `undo`).
+  `bounced` (with `new_email` when they gave one), `away`, `note_passed`, `skipped` (a step of the route they won't send, like "skip LinkedIn for Ana": the next step then goes on its day; `touch` if it isn't the next one) or `unsent` (also `undo`).
 - `away`: an out-of-office reply, never `replied` (that ends the follow-ups). `until` is the day they're back
   (`YYYY-MM-DD`): no follow-up goes before it, and after it they go on as planned.
 - `cancelled`: add `"another_time": true` when they asked to find another time ("maybe Thursday if you have

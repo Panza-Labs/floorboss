@@ -23,7 +23,7 @@ test('outcome notes: stop, replied, booked with an offered time, and anything el
 
 test('event-app messages become CRM tasks; done tasks and their outcomes come back; the calendar books', () => {
   // Three people without email (event-app messages), one LinkedIn, one email.
-  const H = setup({ attendees: 'Name,Title,Company,Email,Profile URL\nAna Berg,COO,Acme,,\nBo Li,VP Ops,Globex,,\nCy Ng,VP Ops,Initech,,https://www.linkedin.com/in/cyng-example\nDi Ho,COO,Hooli,di@hooli.test,\n', event: { app_name: 'Brella' } });
+  const H = setup({ settings: { route: ['email', 'linkedin', 'app'] }, attendees: 'Name,Title,Company,Email,Profile URL\nAna Berg,COO,Acme,,\nBo Li,VP Ops,Globex,,\nCy Ng,VP Ops,Initech,,https://www.linkedin.com/in/cyng-example\nDi Ho,COO,Hooli,di@hooli.test,\n', event: { app_name: 'Brella' } });
   triage(H);
   draftApprove(H);
   const tl = cli(H, 'crm-triage', ['load', '--event', H.slug]) && cli(H, 'event-outreach', ['task-list', '--event', H.slug]);

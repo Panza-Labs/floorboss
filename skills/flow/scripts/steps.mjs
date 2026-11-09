@@ -13,6 +13,7 @@ import { readJson } from '../../../lib/jsonio.mjs';
 import { eventDir } from '../../../lib/paths.mjs';
 import { loadEvent, nowFrom } from '../../../lib/event.mjs';
 import { readLedger, fold } from '../../../lib/ledger.mjs';
+import { touchBefore } from '../../../lib/route.mjs';
 import { todayKeyIn, addDays } from '../../../lib/tz.mjs';
 import { onboardingState } from '../../event-context/scripts/onboarding-state.mjs';
 import { planQuestions, NODES, defaultsFor } from '../../event-context/scripts/onboarding-tree.mjs';
@@ -198,6 +199,7 @@ const HELP_SECTIONS = {
     'send_setup',
     'followups_mode',
     'crm_log',
+    'message_route',
     'crm_create_contacts',
     'crm_fill_blanks'
   ],
@@ -1927,11 +1929,13 @@ export function nextStep(c) {
     }
     if (follow.length) {
       const it = follow[0];
+      const elsewhere = otherChannelStep(c, e, cfg, it);
+      if (elsewhere) return elsewhere;
       // The guard's own rule: a mailbox or thread check, or (with nothing that can read replies) the user's word.
       // A reader that failed is asked about (retry, or the user answers instead); the user's word counts only
       // once they chose that, after the latest failure.
       const failedAt = e.state.tool_failed['email.messages'] ? Date.parse(e.state.tool_failed['email.messages'].at) : null;
-      const sentOf = (x) => Date.parse(e.state.people[x.id]?.touches?.[x.touch - 1]?.sent_at || 0) || 0;
+      const sentOf = (x) => Date.parse(e.state.people[x.id]?.touches?.[touchBefore(e.state.people[x.id], x.touch)]?.sent_at || 0) || 0;
       // A CRM read of this person just now showed the CRM hasn't seen their email: the user is asked instead.
       const crmBlindNow = (x) =>
         e.entries.some(
@@ -2249,6 +2253,43 @@ function inboxStep(c, e, where, ids = null) {
   });
 }
 
+// A follow-up waits on a channel other than its own that this person was written to earlier: read that inbox where
+// floorboss can, otherwise ask. w.check: the channels still to check (from verifySend).
+function otherChannelStep(c, e, cfg, w) {
+  const kind = w.check?.[0];
+  if (!kind) return null;
+  const name = w.name || (readJson(join(e.paths.derived, 'contacts.json'), []).find((x) => x.id === w.id) || {}).name || w.id;
+  const label = kind === 'email' ? 'email' : kind === 'linkedin' ? 'LinkedIn' : e.event.app_name || 'the event app';
+  if (kind === 'email') {
+    const task = cfg.connectors?.['email.messages'] ? 'email.messages' : cfg.connectors?.['crm.activity'] ? 'crm.activity' : null;
+    if (task && e.state.tool_failed[task]) return toolDown(e, task, task === 'email.messages' ? 'mailbox reader' : 'CRM', ['retry', 'ask me', 'later']);
+    if (task) {
+      const src = task === 'email.messages' ? 'mailbox' : 'crm';
+      return step('check_replies_one', `Before ${name}'s next message goes, their email replies are checked, right now.`, {
+        run_first: node('event-outreach', 'sync-list', '--event', e.event.slug, '--ids', w.id),
+        judge: {
+          read: join(e.paths.dir, 'sync-list.json'),
+          write: join(e.paths.work, 'sync.json'),
+          format: `the ${task} recipe's answer for this one person, as {"people":[{"id","${src === 'mailbox' ? 'messages' : 'activities'}":[…]}]}`,
+          then: node('event-outreach', 'sync', '--event', e.event.slug, '--source', src, '--file', join(e.paths.work, 'sync.json')),
+          on_error: onToolError(e.event.slug, task)
+        }
+      });
+    }
+  } else if (e.settings.inbox_read?.[kind] === true && !e.state.tool_failed[`inbox.${kind}`]) {
+    return inboxStep(c, e, kind === 'linkedin' ? 'LinkedIn' : 'app', [w.id]);
+  }
+  return step('no_reply_check', `${name} was written to on ${label} earlier, and nothing can read that here, so the user is asked before the next message goes.`, {
+    ask: {
+      id: 'no_reply',
+      person: { id: w.id, name },
+      question: `Has ${name} replied, booked or said stop on ${label} since your message there?`,
+      options: ['no reply', 'they replied', 'they asked to stop'],
+      answer_format: '{"id":"<id>","answer":"no reply|they replied|they asked to stop","said":"<the user\'s words>"}'
+    }
+  });
+}
+
 function appStep(c, e, cfg) {
   // LinkedIn messages go through the same browser path: either channel turns it on.
   const chans = e.settings.sending?.channels || [];
@@ -2293,6 +2334,10 @@ function appStep(c, e, cfg) {
     });
   // Follow-ups in the app: nothing can read the app's inbox, so the user is asked before each one.
   // A follow-up waits on their replies: read the inbox when the user allowed it, rather than asking them.
+  if (!items.length && waitingCheck.some((w) => w.check?.length)) {
+    const w = waitingCheck.find((x) => x.check?.length);
+    return otherChannelStep(c, e, cfg, w);
+  }
   if (!items.length && waitingCheck.length) {
     const wantLi = waitingCheck.filter((w) => w.where === 'LinkedIn'),
       wantApp = waitingCheck.filter((w) => w.where !== 'LinkedIn');

@@ -30,6 +30,7 @@ import { ownerMatch, namedCompanies, unclearSkip } from '../../../lib/names.mjs'
 import { openingOf, OPENINGS } from '../../event-outreach/scripts/structures.mjs';
 import { asRule } from '../../event-outreach/scripts/sameness.mjs';
 import { DEFAULTS, OPTOUT_BUILT_IN } from '../../../lib/config.mjs';
+import { parseRoute } from '../../../lib/route.mjs';
 const DEFAULT_OPTOUT = DEFAULTS.optout_sentence;
 import {
   segmentsMd,
@@ -616,6 +617,11 @@ const SAVERS = {
     const mode = /browser|automatic/.test(t) ? 'browser' : /task/.test(t) ? 'tasks' : /csv|import/.test(t) ? 'csv' : /don|none|^no/.test(t) ? 'none' : null;
     if (!mode) throw new Error("Say one of: in the browser, tasks, CSV, or don't log them.");
     return config(c, { crm_log: mode, ...(typeof v === 'object' && v.crm_name ? { crm_name: String(v.crm_name).slice(0, 40) } : {}) });
+  },
+  message_route: (v, c) => {
+    const t = String(Array.isArray(v) ? v.join(',') : v).toLowerCase().replace(/\([^)]*\)/g, '').trim();
+    answers(c, { message_route_asked: true });
+    return config(c, { route: parseRoute(t) });
   },
   crm_create_contacts: (v, c) => {
     const t = String(v).toLowerCase();

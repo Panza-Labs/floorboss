@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { setup, cli, triage, todoJobs } from './fixtures/harness.mjs';
 
 test('rate set: paste messages are labelled LinkedIn or the event app, never "first email"', () => {
-  const H = setup({ attendees: 'Name,Title,Company,Email,LinkedIn\nAna Berg,COO,Acme,ana@acme.test,\nBo Li,VP Ops,Globex,,https://www.linkedin.com/in/bo-li-example\nCy Ng,Head of Ops,Initech,,\n', event: { app_name: 'Meetwell' } });
+  const H = setup({ settings: { route: ['email', 'linkedin', 'app'] }, attendees: 'Name,Title,Company,Email,LinkedIn\nAna Berg,COO,Acme,ana@acme.test,\nBo Li,VP Ops,Globex,,https://www.linkedin.com/in/bo-li-example\nCy Ng,Head of Ops,Initech,,\n', event: { app_name: 'Meetwell' } });
   triage(H);
   const { jobs } = todoJobs(H);
   assert.equal(jobs.filter((j) => j.kind === 'message').length, 3, JSON.stringify(jobs.map((j) => [j.id, j.channel])));

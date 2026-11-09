@@ -193,7 +193,7 @@ question is how much setup you want. You can change it any time by saying "more 
 |---|---|---|
 | **Quick** | about 8 | Your list, who you want to meet and what you offer, your sign-off and free time. It assumes you work alone, with no CRM and no writing samples (it says so when you pick it). Nothing connected is read and nothing is sent; if a CRM is connected, it says plainly that it won't be checked. It asks before researching the shortlisted companies on the web. |
 | **Standard** | about 18 | Also checks the list against your CRM, mailbox and calendar (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, how long a lost deal keeps someone out, whether emails to people you already know end with the opt-out line, and sets your tone from samples and from emails of yours that got replies, if you have them. You send the messages. |
-| **Full** | about 21 | Everything in standard, plus floorboss sends what you approve, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), and logs messages in your CRM. |
+| **Full** | about 22 | Everything in standard, plus floorboss sends what you approve, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), and logs messages in your CRM. |
 
 The counts are the setup questions after the level and the event, from walking the question tree for a
 seller who works alone and has a CRM, mailbox and calendar connected, and who has written nothing about themselves yet (standard and full ask for a line about you and what you know that buyers may not); a team, a CRM export, an event outside the English-speaking world, a job search or a list that's
@@ -260,8 +260,13 @@ calendar.
    draft carries the critic's reasons too), and you can apply your notes to every draft. You can skip this.
 7. **Approval and sending.** You approve in the terminal. With sending on, each person's whole sequence
    (first message and follow-ups) is approved together, and Claude Code asks you before every send.
-   Follow-ups stay in the same thread and go only to people who haven't replied, booked or said stop,
-   after their replies were checked in the last 90 seconds. A reply is read for what it says: stop, no,
+   Each message goes on its step of the route: by default email, then the event app, then LinkedIn, then email.
+   Anyone you can't reach on a step skips it, and you can set a longer, shorter or different route in full setup
+   (or `config --set` with `route`). An email follows on in the thread of their last email. A message
+   goes only to people who haven't replied, booked or said stop on any channel, after their replies were checked
+   in the last 90 seconds where it's going, and in the last 10 minutes on every other channel they were written
+   to (where floorboss can't read one, you're asked). LinkedIn steps wait for you to send unless you turn on
+   LinkedIn sending; the next message waits until that one is recorded as sent, or you say to skip it ("skip LinkedIn for Ana"). A reply is read for what it says: stop, no,
    out of office, a cancelled meeting (its time is free again; a cancellation from anyone else is put to you), a time (you're asked to book it), or "talk to my
    colleague" (you're asked to add them).
    An accepted calendar invite counts as booked.

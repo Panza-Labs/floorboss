@@ -19,6 +19,7 @@ import { readJson, writeJson, writeText } from '../../../lib/jsonio.mjs';
 import { fold } from '../../../lib/ledger.mjs';
 import { contextFor, saveEvent, loadEvent } from '../../../lib/event.mjs';
 import { saveConfig } from '../../../lib/config.mjs';
+import { routeLength } from '../../../lib/route.mjs';
 import { parseGate, TRIAGE_ANSWERS } from '../../../lib/gate.mjs';
 import { validateMapping, writeSource, sourcePath, optOutSays, defaultStatusMeaning } from './sources.mjs';
 import { readMappingWords } from './mapping-words.mjs';
@@ -1213,7 +1214,7 @@ function plan(opts) {
     colleague_notes: c.settings.colleague_notes ? v.coordinate.length : v.coordinate.filter((id) => c.state.people[id]?.colleague_note).length,
     held,
     first_messages: c.today,
-    follow_up: c.settings.touches > 1 ? nextDue(c.today, c.event, mode) : null,
+    follow_up: routeLength(c.settings) > 1 ? nextDue(c.today, c.event, mode) : null,
     mode,
     no_times: v.openAsk.length
       ? v.slots.length

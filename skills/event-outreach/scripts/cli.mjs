@@ -34,6 +34,7 @@ import { planSync } from './sync.mjs';
 import { drafterFor, buildBrief, instructionsPath } from './drafter.mjs';
 import { addNeverSay } from '../../flow/scripts/profile-write.mjs';
 import { agendaData, validatePoints, renderHtml, renderMarkdown, renderIcs, newsPath } from './agenda.mjs';
+import { personRoute, stepLabel, sentKind, touchBefore } from '../../../lib/route.mjs';
 import { approvalHash, recipientOf, verifySend, readersOf, withFallbacks, userWordCounts, taskMark } from '../../../lib/sendcheck.mjs';
 import { renderOutbox } from './outbox.mjs';
 import { analyzeBatch, checkInsights, SAMENESS_NOTE } from './sameness.mjs';
@@ -413,6 +414,56 @@ const lastSentTouch = (st) =>
   );
 // Where a message to this person lands ("LinkedIn", the event app, ...), from their contact and channel.
 const whereOf = (c, id) => whereTo(c.byId[id], c.event, c.triage.channels?.[id]);
+// This person's route (lib/route.mjs), or null when one channel carries their whole sequence.
+const routeOf = (c, id) => personRoute(c.byId[id], c.event, c.settings, c.triage.channels?.[id]);
+// The routing of one message: its route step, else the user's routing for the person.
+const pickAt = (c, id, touch) => {
+  const step = routeOf(c, id)?.[touch - 1];
+  return step === 'app' ? 'app' : step ? null : c.triage.channels?.[id];
+};
+const whereAt = (c, id, touch) => whereTo(c.byId[id], c.event, pickAt(c, id, touch));
+// The fields of a message that depend on where it goes.
+function messageFields(c, id, touch, channel, followup) {
+  const ct = c.byId[id];
+  const steps = routeOf(c, id);
+  const where = whereAt(c, id, touch);
+  // A first message on LinkedIn to someone not connected goes as an invitation note, wherever it falls in the route.
+  const inviteNote = where === 'LinkedIn' && (steps ? !steps.slice(0, touch - 1).includes('linkedin') : !followup);
+  return {
+    to: channel === 'email' ? ct.email : ct.profile_url || null,
+    routed: pickAt(c, id, touch) || undefined,
+    invite_note: channel === 'paste' ? inviteNote : undefined,
+    app_note:
+      channel === 'paste' && where !== 'LinkedIn'
+        ? {
+            times_in_note: c.settings.app_note_times !== 'in_app',
+            event_name_in_note: c.settings.app_note_event_name !== false,
+            optout_in_note: c.settings.app_note_optout !== false
+          }
+        : undefined,
+    char_limit: channel === 'paste' ? (inviteNote ? linkedinNoteCap(c) : c.settings.paste_limit) : undefined
+  };
+}
+// A message on a different channel from the one before it: it isn't the same thread, and they may not have seen that one.
+function channelChangeNote(c, id, touch) {
+  const steps = routeOf(c, id);
+  const before = touchBefore(c.state[id], touch);
+  if (!steps || touch < 2 || steps[touch - 1] === steps[before - 1]) return null;
+  return `This goes on ${stepLabel(steps[touch - 1], c.event)}; the message before it went on ${stepLabel(steps[before - 1], c.event)}, and they may not have seen that one. It has to make sense alone: never quote it, mention it or say which channel it went on.`;
+}
+// The subject to reply under: the last email of this sequence before this message.
+function lastEmailSubject(c, id, touch) {
+  for (let t = touch - 1; t >= 1; t--) {
+    const d = earlierDraft(c, id, t);
+    if (d?.subject) return d.subject;
+  }
+  return null;
+}
+// The latest message before this one with a thread of the given kind (a sent message's or a staged draft's).
+function earlierWith(st, touch, field) {
+  for (let t = touch - 1; t >= 1; t--) if (st.touches?.[t]?.[field]) return st.touches[t][field];
+  return null;
+}
 // A LinkedIn connection note's character cap: the user's setting, 300 by default, never above the paste limit.
 const linkedinNoteCap = (c) => Math.min(c.settings.paste_limit, Number(c.settings.linkedin_note_limit) || 300);
 // A slot's label in the event's time (fb when the slot is gone: the id, or whatever the caller has).
@@ -566,7 +617,7 @@ const knownReader = (c, id) => {
 
 function checkCtx(c, job, id, channel, others, lang = null) {
   // A LinkedIn message has no meeting fields: the app-note settings are for event apps only.
-  const app = channel === 'paste' && whereOf(c, id) !== 'LinkedIn';
+  const app = channel === 'paste' && whereAt(c, id, job.touch ?? 1) !== 'LinkedIn';
   const skills = skillsOf(c);
   return {
     followup: !!job.followup,
@@ -582,7 +633,7 @@ function checkCtx(c, job, id, channel, others, lang = null) {
     languages: c.settings.languages || [],
     // A first LinkedIn message to someone not connected goes as a connection note, which LinkedIn caps far
     // below a message (the limit is a setting: LinkedIn changes it, and it differs by account type).
-    pasteLimit: channel === 'paste' && !app && !job.followup ? linkedinNoteCap(c) : c.settings.paste_limit,
+    pasteLimit: channel === 'paste' && !app && (job.invite_note ?? !job.followup) ? linkedinNoteCap(c) : c.settings.paste_limit,
     otherNames: others,
     ownFacts: [skills.whatYouBring, skills.voice, c.settings.goal].filter(Boolean).join('\n'),
     // Everything else this message may quote a figure from: the research, the company brief, the CRM, the notes.
@@ -825,14 +876,14 @@ function todo(opts) {
     heldForUser = [];
   // The app's meeting-request limit: first messages already sent in the app use it up; new ones go in
   // ranking order, and the rest wait as backups until someone ahead of them is cut, says no or is dropped.
-  const isApp = (cid) => whereOf(c, cid) !== 'LinkedIn';
+  const isApp = (cid) => whereAt(c, cid, 1) !== 'LinkedIn';
   // A limit that isn't a whole number (a hand-edited config) counts as 0: fail closed, nothing over the limit.
   const rawLimit = c.settings.app_request_limit;
   const limit = rawLimit == null ? null : Number.isInteger(Number(rawLimit)) && Number(rawLimit) >= 0 && typeof rawLimit !== 'boolean' ? Number(rawLimit) : 0;
   // Used: app first messages sent, or approved and in the outbox waiting to be sent (a request the user is
   // about to send counts, or the next run would hand out more than the app allows).
   const firstGoesInApp = (cid, s) =>
-    (s.channel ? !/linkedin|e-?mail/i.test(s.channel) : c.triage.channels?.[cid] === 'app' || !c.byId[cid]?.email) && isApp(cid);
+    (s.channel ? !/linkedin|e-?mail/i.test(s.channel) : routeOf(c, cid) ? routeOf(c, cid)[0] === 'app' : c.triage.channels?.[cid] === 'app' || !c.byId[cid]?.email) && isApp(cid);
   let appLeft =
     limit == null
       ? Infinity
@@ -868,7 +919,8 @@ function todo(opts) {
       continue;
     }
     const pick = c.triage.channels?.[id];
-    const channel =
+    const steps = routeOf(c, id);
+    let channel =
       (pick === 'app' || pick === 'chat') && c.settings.channels.includes('paste')
         ? 'paste'
         : !ct.email && ct.phone && (c.settings.sending?.channels || []).includes('chat')
@@ -878,11 +930,11 @@ function todo(opts) {
             : c.settings.channels.includes('paste')
               ? 'paste'
               : null;
-    if (!channel) {
+    if (!steps && !channel) {
       skipped.push({ id, reason: 'no email, and paste messages are turned off in channels' });
       continue;
     }
-    if (channel === 'paste' && c.settings.linkedin_messages === false && whereTo(ct, c.event, c.triage.channels?.[id]) === 'LinkedIn') {
+    if (!steps && channel === 'paste' && c.settings.linkedin_messages === false && whereTo(ct, c.event, c.triage.channels?.[id]) === 'LinkedIn') {
       skipped.push({ id, reason: 'only a LinkedIn profile, and LinkedIn messages are off' });
       continue;
     }
@@ -895,15 +947,17 @@ function todo(opts) {
     } else {
       const sentKey = st.sent[lastSent];
       const sentMode = modeFor(daysUntilEvent(c.event, new Date(`${sentKey}T12:00:00Z`)));
-      const fit = touchesThatFit(sentKey, c.event, sentMode, c.settings.touches);
+      const fit = touchesThatFit(sentKey, c.event, sentMode, steps ? steps.length : c.settings.touches);
       const due = nextDue(sentKey, c.event, sentMode);
-      const next = lastSent + 1;
+      let next = lastSent + 1;
+      while (st.touches?.[next]?.skipped) next++;
       if (next <= fit && due && due <= today && st.touches[next]?.status !== 'outboxed') {
         touch = next;
         followup = true;
       }
     }
     if (!touch) continue;
+    if (steps) channel = steps[touch - 1] === 'email' ? 'email' : 'paste';
     if (touch === 1 && channel === 'paste' && isApp(id)) {
       if (appLeft <= 0) {
         skipped.push({ id, reason: `backup: the app's request limit (${limit}) is taken by people ranked above them` });
@@ -929,18 +983,20 @@ function todo(opts) {
     const labels = sids.map((x) => slotLabel(slotById[x], c.event.time_zone, null, c.event.city));
     const fin = c.triage.final[id] || {};
     const pre = c.triage.pre[id] || {};
-    const prevDraft = followup ? earlierDraft(c, id, touch - 1) : null;
-    const prevBody = st.sent_text?.[touch - 1] || prevDraft?.body || null;
+    const before = touchBefore(st, touch);
+    const prevDraft = followup ? earlierDraft(c, id, before) : null;
+    const prevBody = st.sent_text?.[before] || prevDraft?.body || null;
     jobs.push({
       id,
       touch,
       kind: 'message',
       channel,
-      to: channel === 'email' ? ct.email : ct.profile_url || null,
+      ...messageFields(c, id, touch, channel, followup),
+      channel_changed: !!channelChangeNote(c, id, touch) || undefined,
       mode,
       mode_guidance: MODES[mode].label,
       followup,
-      followup_note: followup ? "Send in the same thread, only if they haven't replied." : null,
+      followup_note: followup ? channelChangeNote(c, id, touch) || "Send in the same thread, only if they haven't replied." : null,
       contact: { name: ct.name, title: ct.title, company: ct.company },
       group: fin.group,
       reason: fin.reason || null,
@@ -967,29 +1023,12 @@ function todo(opts) {
       open_ask: !labels.length,
       // The exact line to end with (empty: none), so the drafter doesn't have to look for it.
       optout_line: optoutForReader(c.settings, null, knownReader(c, id)) || null,
-      // App notes: whether the times, event name and opt-out line go in the note (the user's app-note settings).
-      app_note:
-        channel === 'paste' && whereTo(ct, c.event, c.triage.channels?.[id]) !== 'LinkedIn'
-          ? {
-              times_in_note: c.settings.app_note_times !== 'in_app',
-              event_name_in_note: c.settings.app_note_event_name !== false,
-              optout_in_note: c.settings.app_note_optout !== false
-            }
-          : undefined,
       // The user's feedback on the last version (outreach revise): rewrite to it, keeping what it doesn't touch.
       ...rewriteNotes(st.touches?.[touch], prior, ledgerTouch(c, id, touch)),
       drafter: drafterFor(c.settings, { kind: 'message', channel, followup }),
       languages: (c.settings.languages || []).length ? c.settings.languages : undefined,
       earliest: sids.length ? slotById[sids[0]].start : null,
       home_labels: home !== c.event.time_zone ? sids.map((x) => slotLabel(slotById[x], c.event.time_zone, home, c.event.city)) : undefined,
-      // The most characters this message may have: a first LinkedIn message to someone not connected goes as an
-      // invitation note, capped far below a message (the same limit the checks use).
-      char_limit:
-        channel === 'paste'
-          ? whereTo(ct, c.event, c.triage.channels?.[id]) === 'LinkedIn' && !followup
-            ? linkedinNoteCap(c)
-            : c.settings.paste_limit
-          : undefined,
       profile: readProfile(c.paths.dir, id),
       // What the company sells, how it relates to the sender and what it would want: the angle comes from it.
       company_brief: readCompanyBrief(c.paths.dir, ct.company),
@@ -1018,13 +1057,16 @@ function todo(opts) {
   // follow-ups, planned on the days they'd go (each one only if there's still no reply, booking or stop).
   if (sendingOn(c.settings)) {
     for (const j of jobs.filter((x) => x.kind === 'message' && x.touch === 1)) {
-      const fit = touchesThatFit(today, c.event, mode, c.settings.touches);
+      const steps = routeOf(c, j.id);
+      const fit = touchesThatFit(today, c.event, mode, steps ? steps.length : c.settings.touches);
       let due = today;
       for (let t = 2; t <= fit; t++) {
         due = nextDue(due, c.event, mode);
         // Not on a weekend: moved to the Monday (if the event still runs then).
         while (due && [0, 6].includes(new Date(`${due}T12:00:00Z`).getUTCDay())) due = addDays(due, 1);
         if (!due || due > c.event.end_date) break;
+        // A step the user skipped: the sequence goes on to the next one.
+        if (c.state[j.id]?.touches?.[t]?.skipped) continue;
         // A follow-up the user dropped ends the sequence there.
         if (c.state[j.id]?.touches?.[t]?.status === 'dropped') break;
         // Approved and still written for the message before it as it is now: nothing to do. Approved for an
@@ -1034,26 +1076,31 @@ function todo(opts) {
         if (c.state[j.id]?.sent?.[t] || (c.state[j.id]?.touches?.[t]?.status === 'outboxed' && !(writtenFor && prevNow && writtenFor !== prevNow))) continue;
         // A follow-up is written once the message before it has passed the critic: drafting all of them at
         // once piles up drafts nobody needs yet, and every rewrite of a first email would leave its follow-ups stale.
-        const prevT = c.state[j.id]?.touches?.[t - 1];
+        const beforeT = touchBefore(c.state[j.id], t);
+        const prevT = c.state[j.id]?.touches?.[beforeT];
         const prevReady =
           !!prevT?.hash &&
           ((prevT.critic?.verdict === 'PASS' && prevT.critic.hash === prevT.hash) ||
             prevT.status === 'outboxed' ||
             prevT.review_skipped ||
-            !!c.state[j.id]?.sent?.[t - 1]);
+            !!c.state[j.id]?.sent?.[beforeT]);
+        const channel = steps ? (steps[t - 1] === 'email' ? 'email' : 'paste') : j.channel;
         jobs.push({
           ...j,
+          ...messageFields(c, j.id, t, channel, true),
+          channel,
+          channel_changed: !!channelChangeNote(c, j.id, t) || undefined,
           touch: t,
           followup: true,
           planned: true,
           planned_due: due,
           previous_hash_now: prevT?.hash || null,
           ...(!prevReady && !c.state[j.id]?.touches?.[t]?.hash ? { waits_for_previous: true } : {}),
-          followup_note: `Follow-up ${t - 1}, planned for ${due}: goes out only if they haven't replied, booked or said stop by then. Write it as the next message in the same thread as message ${t - 1} of this sequence.`,
+          followup_note: `Follow-up ${t - 1}, planned for ${due}: goes out only if they haven't replied, booked or said stop by then. ${channelChangeNote(c, j.id, t) || `Write it as the next message in the same thread as message ${t - 1} of this sequence.`}`,
           previous_message: null,
           previous_subject: null,
           ...rewriteNotes(c.state[j.id]?.touches?.[t], readJson(draftFile(c.paths, j.id, t), null), ledgerTouch(c, j.id, t)),
-          drafter: drafterFor(c.settings, { kind: 'message', channel: j.channel, followup: true }),
+          drafter: drafterFor(c.settings, { kind: 'message', channel, followup: true }),
           draft_file: draftFile(c.paths, j.id, t)
         });
       }
@@ -1340,7 +1387,7 @@ function saveDraft(opts, given = null) {
   // A follow-up or confirmation stays in its thread: "Re: <the message before it>", whatever was typed (a
   // rewritten first message changed its subject and its follow-up kept the old one). A follow-up planned with
   // its first message takes that draft's subject.
-  const before = job.previous_subject || ((job.followup || job.kind === 'confirmation') && touch > 1 ? earlierDraft(c, job.id, touch - 1)?.subject : null);
+  const before = job.previous_subject || ((job.followup || job.kind === 'confirmation') && touch > 1 ? lastEmailSubject(c, job.id, touch) : null);
   const threadSubject = (job.kind === 'confirmation' || job.followup) && before ? `Re: ${String(before).replace(/^re:\s*/i, '')}` : null;
   const draft = {
     id: job.id,
@@ -1588,7 +1635,7 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       channel: j.kind === 'coordinate' ? 'note' : j.channel,
       address: ct.email,
       profile_url: ct.profile_url,
-      routed: c.triage.channels?.[j.id] || undefined,
+      routed: pickAt(c, j.id, j.touch) || undefined,
       // Research couldn't confirm they're at this company: check their profile before sending.
       identity_unconfirmed: profileMeta(c.paths.dir, j.id)?.identity_confirmed === false || undefined,
       // Their list entry reads like an instruction to an AI (a planted note): flagged on the card too, not only at load.
@@ -1598,7 +1645,7 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       pick_in_app:
         (j.kind === 'message' || j.kind === 'confirmation') &&
         j.channel === 'paste' &&
-        whereTo(ct, c.event, c.triage.channels?.[j.id]) !== 'LinkedIn' &&
+        whereAt(c, j.id, j.touch) !== 'LinkedIn' &&
         c.settings.app_note_times === 'in_app'
           ? (j.slot_ids || d.slot_ids || []).map((x) => labelOf(c, x))
           : undefined,
@@ -1845,8 +1892,9 @@ function gate(opts) {
     }
     // A follow-up is approved only with the very message before it (approved now, earlier, or already sent).
     if (j.kind === 'message' && j.touch > 1) {
-      const prevSt = c.state[j.id]?.touches?.[j.touch - 1]?.status;
-      if (!(doneTouch.has(`${j.id}:${j.touch - 1}`) || isOut(prevSt) || c.state[j.id]?.sent?.[j.touch - 1])) {
+      const beforeT = touchBefore(c.state[j.id], j.touch);
+      const prevSt = c.state[j.id]?.touches?.[beforeT]?.status;
+      if (!(doneTouch.has(`${j.id}:${beforeT}`) || isOut(prevSt) || c.state[j.id]?.sent?.[beforeT])) {
         notReady.push({ id: j.id, touch: j.touch, reason: `follow-up ${j.touch - 1} waits for message ${j.touch - 1} to be approved` });
         continue;
       }
@@ -2728,7 +2776,9 @@ function tracker(opts) {
     const openTask = Object.values(st.tasks || {}).find((t) => !t.done);
     const channel = coord
       ? 'note to colleague'
-      : c.triage.channels?.[id] !== 'app' && ct.email && c.settings.channels.includes('email')
+      : routeOf(c, id)
+        ? [...new Set(routeOf(c, id).map((s) => stepLabel(s, c.event)))].join(', ')
+        : c.triage.channels?.[id] !== 'app' && ct.email && c.settings.channels.includes('email')
         ? 'email'
         : whereTo(ct, c.event, c.triage.channels?.[id]);
     let status,
@@ -3114,7 +3164,7 @@ function stageable(c) {
     if (tt.staged || st.sent?.[card.touch]) continue;
     if (card.touch === 1 && crmPending(c, card.id)) continue;
     const lastSent = lastSentTouch(st);
-    const prev = card.touch > 1 ? st.touches?.[card.touch - 1]?.staged : card.touch === 0 && lastSent ? st.touches?.[lastSent]?.staged : null;
+    const prev = card.touch > 1 ? earlierWith(st, card.touch, 'staged') : card.touch === 0 && lastSent ? st.touches?.[lastSent]?.staged : null;
     out.push({
       id: card.id,
       touch: card.touch,
@@ -3272,14 +3322,14 @@ function threadStatus(opts) {
 // A fresh attempt for drafts held after failing the critic twice: the user asks for it by ID.
 // Where a message goes when floorboss sends it itself: email through the email.send recipe, a chat app
 // through chat.send, the event app or LinkedIn in the user's browser. Null when floorboss doesn't send it.
-function sendRoute(c, id, channel) {
+function sendRoute(c, id, channel, touch = 0) {
   const ch = c.settings.sending?.channels || [];
   const ct = c.byId[id];
   // The user said not to reach this person (channel none) since the plan: nothing goes.
   if (c.triage.channels?.[id] === 'none') return null;
   if (channel === 'email')
     return ch.includes('email') && c.config?.connectors?.['email.send'] ? { via: 'email.send', to: recipientOf(ct, 'email', c.settings) } : null;
-  const where = whereTo(ct, c.event, c.triage.channels?.[id]);
+  const where = whereAt(c, id, touch);
   if (where === 'LinkedIn')
     return ch.includes('linkedin') && c.settings.sending?.linkedin_ack && !(ch.includes('chat') && ct.phone)
       ? { via: 'browser', to: recipientOf(ct, 'paste', c.settings), where }
@@ -3293,6 +3343,16 @@ function sendRoute(c, id, channel) {
   }
   // In the event's app people are found by name: the profile link when there is one, else name and company.
   return ch.includes('app') && !(ch.includes('chat') && ct.phone) ? { via: 'browser', to: recipientOf(ct, 'paste', c.settings), where } : null;
+}
+
+// The app's request limit counts everyone first written to there, whichever message of their route that is.
+function appLimitReached(c, id) {
+  const raw = c.settings.app_request_limit;
+  if (raw == null) return false;
+  const limit = Number.isInteger(Number(raw)) && Number(raw) >= 0 && typeof raw !== 'boolean' ? Number(raw) : 0;
+  const inApp = (p) => Object.values(p?.touches || {}).some((x) => sentKind(x.sent) === 'app');
+  if (inApp(c.folded.people[id])) return false;
+  return Object.values(c.folded.people).filter(inApp).length >= limit;
 }
 
 // Replies are checked before a follow-up goes: the last mailbox or CRM sync, thread check or CRM task read
@@ -3326,6 +3386,7 @@ function sendList(opts) {
   for (const { file, id, t: tt } of draftFiles(c)) {
     const t = Number(tt);
     const st = c.state[id] || { sent: {}, touches: {} };
+    if (st.touches?.[t]?.skipped) continue;
     // The kind, the booking, the plan and the thread are the ledger's (savedDraft) when the working copy is still
     // the saved text; one changed by hand fails the approval's fingerprint below.
     const raw = readJson(file, null);
@@ -3381,7 +3442,8 @@ function sendList(opts) {
       }
     }
     if (t > 1) {
-      const prev = st.sent?.[t - 1];
+      const beforeT = touchBefore(st, t);
+      const prev = st.sent?.[beforeT];
       if (!prev) continue;
       // Written for a first message that has changed since (and was approved again): written again first.
       if (d.previous_hash && st.touches?.[t - 1]?.hash && d.previous_hash !== st.touches[t - 1].hash) {
@@ -3417,7 +3479,7 @@ function sendList(opts) {
         // The same rule as the guard's: the user's word counts only where nothing floorboss can read could see
         // their reply (a CRM read that showed it hasn't seen their email, or a reader the user answers for).
         const rdr = withFallbacks(readersOf({ connectors: c.config?.connectors || {} }), c.folded);
-        const sentAtMs = Date.parse(st.sent_at?.[t - 1] || `${prev}T00:00:00Z`) || 0;
+        const sentAtMs = Date.parse(st.sent_at?.[beforeT] || `${prev}T00:00:00Z`) || 0;
         const canCheck = !userWordCounts(c.entries, id, email ? 'email.send' : 'browser', rdr, sentAtMs);
         if (canCheck) {
           waiting.push({
@@ -3430,7 +3492,11 @@ function sendList(opts) {
         noReplyIds.push(id);
       }
     }
-    const route = sendRoute(c, id, d.channel);
+    const route = sendRoute(c, id, d.channel, t);
+    if (route?.via === 'browser' && route.where !== 'LinkedIn' && t > 1 && appLimitReached(c, id)) {
+      waiting.push({ id, touch: t, via: route.via, where: route.where, why: `the app's request limit (${c.settings.app_request_limit}) is used up: it stays here until someone else is cut` });
+      continue;
+    }
     if (!route || !route.to) {
       waiting.push({ id, touch: t, why: route?.why || 'no way for floorboss to send it on this channel: it stays in the outbox for you' });
       continue;
@@ -3443,8 +3509,7 @@ function sendList(opts) {
       c.entries.push(e);
     }
     // The thread to reply in: the message before it (a confirmation: the last one that went).
-    const prevTouch = t > 1 ? t - 1 : t === 0 ? lastSentTouch(st) : 0;
-    const prevMsg = prevTouch ? st.touches?.[prevTouch]?.sent_msg : null;
+    const prevMsg = t > 1 ? (d.channel === 'email' ? earlierWith(st, t, 'sent_msg') : st.touches?.[t - 1]?.sent_msg) : t === 0 ? st.touches?.[lastSentTouch(st)]?.sent_msg : null;
     const item = {
       id,
       touch: t,
@@ -3460,7 +3525,7 @@ function sendList(opts) {
     };
     const v = verifySend(item, { evDir: c.paths.dir, settings: c.settings, state: c.state, entries: c.entries, folded: c.folded, nowMs: c.now.getTime() });
     if (!v.ok) {
-      waiting.push({ id, touch: t, via: item.via, where: item.where || null, why: v.why });
+      waiting.push({ id, touch: t, via: item.via, where: item.where || null, why: v.why, check: v.check });
       continue;
     }
     items.push(item);
@@ -3628,7 +3693,7 @@ function appResult(opts) {
         touch,
         date: c.today,
         via: 'floorboss',
-        channel: whereOf(c, id) === 'LinkedIn' ? 'LinkedIn' : c.event.app_name || 'the event app',
+        channel: whereAt(c, id, touch) === 'LinkedIn' ? 'LinkedIn' : c.event.app_name || 'the event app',
         hash: c.folded.people[id].touches[touch].approved?.hash || undefined,
         source: 'user',
         said: said.slice(0, 200)
@@ -3645,14 +3710,14 @@ function appResult(opts) {
       touch,
       date: c.today,
       via: 'floorboss',
-      channel: whereOf(c, id) === 'LinkedIn' ? 'LinkedIn' : c.event.app_name || 'the event app',
+      channel: whereAt(c, id, touch) === 'LinkedIn' ? 'LinkedIn' : c.event.app_name || 'the event app',
       hash: c.folded.people[id].touches[touch].approved?.hash || undefined,
       source: 'app'
     });
   if (result === 'too_long') {
     // The page's own cap ("335/200 characters") becomes the limit, so the redraft fits instead of looping.
     const cap = Number((/\d+\s*\/\s*(\d+)\s*characters/i.exec(page) || [])[1]);
-    const li = whereOf(c, id) === 'LinkedIn';
+    const li = whereAt(c, id, touch) === 'LinkedIn';
     if (cap > 20) saveConfig(li ? { linkedin_note_limit: cap } : { paste_limit: cap });
     led(c, {
       type: 'revise',
@@ -3953,7 +4018,7 @@ function rateSet(opts) {
     const where =
       x.d.channel === 'email'
         ? 'email'
-        : whereTo(x.ct, c.event, c.triage.channels?.[x.id]) === 'LinkedIn'
+        : whereAt(c, x.id, x.touch) === 'LinkedIn'
           ? 'LinkedIn message'
           : c.event.app_name
             ? `message in ${c.event.app_name}`

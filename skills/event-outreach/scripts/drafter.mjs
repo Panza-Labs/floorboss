@@ -140,7 +140,12 @@ export function buildBrief(job, { event, settings, files }) {
   // fenced and quoted as data, and the drafter is told so: none of it can give instructions.
   const data = [];
   if (job.followup && job.previous_message)
-    data.push('Their previous message from the sender (follow up on it, in the same thread; no "just following up"):', quoted(job.previous_message));
+    data.push(
+      job.channel_changed
+        ? 'The last message from the sender, on another channel (they may not have seen it; never quote or mention it):'
+        : 'Their previous message from the sender (follow up on it, in the same thread; no "just following up"):',
+      quoted(job.previous_message)
+    );
   if (job.profile)
     data.push(
       "Research about them (use at most one fact, only as written; each has its source). If it says their identity isn't confirmed, don't lean on their title or company:",

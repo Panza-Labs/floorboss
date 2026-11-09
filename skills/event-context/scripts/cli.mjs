@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run, need } from '../../../lib/args.mjs';
 import { loadConfig, saveConfig, DEFAULTS } from '../../../lib/config.mjs';
+import { parseRoute } from '../../../lib/route.mjs';
 import { contextDir, ensureDir, configPath, home } from '../../../lib/paths.mjs';
 import { loadEvent, contextFor, saveEvent, nowFrom } from '../../../lib/event.mjs';
 import { isValidZone } from '../../../lib/tz.mjs';
@@ -165,6 +166,7 @@ function config(opts) {
     }
     // A contacts file is a list: read only from where lists are read, as `crm-triage inputs --known` takes it.
     if (Array.isArray(patch.known_contacts_paths)) patch.known_contacts_paths = patch.known_contacts_paths.map((x) => allowedPath(String(x), { list: true }));
+    if ('route' in patch && patch.route !== null) patch.route = parseRoute(patch.route);
     for (const k of ['touches', 'max_offers', 'per_slot', 'meeting_minutes', 'warm_months', 'paste_limit']) {
       if (k in patch && !(Number.isFinite(+patch[k]) && +patch[k] > 0)) throw new Error(`${k} must be a positive number.`);
     }

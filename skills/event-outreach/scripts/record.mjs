@@ -21,6 +21,7 @@ export const WHATS = [
   'bounced',
   'away',
   'note_passed',
+  'skipped',
   'unsent',
   'undo'
 ];
@@ -205,6 +206,21 @@ export function planRecord(items, ctx) {
       return;
     }
     switch (item.what) {
+      case 'skipped': {
+        let t = item.touch != null ? Number(item.touch) : Math.max(0, ...Object.keys(st.sent).map(Number)) + 1;
+        if (item.touch == null) while (ctx.state[id]?.touches?.[t]?.skipped) t++;
+        if (!Number.isInteger(t) || t < 2 || t > 10) {
+          errors.push(`${where}: only a follow-up can be skipped (message 2 or later); to leave someone out, record "cut"`);
+          return;
+        }
+        if (st.sent[t]) {
+          errors.push(`${where}: message ${t} to ${who} already went`);
+          return;
+        }
+        entries.push({ type: 'step_skipped', ...base, touch: t });
+        lines.push(`message ${t} to ${who} skipped; the next step goes on its day`);
+        break;
+      }
       case 'note_passed': {
         if (holder === undefined) {
           errors.push(`${where}: ${who} has no note to a colleague: nobody holds them for you`);
@@ -240,7 +256,8 @@ export function planRecord(items, ctx) {
         const waiting = !!t0 && !st.sent[0] && !!st.booked && ['drafted', 'outboxed'].includes(t0.status);
         const saysConfirmation = /^confirm/i.test(String(item.kind || ''));
         const given = saysConfirmation ? 0 : item.touch != null ? Number(item.touch) : waiting ? 0 : null;
-        const next = Math.max(0, ...Object.keys(st.sent).map(Number)) + 1;
+        let next = Math.max(0, ...Object.keys(st.sent).map(Number)) + 1;
+        while (ctx.state[id]?.touches?.[next]?.skipped) next++;
         // The same send reported again (same day, give or take one): recorded once.
         const dup = Object.entries(st.sent).find(([t, d]) => (given != null ? Number(t) === given : Number(t) > 0 && daysApart(d, date) <= 1));
         if (dup) {

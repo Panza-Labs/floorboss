@@ -86,7 +86,7 @@ Anything else is refused.
 
 | What | Where it goes | What it can carry | Asked | Held by |
 |---|---|---|---|---|
-| A send (email, chat) | your mailbox or chat tool, to one recipient | the approved message, word for word: recipient, subject, body, and the thread of the message before it | before every message, with the whole text | guard: one listed, approved item, sent once; `test/security-guard.test.mjs` |
+| A send (email, chat) | your mailbox or chat tool, to one recipient | the approved message, word for word: recipient, subject, body, and the thread of their last email | before every message, with the whole text | guard: one listed, approved item, sent once; `test/security-guard.test.mjs` |
 | A draft in your mailbox | your own drafts folder | the same fields as a send; nothing is sent | once per batch, naming who each is to | guard: listed drafts only; `test/security-round3.test.mjs` |
 | An event-app note (LinkedIn is still in progress; see the README) | the app, in your browser | the approved note, to the profile floorboss listed | before every note, with the whole text | the browser send window: only that profile's page, no script; `test/security-round2.test.mjs` |
 | A CRM task | your CRM | a title, a body, a due date and the one contact it's about | before every task | guard: listed tasks only; `test/security-round7.test.mjs` |

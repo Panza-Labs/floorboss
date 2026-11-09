@@ -69,6 +69,7 @@ const LEVEL_OF = {
   inbox_read: 'full',
   crm_log: 'full',
   crm_create_contacts: 'full',
+  message_route: 'full',
   crm_fill_blanks: 'full',
   followups_mode: 'full',
   app_request_limit: 'full'
@@ -739,6 +740,17 @@ NODES.push(
         ? ['log it in my CRM in the browser, automatically (recommended)', 'make a CRM task for each', "I'll import a CSV from the outbox", "don't log them"]
         : ['make a CRM task for each (recommended)', "I'll import a CSV from the outbox", "don't log them"],
     saves: 'config: crm_log (browser | tasks | csv | none) and crm_name (what the CRM is called)'
+  },
+  {
+    id: 'message_route',
+    round: 'sending',
+    phase: 'later',
+    when: (s) => !!s.ans.sending_asked,
+    done: (s) => !!s.ans.message_route_asked,
+    ask: (s) =>
+      `Which channel should each message go on, in order? The usual route is email, then ${s.ev?.app_name || 'the event app'}, then LinkedIn, then email. Anyone you can't reach on a step skips it. You can make it longer, shorter or a different order.`,
+    options: () => ['email, app, linkedin, email (recommended)', 'email, email (no other channels)', 'your own order, like "email, linkedin, email"'],
+    saves: 'config: route (a list of email, app, linkedin); answers: message_route_asked'
   },
   {
     id: 'crm_create_contacts',

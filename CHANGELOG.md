@@ -54,6 +54,10 @@ The first public version.
 - Your own outbound skill or agent can write the messages it covers; floorboss checks them.
 
 ### Sending and tracking
+- Each person's sequence goes on a route of channels, one per message: by default email, the event app, LinkedIn,
+  email. Anyone you can't reach on a step skips it, and you can make the route longer, shorter or a different order.
+  Before any message goes, their replies are checked on every channel they were written to, so someone who answered
+  in the event app doesn't get the next email; where floorboss can't read a channel, it asks you. A step you won't send can be skipped ("skip LinkedIn for Ana").
 - Approval of each person's whole sequence; you can edit or drop any touch, in the file or inline
   ("edit c012: …"). Checks refuse a figure (%, x, money) that none of the draft's sources holds.
 - Optional sending by email, with Claude Code asking before every send. Event-app notes through your browser.
