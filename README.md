@@ -62,13 +62,15 @@ research pages and replies written by strangers. Here is how it keeps that text 
   floorboss's scripts into fixed fields (a name, a title, a status, a note). A field is never run as a
   command.
 - **Suspicious text is shown to you.** A list note that reads like an instruction to an AI is flagged on
-  that person's shortlist card and outbox card, where you decide about them. It changes nothing on its own.
+  that person's shortlist card and outbox card, where you decide about them. The scripts don't act on it.
 - **Untrusted text is fenced.** Wherever Claude has to read list or page text (to judge who fits, or to
   build a list from an event's page), it's handed over marked as data from your files. Attendee notes never
   reach the critic.
-- **The agents that read drafts can't act.** The critic and the outreach writer can only list file names.
-  They can't read files, call tools or send anything, so a draft can't be turned into an action. The
-  researcher has web search and fetch, nothing else.
+- **Claude drafts under the guard.** By default Claude writes the drafts in your session, with attendee notes
+  marked untrusted and the guard on.
+- **The agents that read drafts can't act.** The critic can only list file names, and so can the outreach
+  writer, used only when your own outbound agent's instructions do the writing. They can't read files, call tools
+  or send anything, so a draft can't be turned into an action. The researcher has web search and fetch, nothing else.
 - **Tool calls are held to recipes.** The guard hook checks every call floorboss makes to a connected tool
   against the recipe saved for it, with only the recipe's own arguments. During a run Claude may only read,
   write in floorboss's own folder, and open the pages floorboss has a reason to. A web address or search
@@ -78,11 +80,6 @@ research pages and replies written by strangers. Here is how it keeps that text 
   has no rule for, wait until the session ends. See [Where your data can go](SECURITY.md#where-your-data-can-go).
 - **You approve every message, word for word.** Nothing goes out that you haven't approved, and with
   sending on, Claude Code asks you before each send and shows you the whole message.
-
-How it's tested: the test data plants instructions in an attendee note and in a connected mailbox's
-answers. In 20 simulated first-time users, the planted text changed nothing floorboss sent. In both
-side-by-side studies against plain Claude Code (scored on the drafts, before review and approval), it
-changed nothing floorboss drafted. In all of them, no tool it pointed at was called.
 
 What it can't fully stop: Claude still reads list text when it judges who's a good fit, so a cleverly
 written note could sway a judgment like that. That's why the shortlist comes to you before anything is
@@ -268,6 +265,7 @@ calendar.
    out of office, a cancelled meeting (its time is free again; a cancellation from anyone else is put to you), a time (you're asked to book it), or "talk to my
    colleague" (you're asked to add them).
    An accepted calendar invite counts as booked.
+   Nothing runs in the background: follow-ups go when you run floorboss on their day.
 
 **Event apps.** When most attendees have no email (common with event-app exports), notes go in the event's
 app (Grip, Brella, Swapcard and the like) through your own browser, in a 20-minute window you open, and
@@ -443,7 +441,8 @@ private claude.ai page. Floorboss says which before each of these.
 - The agents: the critic and the outreach writer (which follows your own outbound agent's instructions when
   that agent could send or write) have one listed tool, Glob, which only shows file names; they can't read,
   write or call anything (an empty tools list would make Claude Code hand them every tool). floorboss puts
-  your instructions inside the writer's brief. The researcher has web search and fetch only.
+  your instructions inside the writer's brief. By default Claude drafts in the main session instead, with attendee
+  notes marked untrusted and the guard on. The researcher has web search and fetch only.
 - The outbox page escapes every field and loads nothing from the internet.
 - Connected tools are screened by name: anything that deletes or changes records is never mapped, and a send
   tool only when you turned sending on, one message at a time. floorboss writes drafts from its own files,

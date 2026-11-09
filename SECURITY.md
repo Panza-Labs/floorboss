@@ -15,8 +15,10 @@ Reports are especially welcome about:
 - anything in the generated outbox page that runs script or loads something external
 - files written outside floorboss's data folder
 
-How floorboss is built to resist these: the critic and the outreach writer agents can only list file
-names (they can't read, write or call anything; the writer gets the user's instructions inside its brief),
+How floorboss is built to resist these: by default Claude drafts in the main session, with attendee notes marked untrusted and
+the guard on; the critic, and the outreach writer agent used only when the user's own outbound instructions do the
+writing, can only list file names (they can't read, write or call anything; the writer gets those instructions
+inside its brief),
 the researcher has web search and fetch only, scripts (not the model) parse every file and pasted status,
 attendee notes are fenced as untrusted and never reach the critic, the outbox escapes every field, links only
 to LinkedIn, known event apps and the event's own site, and its Content-Security-Policy blocks external
@@ -46,8 +48,9 @@ while a run is under way:
 - **Web pages and searches** take no address or query over 300 characters, with a line break or with an
   email address in it. WebFetch opens only LinkedIn profiles, the event apps floorboss knows and the event
   sites you named. The researcher (the one agent with the open web) opens only pages its own searches found
-  and the sites of companies on your list. Its brief is a company and people's names and titles: what your
-  CRM says about them stays with floorboss.
+  and the sites of companies on your list. Its brief is names, titles and companies, each person's segment, your company
+  and goal, your proof lines, and whether a company is your customer or partner or in your CRM. It never gets your
+  CRM's notes, owners or statuses.
 - **The browser** opens only the pages floorboss has a reason to, under the same address limits. A CRM site
   where every customer has their own address (`yourco.my.salesforce.com`) asks you first.
 - **People-data lookups** (Apollo, Clay and the like) carry one person you agreed to look up: their name,
@@ -124,7 +127,7 @@ Then, in Claude Code, `/hooks` lists every hook and the command it runs.
 
 ## How the repository is kept
 
-- **CI** runs the tests on Node.js 22, 24 and 26 and the self-check, on every push. Its workflows start with no
+- **CI** runs the tests on Node.js 22, 24 and 26, and the self-check on Node.js 22, on every push. Its workflows start with no
   write access, keep no token on disk after checkout, and pin every action to a full commit, with a test that
   fails if one isn't (`test/workflows.test.mjs`). The actions used are GitHub's own (`actions/checkout`,
   `actions/setup-node`, `github/codeql-action`) and the OpenSSF's Scorecard. None of them is part of what you
@@ -166,7 +169,8 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
 - **What the researcher opens.** It's held to hosts its searches returned and to the domains of people on your
   list, with their subdomains. Text that steers it could send it to a search only an attacker's page answers, and
   an attendee can register with a domain they control. A link to such a site could carry what the researcher
-  holds: one contact's name, title and company, and your label for their segment. Email addresses are refused.
+  holds: names, titles and companies, your label for each person's segment, your company and goal, your proof lines,
+  and whether a company is your customer or partner. Email addresses are refused.
 - **Search during a run.** Claude's search shows matching lines only from floorboss's data folder, but it can
   still list matching files elsewhere and open them, apart from the key files Read refuses by name.
 - **Screen-control tools.** A remote-devices server's browser tools are held as a browser, but its `computer_*`

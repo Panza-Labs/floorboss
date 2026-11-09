@@ -12,7 +12,7 @@ test('instruction-like list notes: flagged on the gate card and on the outbox ca
   const ana = idOf(H, 'Ana Berg');
   const view = cli(H, 'crm-triage', ['view', '--event', H.slug]);
   assert.deepEqual(view.instruction_like?.people.map((p) => p.id), [ana], JSON.stringify(view.instruction_like));
-  assert.match(view.instruction_like.note, /changed nothing/);
+  assert.match(view.instruction_like.note, /didn't act on them/);
   const row = view.top.find((x) => x.id === ana);
   assert.match(row?.flag || '', /reads like an instruction to an AI/);
   assert.equal(view.top.find((x) => x.name === 'Bo Li')?.flag, undefined);

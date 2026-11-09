@@ -55,7 +55,7 @@ function card(c, hosts = [], app = null) {
   <header><div>${c.pending ? '<span class="chip warn">pending your approval</span> ' : ''}<b>${e(c.name)}</b> · ${e(c.title)}, ${e(c.company)} <span class="id">${e(c.id)}${c.touch > 1 ? ` · touch ${c.touch}` : ''}</span>${c.kind === 'confirmation' ? ' <span class="chip ok">booked: confirmation</span>' : ''}${c.staged ? ' <span class="chip">in your mailbox drafts</span>' : ''}</div>${c.kind === 'coordinate' ? '' : verdictChip(c.verdict)}</header>
   <p class="meta">${channel} · ${addr}${c.mode ? ` · ${e(c.mode)}` : ''}</p>
   ${c.identity_unconfirmed ? '<p class="failnote">Research couldn\'t confirm they\'re at this company: check their profile before sending.</p>' : ''}
-  ${c.instruction_like ? '<p class="failnote">Their entry on the list reads like an instruction to an AI. floorboss treated it as data and it changed nothing: check the entry before sending.</p>' : ''}
+  ${c.instruction_like ? '<p class="failnote">Their entry on the list reads like an instruction to an AI. The scripts didn\'t act on it. Check this person yourself.</p>' : ''}
   ${c.pick_in_app?.length ? `<p class="follow">In the app's meeting request, pick ${e(c.pick_in_app.join(' or '))}.</p>` : c.pick_in_app ? '<p class="follow">In the app\'s meeting request, pick any open time.</p>' : ''}
   ${c.brief ? `<p class="brief">${e(c.brief)}</p>` : ''}
   ${c.followup_note ? `<p class="follow">${e(c.followup_note)}</p>` : ''}
