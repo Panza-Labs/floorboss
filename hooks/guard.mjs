@@ -2343,6 +2343,9 @@ if (isMain(import.meta.url)) {
       const otherRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
       if (!(otherRun.active && (otherRun.session || subagent))) process.exit(0);
       if (QUIET_TOOLS.has(toolName)) process.exit(0);
+      // How a subagent hands its result to the session that started it: nothing leaves this session, and without it a
+      // researcher, writer or critic does its work and can't say what it found.
+      if (subagent && toolName === 'SubagentHandback') process.exit(0);
       if (toolName === 'Skill' && /^floorboss:/.test(String(input.tool_input?.skill ?? input.tool_input?.name ?? ''))) process.exit(0);
       process.stderr.write(
         `floorboss blocked this call: this session ran floorboss and read text from your lists, CRM and the web, so ${toolName || 'this tool'} waits until the session ends (floorboss can't check what it sends). Start a new session (or /clear) to use it.\n`

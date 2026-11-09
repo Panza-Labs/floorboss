@@ -226,6 +226,15 @@ test('C5: names built from words of the answer never rewrite it', () => {
   assert.deepEqual(gatePeople([{ id: 'c1', name: 'Drop: Tables' }, { id: 'c2', name: 'Drop, Tables' }, { id: 'c3', name: 'Ana Drop' }, { id: 'c4', name: 'All Except' }, { id: 'c5', name: 'Bo Li' }]), [{ id: 'c3', name: 'Ana' }, { id: 'c5', name: 'Bo Li' }]);
 });
 
+test('a subagent can hand back its result during a run; other new tools still wait, and only a subagent has this one', () => {
+  const H = setup({ attendees: TWO });
+  const other = (input) => spawnSync('node', [join(ROOT, 'hooks/guard.mjs'), 'other'], { input: JSON.stringify(input), env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: NOW }, encoding: 'utf8' });
+  writeFileSync(join(H.HOME, 'active.json'), JSON.stringify({ at: new Date().toISOString(), sessions: { s1: new Date().toISOString() } }));
+  assert.equal(other({ tool_name: 'SubagentHandback', tool_input: { message: 'c001 PASS' }, session_id: 's1', agent_id: 'a1' }).status, 0);
+  assert.equal(other({ tool_name: 'SendMessage', tool_input: { message: 'x' }, session_id: 's1', agent_id: 'a1' }).status, 2);
+  assert.equal(other({ tool_name: 'SubagentHandback', tool_input: { message: 'x' }, session_id: 's1' }).status, 2, 'not from the main session');
+});
+
 test('C9: the words of the question never name a company', () => {
   const listed = ['Companies', 'All', 'News', 'Acme', 'Ai', 'People', 'None', 'People.ai'];
   for (const t of ['skip companies', 'skip all', 'skip the news', 'no, skip the news', 'skip all of them', 'skip all please', 'skip research for all companies', 'skip news please', 'skip all research', 'skip company research', 'skip companies, people: none', 'skip companies, people: top 5', 'skip the people', 'skip news.', 'no'])

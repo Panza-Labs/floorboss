@@ -93,6 +93,8 @@ The first public version.
   talk about), as a page, a short version and an `.ics` file. It names the companies before any web search.
 
 ### Connections and safety
+- A subagent can hand its result back during a run on current Claude Code, which delivers results through a tool of its
+  own that the guard refused as unknown: critics, researchers and writers did the work and couldn't report it.
 - From a fourth full audit (9 confirmed findings, all low; six fixed here, each with regression tests, and three planned
   for 0.1.1): the guard reads a backslash in a script's path as the shell does; what the first setup scan found a
   connector to be can't be changed by a later scan; a `browser_` tool on a server not known to be a browser is held as
