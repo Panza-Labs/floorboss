@@ -1,7 +1,7 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // What the status outputs say about how things stand: a cancellation read from the mailbox frees the time (and
-// says so when nothing was booked); someone away is shown as away, not as due, until the day they're back; and
+// says so when nothing was booked); someone away is noted as away and stays due; and
 // contacted.csv tells a decline, a cancellation, an absence and a bounce apart, with the meeting's time.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -84,7 +84,7 @@ test('sync through the CLI: the cancelled meeting is off the fold and counts as 
   assert.equal(p.reply_actions.filter((a) => !a.done).length, 0, 'no new time asked for: no question');
 });
 
-test('someone away is listed as away, not due, in the summary and the tracker, and is due again the day they are back', () => {
+test('someone away is noted in the summary and their follow-up stays due', () => {
   const H = ready('Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP Ops,Globex,bo@globex.test\n');
   const ana = idOf(H, 'Ana Berg'),
     bo = idOf(H, 'Bo Li');
@@ -93,18 +93,17 @@ test('someone away is listed as away, not due, in the summary and the tracker, a
   const s = cli(H, 'event-outreach', ['summary', '--event', H.slug], LATER);
   assert.ok(!s.ERROR, s.ERROR);
   assert.deepEqual(
-    s.follow_ups_due.map((d) => d.id),
-    [bo],
-    'only Bo is due'
+    s.follow_ups_due.map((d) => d.id).sort(),
+    [ana, bo].sort(),
+    'both are due'
   );
-  assert.deepEqual(s.away, [{ id: ana, name: 'Ana Berg', until: '2026-10-25', note: 'away until 2026-10-25: no follow-up before then' }]);
+  assert.deepEqual(s.away, [{ id: ana, name: 'Ana Berg', until: '2026-10-25', note: 'away until 2026-10-25: follow-ups go on as planned' }]);
   cli(H, 'event-outreach', ['tracker', '--event', H.slug], LATER);
   const html = readFileSync(join(H.dir, 'tracker.html'), 'utf8');
   const row = (name) => html.split('<tr').find((r) => r.includes(name));
-  assert.match(row('Ana Berg'), /Away until 2026-10-25: no follow-up before then/);
-  assert.doesNotMatch(row('Ana Berg'), /Follow up/);
+  assert.match(row('Ana Berg'), /Follow up now/);
   assert.match(row('Bo Li'), /Follow up now/);
-  // Back on the 25th: due again, that day.
+  // Back on the 25th: no longer noted.
   const back = cli(H, 'event-outreach', ['summary', '--event', H.slug], '2026-10-25T08:00:00Z');
   assert.deepEqual(
     back.follow_ups_due.map((d) => [d.id, d.due]).sort(),

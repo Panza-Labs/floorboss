@@ -414,8 +414,7 @@ export function planRecord(items, ctx) {
         );
         break;
       }
-      // An out-of-office reply: not a reply to the message. No follow-up before the day they're back; after it,
-      // follow-ups go on as planned.
+      // An out-of-office reply: not a reply to the message. The day they're back is noted; follow-ups keep their days.
       case 'away': {
         const until = String(item.until || '').trim();
         if (!validDay(until) || until < today) {
@@ -423,7 +422,7 @@ export function planRecord(items, ctx) {
           return;
         }
         entries.push({ type: 'paused', ...base, until });
-        lines.push(`${who} is away until ${until}: no follow-up before then`);
+        lines.push(`${who} is away until ${until}: follow-ups go on as planned`);
         break;
       }
       case 'replied': {

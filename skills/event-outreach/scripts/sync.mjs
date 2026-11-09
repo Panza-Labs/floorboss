@@ -70,7 +70,7 @@ export function planSync(people, { state, since, source, now, byId, zone = 'UTC'
       if (x.direction === 'in' && x.intent === 'ooo') {
         if (x.until) {
           entries.push({ type: 'paused', id: p.id, until: x.until, source, ext });
-          lines.push(`${who} is away until ${x.until} (an automatic reply): follow-ups wait until then`);
+          lines.push(`${who} is away until ${x.until} (an automatic reply), not a reply: follow-ups go on as planned`);
         } else {
           entries.push({ type: 'synced', id: p.id, ext, source });
           lines.push(`${who}: an out-of-office on ${day(x.at)}, no return date read from it, not a reply: follow-ups go on as planned`);

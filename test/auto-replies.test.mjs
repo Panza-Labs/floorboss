@@ -121,7 +121,7 @@ test('the reader marking auto is enough, mailbox or CRM', () => {
   assert.deepEqual(types(read({ activity_id: 'a3', type: 'email', subject: 'Re: Ticket commission', auto: true })), ['synced']);
 });
 
-test('an out-of-office pauses until the day it gives, and pauses nothing without one', () => {
+test('an out-of-office notes the day it gives, and nothing without one', () => {
   const dated = read({ activity_id: 'a4', type: 'email', subject: 'Out of Office: Ticket commission', intent: 'ooo', until: '2026-11-10' });
   assert.deepEqual(types(dated), ['paused']);
   assert.equal(dated.entries[0].until, '2026-11-10');

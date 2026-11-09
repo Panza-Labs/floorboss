@@ -65,8 +65,8 @@ The first public version.
   booking ends the rest of that person's sequence, and a cancellation from them frees the meeting's time (one
   from anyone else is put to you). Times that get
   booked are dropped from later follow-ups.
-- Automatic replies never end a sequence: an out-of-office holds follow-ups until the day it gives (none when it
-  gives no date), and acknowledgements and delay notices are ignored. They're told by the reader and by their
+- Automatic replies never end a sequence: an out-of-office is noted, with the day it gives, and follow-ups keep
+  their days; acknowledgements and delay notices are ignored. They're told by the reader and by their
   subject (Outlook, Exchange, Lotus and other languages' formats), so one a CRM logged without its text counts too.
   A delivery failure from the mail system stops everything to that address.
 - Every run starts by reading what came in since the last one, before anything is drafted, sent or summed
@@ -89,8 +89,8 @@ The first public version.
 - One ledger per event, a tracker page, and CRM logging that fills blank fields only. Logging through
   your browser types only listed details, and asks you before each message text. With your yes in setup, someone
   the CRM doesn't have is added there so the message can be logged; the recommended answer asks once per batch, naming them.
-- Someone who sent an out-of-office shows as away until the day they're back, in the run's summary and on the
-  tracker, never as a follow-up due. `contacted.csv` tells meeting booked, declined, cancelled, replied,
+- Someone who sent an out-of-office is noted as away until the day they're back in the run's summary, and their
+  follow-ups keep their days. `contacted.csv` tells meeting booked, declined, cancelled, replied,
   bounced and away apart, counts meeting confirmations, and adds the meeting's time as a last column.
 
 ### Meeting day

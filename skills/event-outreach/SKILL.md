@@ -382,7 +382,7 @@ Write the user's report to a file in `~/.floorboss/work/` (floorboss's data fold
 - `what`: `sent`, `booked`, `moved`, `cancelled`, `replied`, `met`, `declined`, `stop`, `cut`, `added`,
   `bounced` (with `new_email` when they gave one), `away`, `note_passed`, `skipped` (a step of the route they won't send, like "skip LinkedIn for Ana": the next step then goes on its day; `touch` if it isn't the next one) or `unsent` (also `undo`).
 - `away`: an out-of-office reply, never `replied` (that ends the follow-ups). `until` is the day they're back
-  (`YYYY-MM-DD`): no follow-up goes before it, and after it they go on as planned.
+  (`YYYY-MM-DD`). Follow-ups keep their days; the date is only noted.
 - `cancelled`: add `"another_time": true` when they asked to find another time ("maybe Thursday if you have
   anything?"). Their meeting is freed and the next step asks the user to agree a new time with them (the user
   writes back; floorboss sends nothing new to someone who replied) and to say when, or "not booked yet".

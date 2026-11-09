@@ -119,4 +119,6 @@ test('a skipped step is passed over: the next message goes without it and the sk
   assert.ok(later.some((j) => j.touch === 3 && j.channel === 'paste'), 'step 3 is next');
   assert.ok(!later.some((j) => j.touch === 2), 'step 2 is not written');
   assert.match(later.find((j) => j.touch === 3).followup_note, /never quote it, mention it/);
+  const due = cli(H, 'event-outreach', ['summary', '--event', H.slug], '2026-10-20T08:00:00Z').follow_ups_due;
+  assert.deepEqual(due.map((d) => [d.id, d.next_touch]), [[id, 3]], 'the summary counts the route and passes over the skip');
 });

@@ -267,7 +267,7 @@ calendar.
    in the last 90 seconds where it's going, and in the last 10 minutes on every other channel they were written
    to (where floorboss can't read one, you're asked). LinkedIn steps wait for you to send unless you turn on
    LinkedIn sending; the next message waits until that one is recorded as sent, or you say to skip it ("skip LinkedIn for Ana"). A reply is read for what it says: stop, no,
-   out of office, a cancelled meeting (its time is free again; a cancellation from anyone else is put to you), a time (you're asked to book it), or "talk to my
+   out of office (not a reply: the follow-ups keep their days), a cancelled meeting (its time is free again; a cancellation from anyone else is put to you), a time (you're asked to book it), or "talk to my
    colleague" (you're asked to add them).
    An accepted calendar invite counts as booked.
    Nothing runs in the background: follow-ups go when you run floorboss on their day.

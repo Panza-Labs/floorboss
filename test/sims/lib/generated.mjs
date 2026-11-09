@@ -424,10 +424,10 @@ export function checkRun(P) {
     if (!created.size) problems.push('nobody was added to the CRM: the new-people path never ran');
     if (!sent.length) problems.push('nothing was sent: the check saw no first emails');
   }
-  // After a reply: nothing more to that address (an out-of-office: nothing before they're back).
+  // After a reply: nothing more to that address (an out-of-office isn't one: the follow-ups go on).
   for (const [addr, rk] of Object.entries(P.per.replyKinds || {})) {
     const after = sent.filter((m) => lower(m.to) === addr && Date.parse(m.at) > Date.parse(rk.at));
-    if (rk.kind === 'ooo') { if (after.some((m) => m.at.slice(0, 10) < '2027-10-19')) problems.push(`SENT to ${addr} while they were away (out of office until 2027-10-19)`); continue; }
+    if (rk.kind === 'ooo') continue;
     // After a booking, the confirmation is the one message that goes (in the same thread).
     const notOk = rk.kind === 'booked' ? after.filter((m) => !/^See you there|confirm/i.test(`${m.subject} ${m.body}`)) : after;
     if (notOk.length) problems.push(`SENT to ${addr} after they wrote back (${rk.kind})`);

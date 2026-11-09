@@ -912,12 +912,6 @@ function todo(opts) {
       if (!st.removed && !st.dropped && !st.stopped) skipped.push({ id, reason: sup });
       continue;
     }
-    // An out-of-office: no message before the day they're back (the event's day); a confirmation isn't made here.
-    const away = awayUntil(c.folded.people[id], c.today);
-    if (away) {
-      skipped.push({ id, reason: `away until ${away}` });
-      continue;
-    }
     const pick = c.triage.channels?.[id];
     const steps = routeOf(c, id);
     let channel =
@@ -2809,17 +2803,14 @@ function tracker(opts) {
       status = 'Drafted';
       tone = 'warn';
     } else status = 'Not drafted yet';
-    const back = awayUntil(c.folded.people[id], today);
     const next =
       st.stopped || st.replied || st.booked
         ? ''
-        : back
-          ? awayNote(back).replace(/^a/, 'A')
-          : due[id]
-            ? `Follow up ${due[id] <= today ? 'now' : due[id]}`
-            : openTask
-              ? 'Task open in the CRM'
-              : '';
+        : due[id]
+          ? `Follow up ${due[id] <= today ? 'now' : due[id]}`
+          : openTask
+            ? 'Task open in the CRM'
+            : '';
     return {
       name: ct.name,
       company: ct.company,
@@ -2855,9 +2846,8 @@ function openOutbox(opts) {
   return opts['dry-run'] || opts['no-open'] ? { written: paths.outbox, opened: false } : { opened: paths.outbox, with: cmd };
 }
 
-// Someone away (an out-of-office) has no follow-up before the day they're back: said so wherever follow-ups due
-// are listed, never listed as due.
-const awayNote = (until) => `away until ${until}: no follow-up before then`;
+// Someone away (an out-of-office): noted beside the follow-ups, which keep their days.
+const awayNote = (until) => `away until ${until}: follow-ups go on as planned`;
 
 function summary(opts) {
   need(opts, 'event');
@@ -2880,11 +2870,14 @@ function summary(opts) {
     const sentKey = st.sent[last];
     const mode = modeFor(daysUntilEvent(c.event, new Date(`${sentKey}T12:00:00Z`)));
     const d = nextDue(sentKey, c.event, mode);
-    const already = isOut(st.touches?.[last + 1]?.status);
-    const fits = d && !already && last + 1 <= touchesThatFit(sentKey, c.event, mode, c.settings.touches);
+    let upcoming = last + 1;
+    while (st.touches?.[upcoming]?.skipped) upcoming++;
+    const steps = routeOf(c, id);
+    const already = isOut(st.touches?.[upcoming]?.status);
+    const fits = d && !already && upcoming <= touchesThatFit(sentKey, c.event, mode, steps ? steps.length : c.settings.touches);
     if ((fits || already) && awayOf(id)) listAway(id);
-    else if (fits) due.push({ id, name: c.byId[id]?.name, next_touch: last + 1, due: d });
-    else if (already) waiting.push({ id, name: c.byId[id]?.name, touch: last + 1 });
+    if (fits) due.push({ id, name: c.byId[id]?.name, next_touch: upcoming, due: d });
+    else if (already) waiting.push({ id, name: c.byId[id]?.name, touch: upcoming });
   }
   // Anything approved or in the outbox and not yet sent is waiting to be sent, first messages included.
   const blockedNow = [];
@@ -2901,10 +2894,7 @@ function summary(opts) {
         continue;
       }
       if ((st.replied || st.booked) && Number(t) !== 0) continue; // after a yes, only the confirmation is left
-      if (Number(t) !== 0 && awayOf(id)) {
-        listAway(id);
-        continue;
-      }
+      if (Number(t) !== 0 && awayOf(id)) listAway(id);
       if (!waiting.some((w) => w.id === id && w.touch === Number(t)))
         waiting.push({ id, name: c.byId[id]?.name, touch: Number(t), coordinate_note: kind === 'coordinate' || undefined });
     }
@@ -2933,11 +2923,9 @@ function summary(opts) {
       : undefined,
     note: due.length
       ? `Run /floorboss:start again on or after ${due[0].due}.`
-      : away.length
-        ? `Run /floorboss:start again on or after ${away.map((a) => a.until).sort()[0]}, when the first person away is back.`
-        : sendingOn(c.settings)
-          ? 'floorboss sends the approved messages on the channels you turned on (step 6c); anything on another channel is in the outbox for you to send and tick.'
-          : 'Tick Sent in the outbox as you send; follow-ups are timed from those dates.'
+      : sendingOn(c.settings)
+        ? 'floorboss sends the approved messages on the channels you turned on (step 6c); anything on another channel is in the outbox for you to send and tick.'
+        : 'Tick Sent in the outbox as you send; follow-ups are timed from those dates.'
   };
 }
 

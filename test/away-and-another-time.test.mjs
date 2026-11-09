@@ -1,7 +1,6 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
-// What came in between sessions, recorded by hand: an out-of-office holds follow-ups until the day they're back
-// (it isn't a reply); a cancellation that asks for another time is put to the user to agree a new one (nothing
+// What came in between sessions, recorded by hand: an out-of-office isn't a reply and holds no follow-up; a cancellation that asks for another time is put to the user to agree a new one (nothing
 // new goes to someone who replied); and recording what came in never makes the "anything new?" question come back.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -52,7 +51,7 @@ test('an out-of-office is recorded as away until a day, not as a reply; the repl
   assert.ok(r.recorded.some((l) => /is away until/.test(l)), r.recorded.join(' | '));
   const st = stateOf(HOME);
   assert.equal(st.people[away].replied, false, 'an out-of-office is not a reply');
-  assert.match(contactable(st, away) || '', /away until/, 'no follow-up before they are back');
+  assert.equal(contactable(st, away), null, 'follow-ups go on while they are away');
   // The reply with a time raises its own question first; the replies question is still answered there.
   const next = run(HOME, 'flow', ['next', '--event', MOCK]);
   assert.equal(next.step, 'reply_action', `${next.step}: ${JSON.stringify(next).slice(0, 300)}`);
@@ -89,13 +88,12 @@ test('a cancellation that asks for another time puts it to the user; nothing new
   assert.equal(st.people[who].reply_actions.filter((a) => !a.done).length, 0, 'the question is settled');
 });
 
-test('an away person is left out of the follow-up batch until the day they are back, in the event\'s own day', () => {
-  // contactable() compares the day they're back with the day given (the event's), not UTC's.
+test('an away person stays in the follow-up batch, before and after the day they are back', () => {
   const st = fold([
     { at: '2026-11-01T09:00:00Z', type: 'person', who: 'floorboss', id: 'c001', name: 'Ann' },
     { at: '2026-11-02T09:00:00Z', type: 'paused', who: 'user', id: 'c001', until: '2026-11-09', said: 'out of office' }
   ]);
-  assert.match(contactable(st, 'c001', 'message', '2026-11-08') || '', /away until 2026-11-09/, 'the evening before, in the event\'s zone, still away');
+  assert.equal(contactable(st, 'c001', 'message', '2026-11-08'), null, 'still away: a follow-up may go');
   assert.equal(contactable(st, 'c001', 'message', '2026-11-09'), null, 'back on the day');
   assert.equal(contactable(st, 'c001', 'confirmation', '2026-11-08'), null, 'a confirmation still goes');
 });
