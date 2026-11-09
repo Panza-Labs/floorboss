@@ -748,7 +748,7 @@ NODES.push(
     done: (s) => !!s.cfg.crm_create_contacts,
     ask: () =>
       "When someone you message (often LinkedIn-only) isn't a contact in your CRM yet, should floorboss create them, so the message can be logged? It creates a new contact only (name, company, title, email, LinkedIn URL) and never edits or merges existing records.",
-    options: () => ['yes, create them (recommended)', 'ask me each time (one list per batch)', 'no, just list them for me'],
+    options: () => ['ask me each time (one list per batch) (recommended)', 'yes, create them', 'no, just list them for me'],
     saves: 'config: crm_create_contacts (yes | ask | no)'
   },
   {

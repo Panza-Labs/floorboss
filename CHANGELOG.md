@@ -83,7 +83,8 @@ The first public version.
   recorded yourself by mistake (never one floorboss sent or found in your mailbox). A reply you report
   shows in the meeting brief.
 - One ledger per event, a tracker page, and CRM logging that fills blank fields only. Logging through
-  your browser types only listed details, and asks you before each message text.
+  your browser types only listed details, and asks you before each message text. With your yes in setup, someone
+  the CRM doesn't have is added there so the message can be logged; the recommended answer asks once per batch, naming them.
 - Someone who sent an out-of-office shows as away until the day they're back, in the run's summary and on the
   tracker, never as a follow-up due. `contacted.csv` tells meeting booked, declined, cancelled, replied,
   bounced and away apart, counts meeting confirmations, and adds the meeting's time as a last column.

@@ -2383,7 +2383,7 @@ function openLogWindow(opts) {
   return {
     open_until: until,
     items: items.length,
-    rule: "In the CRM in the user's browser: find each contact (by email, else name and company), open their record, log the message as the CRM's LinkedIn-message activity (else a note) with its text exactly as listed and its sent date, save, and report what the page said. Never edit, merge or delete anything. Type only the listed values (the message, the person's name, company, email, profile link, title, date); Claude Code asks the user before each message's text is typed."
+    rule: "In the CRM in the user's browser: find each contact (by email, else name and company), open their record, log the message as the CRM's LinkedIn-message activity (else a note) with its text exactly as listed and its sent date, save, and report what the page said. For an item with create: true that the search doesn't find, create a new contact with only its listed details first. For each field in an item's fill that is empty on the record, add the listed value. Never change a field that has a value, and never edit, merge or delete anything else. Type only the listed values (the message, the person's name, company, email, profile link, title, date); Claude Code asks the user before each message's text is typed."
   };
 }
 
