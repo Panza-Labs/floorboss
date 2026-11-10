@@ -14,7 +14,7 @@ import { run, need } from '../../../lib/args.mjs';
 import { allowedPath, contextDir, expandHome } from '../../../lib/paths.mjs';
 import { parseSegments } from '../../event-context/scripts/context-check.mjs';
 import { readJson, writeJson, writeText, appendLine } from '../../../lib/jsonio.mjs';
-import { context, nextStep, ROOT, followupsModeOf, script } from './steps.mjs';
+import { context, nextStep, ROOT, followupsModeOf, script, askedChannels, appOutcomeTarget } from './steps.mjs';
 import { NODES, levelOptions } from '../../event-context/scripts/onboarding-tree.mjs';
 import { append } from '../../../lib/ledger.mjs';
 import { readUrl, listFileProblem } from '../../../lib/security.mjs';
@@ -267,6 +267,12 @@ const QUICK_ASSUMES =
   'Quick setup assumes you work alone (no coworkers\' contacts to hold back), with no CRM and no mailbox or contacts check (nobody is held as already known), and no writing samples (the tone comes from your sign-off and offer). It asks before any web research. Say "standard setup" any time to change it.';
 
 // Savers by question id. Each takes (value, c) and does what the question's answer means.
+// The user's word that nobody replied, once per channel the question named (askedChannels: the step's, never the answer's).
+function noReplySaid(c, s, ids, said) {
+  let out;
+  for (const channel of askedChannels(s)) out = ledger(c, { type: 'no_reply_said', who: 'user', ids, ...(channel ? { channel } : {}), said });
+  return out;
+}
 const SAVERS = {
   // The event this run is for: an existing one (its name or slug), or a new one (its own answers start empty;
   // the user's setup carries over).
@@ -620,8 +626,10 @@ const SAVERS = {
   },
   message_route: (v, c) => {
     const t = String(Array.isArray(v) ? v.join(',') : v).toLowerCase().replace(/\([^)]*\)/g, '').trim();
+    // Marked asked only once it saved: an answer it can't read is asked again.
+    const saved = config(c, { route: parseRoute(t) });
     answers(c, { message_route_asked: true });
-    return config(c, { route: parseRoute(t) });
+    return saved;
   },
   crm_create_contacts: (v, c) => {
     const t = String(v).toLowerCase();
@@ -1554,7 +1562,7 @@ const SAVERS = {
     const st = fold(readLedger(c.event.paths.ledger).entries);
     const u = Object.entries(st.people).flatMap(([id, p]) =>
       Object.entries(p.touches)
-        .filter(([, x]) => x.released && !x.sent && !x.release_cleared)
+        .filter(([, x]) => x.released && !x.sent && !x.release_cleared && x.released_via !== 'browser')
         .map(([t]) => ({ id, touch: Number(t) }))
     )[0];
     if (!u) throw new Error('No send is waiting to be settled.');
@@ -1632,17 +1640,13 @@ const SAVERS = {
     return cli('event-outreach', ['browser-send', '--event', c.slug, '--said', (said.length < 3 ? `${said} (yes)` : said).slice(0, 200)], c);
   },
   // Whether an unconfirmed app note went, from the user's look at the app's sent messages.
-  app_outcome: (v, c) => {
+  app_outcome: (v, c, s) => {
     const o = typeof v === 'object' && v ? v : { said: String(v) };
     const t = String(o.went ?? o.said ?? '').trim();
     const went = /^(yes|it went|went|sent|it'?s there)\b/i.test(t) ? 'yes' : /^(no|it did ?n.?t go|not sent|not there)\b/i.test(t) ? 'no' : null;
     if (!went) throw new Error('Ask again: did the note go? "it went" or "it did not go".');
-    const st = fold(readLedger(c.event.paths.ledger).entries);
-    const u = Object.entries(st.people).flatMap(([id, p]) =>
-      Object.entries(p.touches)
-        .filter(([, x]) => x.app_result?.result === 'failed' && !x.sent)
-        .map(([tt]) => ({ id, touch: Number(tt) }))
-    )[0];
+    // The person the question named, never another note also waiting.
+    const u = appOutcomeTarget(fold(readLedger(c.event.paths.ledger).entries), s);
     if (!u) throw new Error('No app note is waiting to be settled.');
     if (went === 'yes')
       cli(
@@ -1650,6 +1654,7 @@ const SAVERS = {
         ['app-result', '--event', c.slug, '--id', u.id, '--touch', String(u.touch), '--result', 'sent', '--said', String(o.said || t).slice(0, 200)],
         c
       );
+    else if (u.released) cli('event-outreach', ['send-outcome', '--event', c.slug, '--id', u.id, '--touch', String(u.touch), '--went', 'no', '--said', String(o.said || t).slice(0, 200)], c);
     return ledger(c, { type: 'answered', who: 'user', ask: 'app_outcome', value: went, said: String(o.said || t).slice(0, 200) });
   },
   approve_round: (v, c) => {
@@ -1715,7 +1720,7 @@ const SAVERS = {
       for (const id of o.stopped || []) ledger(c, { type: 'stop', who: 'user', id: String(id), said });
       for (const id of o.replied || []) ledger(c, { type: 'replied', who: 'user', id: String(id), source: 'user', said });
       const listed = (o.people || s?.ask?.people || []).map((p) => String(p.id || p)).filter((id) => !named.has(id));
-      return listed.length ? ledger(c, { type: 'no_reply_said', who: 'user', ids: listed, said: said || 'none of these replied' }) : { recorded: named.size };
+      return listed.length ? noReplySaid(c, s, listed, said || 'none of these replied') : { recorded: named.size };
     }
     if (!o?.id)
       throw new Error(
@@ -1724,7 +1729,7 @@ const SAVERS = {
     const said = String(o.said || o.answer).slice(0, 200);
     if (/stop/i.test(o.answer)) return ledger(c, { type: 'stop', who: 'user', id: o.id, said });
     if (/replied|booked|yes/i.test(o.answer)) return ledger(c, { type: 'replied', who: 'user', id: o.id, source: 'user', said });
-    return ledger(c, { type: 'no_reply_said', who: 'user', ids: [o.id], said });
+    return noReplySaid(c, s, [o.id], said);
   },
   list_short: (v, c) => ledger(c, { type: 'answered', who: 'user', ask: 'list_short', value: String(v).slice(0, 200) })
 };
@@ -1951,12 +1956,14 @@ function answer(opts) {
   // checks, so after that it changes only where a step offers it).
   const shortlistApproved = !!(c.event && readLedger(c.event.paths.ledger).entries.some((x) => x.type === 'answered' && x.ask === 'gate'));
   const anyTime = ANY_TIME.has(opts.ask) || (opts.ask === 'setup_level' && !shortlistApproved);
+  let asked = null;
   if (!anyTime && !(process.env.FLOORBOSS_TEST === '1' && process.env.FLOORBOSS_OUT_OF_TURN === '1')) {
     // The question asked in an ordinary run or an agenda run (its news heads-up), or one the step lists in its own
     // accepts ("skip review" on the critic step, a fallback when a connection can't be saved). Only those fixed
     // fields count, never text in the step: a reply, a name or a page could carry "--ask <id>".
     const offered = (st) => new Set([st.ask?.id, ...(Array.isArray(st.accepts) ? st.accepts : [])].filter(Boolean));
     const now = nextStep(c);
+    asked = now;
     const asking = now.ask?.id;
     const ok = offered(now).has(opts.ask) || (!!c.slug && offered(nextStep(context(c.slug, { ...opts, agenda: true }))).has(opts.ask));
     if (!ok)
@@ -1977,7 +1984,7 @@ function answer(opts) {
   savingAsk = opts.ask;
   let result;
   try {
-    result = saver(value, c);
+    result = saver(value, c, asked);
   } finally {
     savingAsk = '';
   }

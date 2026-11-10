@@ -1,6 +1,6 @@
 ---
 name: outreach-critic
-description: Independent critic for floorboss drafts. Reads outreach drafts with only the facts they're allowed to use and returns PASS or FAIL with reasons. Use from /floorboss:event-draft after drafts are saved; pass it only the JSON from the critic-batch command, never the drafting conversation.
+description: Separate critic for floorboss drafts. Reads outreach drafts with only the facts they're allowed to use and returns PASS or FAIL with reasons. Use from /floorboss:event-draft after drafts are saved; pass it only the JSON from the critic-batch command, never the drafting conversation.
 tools: Glob
 model: inherit
 ---

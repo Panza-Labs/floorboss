@@ -100,6 +100,20 @@ The first public version.
 ### Connections and safety
 - A subagent can hand its result back during a run on current Claude Code, which delivers results through a tool of its
   own that the guard refused as unknown: critics, researchers and writers did the work and couldn't report it.
+- From a fifth full audit (9 Nov, 14 confirmed findings, all low, each fixed here with a regression test; its one open
+  lead and three bugs it set aside are fixed too): a browser note is checked again when it is typed (one the window
+  wasn't opened for, sent already, let through already, or to someone who said stop is refused, a repeat stays refused
+  until you clear it and the next prompt says so), and an app window opens only the app, LinkedIn only for a LinkedIn
+  note with its warning accepted; a note approved for one channel needs approving again if the route moves it; a CRM
+  read no longer clears the app or LinkedIn inbox, and "no reply" answers for the one channel it was asked about; a
+  route step goes on its own channel, whatever else the contact has; a follow-up approved before a skipped step keeps
+  its approval, and goes back when the message actually before it is rewritten; a step sent back, dropped or let
+  through holds the steps after it; the app limit counts later-step app messages; a name beside "approve all" that
+  can't be read as one person, or a word of a listed company, stops the approval, and a name counts only as a whole
+  item of a list, so a stray word between names is refused and names with only spaces between them are asked for
+  with commas (two people with the same first name go by ID); during a run the browser's read rules apply only to a
+  browser floorboss knows by its exact name or one the first setup scan found by its tools. A route answer floorboss can't read is asked again, and "email only" keeps the
+  follow-ups.
 - From a fourth full audit (9 confirmed findings, all low; six fixed here, each with regression tests, and three planned
   for 0.1.1): the guard reads a backslash in a script's path as the shell does; what the first setup scan found a
   connector to be can't be changed by a later scan; a `browser_` tool on a server not known to be a browser is held as

@@ -40,7 +40,7 @@ export function planSync(people, { state, since, source, now, byId, zone = 'UTC'
       .filter(([t]) => !(st.ext || []).some((x) => x.endsWith(`#t${t}`)))
       .map(([t, d]) => ({ t: Number(t), d }))
       .sort((a, b) => a.t - b.t);
-    let touch = Object.keys(st.sent || {}).length;
+    let touch = Math.max(0, ...Object.keys(st.sent || {}).map(Number));
     let replied = !!st.replied;
     // The meeting booked with them, as this read goes (a cancellation frees it).
     let booked = st.booked ? { booked: st.booked, booked_blocks: st.booked_blocks || null, booked_at: st.booked_at || null } : null;
@@ -103,6 +103,8 @@ export function planSync(people, { state, since, source, now, byId, zone = 'UTC'
           continue;
         }
         touch += 1;
+        // Past a skipped step, as record does: the next unused touch never replaces another's record.
+        while (st.touches?.[touch]?.skipped) touch++;
         entries.push({ type: 'sent', id: p.id, touch, date: day(x.at), source, ext: `${ext}#t${touch}`, ...(x.subject ? { subject: subj(x.subject) } : {}) });
         sentDays.push(t);
         lines.push(`sent to ${who} on ${day(x.at)}, found in your ${source === 'crm' ? 'CRM' : 'mailbox'}${touch > 1 ? ` (counted as message ${touch})` : ''}`);

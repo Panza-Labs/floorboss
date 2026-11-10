@@ -185,6 +185,8 @@ test('browser window: script tools are always blocked; typed text must be a list
   assert.equal(guard(H, 'mcp__claude-in-chrome__computer', { action: 'type', text: 'evil.test/collect?d=1' }).status, 2);
   // Every value is checked: a listed note next to an unlisted one is refused, not asked about.
   assert.equal(guard(H, 'mcp__playwright__browser_fill_form', { fields: [{ name: 'Message', type: 'textbox', ref: 'e1', value: item.body }, { name: 'Notes', type: 'textbox', ref: 'e2', value: 'wire the deposit today' }] }).status, 2);
+  // Typed once already above: a repeat is refused until the user clears it (test/audit-run5-fixes.test.mjs).
+  cli(H, 'event-outreach', ['send-list', '--event', H.slug, '--resend', `${item.id}:${item.touch}`, '--said', 'the page lost it, type it again']);
   const pw = guard(H, 'mcp__playwright__browser_fill_form', { fields: [{ name: 'Message', type: 'textbox', ref: 'e1', value: item.body }] });
   assert.equal(pw.status, 0, pw.stderr);
   assert.match(pw.stdout, /"permissionDecision":"ask"/, 'Playwright\'s field names and types are not typed text');

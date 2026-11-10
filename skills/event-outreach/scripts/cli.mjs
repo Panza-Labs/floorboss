@@ -34,7 +34,8 @@ import { planSync } from './sync.mjs';
 import { drafterFor, buildBrief, instructionsPath } from './drafter.mjs';
 import { addNeverSay } from '../../flow/scripts/profile-write.mjs';
 import { agendaData, validatePoints, renderHtml, renderMarkdown, renderIcs, newsPath } from './agenda.mjs';
-import { personRoute, stepLabel, sentKind, touchBefore } from '../../../lib/route.mjs';
+import { personRoute, stepLabel, sentKind, touchBefore, plannedStep } from '../../../lib/route.mjs';
+import { companyWords } from '../../../lib/gate.mjs';
 import { approvalHash, recipientOf, verifySend, readersOf, withFallbacks, userWordCounts, taskMark } from '../../../lib/sendcheck.mjs';
 import { renderOutbox } from './outbox.mjs';
 import { analyzeBatch, checkInsights, SAMENESS_NOTE } from './sameness.mjs';
@@ -66,7 +67,7 @@ import { sessionRun } from '../../../lib/scope.mjs';
 
 // The fingerprint of a draft as it would go: channel, recipient, subject and body. The critic's verdict, the
 // approval and the content-addressed draft file all carry it, so an edit is a new draft.
-const toOf = (c, d) => (d.kind === 'coordinate' ? d.holder || 'colleague' : recipientOf(c.byId[d.id], d.channel, c.settings));
+const toOf = (c, d) => (d.kind === 'coordinate' ? d.holder || 'colleague' : recipientOf(c.byId[d.id], d.channel, c.settings, { routeStep: !!routeOf(c, d.id)?.[d.touch - 1] }));
 const hashOf = (c, d) => approvalHash(d, toOf(c, d));
 // The working copy Claude writes and edits (attempts, verdict, notes for the outbox); the record is the
 // fingerprinted text in drafts/<hash>.json and the ledger.
@@ -142,6 +143,7 @@ function ledgerTouch(c, id, touch) {
     // Saved before the ledger kept these: undefined, and the reader falls back to the working copy.
     booked_slot: has('booked_slot') ? drafted.booked_slot : undefined,
     previous_hash: has('previous_hash') ? drafted.previous_hash : undefined,
+    before_hashes: has('before_hashes') ? drafted.before_hashes : undefined,
     // What the draft says about itself, as it was when saved: the working copy is a file Claude can rewrite.
     // A draft saved before the ledger kept who wrote it counts as floorboss's (no leniency from a working copy's claim).
     own: drafted
@@ -422,6 +424,24 @@ const pickAt = (c, id, touch) => {
   return step === 'app' ? 'app' : step ? null : c.triage.channels?.[id];
 };
 const whereAt = (c, id, touch) => whereTo(c.byId[id], c.event, pickAt(c, id, touch));
+// Which inbox this sent touch can be answered in (lib/route.mjs sentKind), with this person's route step to go on.
+const kindAt = (c, id, t, x) => sentKind(x?.sent, { step: plannedStep(x, routeOf(c, id)?.[Number(t) - 1] || null), appName: c.event.app_name });
+// Approved to go somewhere else than where the route now sends it: back in todo, to be approved again for this place.
+const whereMoved = (c, id, t) => {
+  const appr = c.state[id]?.touches?.[t]?.approved;
+  return !!appr?.where && appr.where !== whereAt(c, id, t);
+};
+// Was this follow-up written for an earlier version of the message actually before it (a skipped step passed over)?
+// What that message was at the time is the ledger's save (before_hashes), never the working copy, which Claude may
+// write. Older drafts kept only the message numbered just before this one (previous_hash), and with a skip in between
+// that is the skipped step's text, not what this follow-up follows, so it says nothing.
+function staleFor(c, id, t, d) {
+  const b = touchBefore(c.state[id], t),
+    L = ledgerTouch(c, id, t),
+    now = c.state[id]?.touches?.[b]?.hash;
+  const then = L.before_hashes?.[b] ?? (b === t - 1 ? (L.previous_hash ?? d?.previous_hash) : null);
+  return !!(t > 1 && then && now && then !== now);
+}
 // The fields of a message that depend on where it goes.
 function messageFields(c, id, touch, channel, followup) {
   const ct = c.byId[id];
@@ -697,15 +717,7 @@ function syncList(opts) {
   const since = sinceOf(c);
   // --channel linkedin|app: only people written to there (an inbox read in the browser); --ids: just those.
   const only = opts.ids ? new Set(idList(opts.ids)) : null;
-  const onChannel = (id) =>
-    !opts.channel ||
-    Object.values(c.folded.people[id]?.touches || {}).some(
-      (t) =>
-        t.sent &&
-        (opts.channel === 'linkedin'
-          ? /linkedin/i.test(t.sent.channel || '')
-          : !!t.sent.channel && !/linkedin|e-?mail/i.test(t.sent.channel) && t.sent.via !== 'email.send')
-    );
+  const onChannel = (id) => !opts.channel || Object.entries(c.folded.people[id]?.touches || {}).some(([t, x]) => x.sent && kindAt(c, id, t, x) === opts.channel);
   const people = Object.keys(since)
     .filter((id) => {
       const s = c.state[id] || {};
@@ -880,8 +892,10 @@ function todo(opts) {
   // A limit that isn't a whole number (a hand-edited config) counts as 0: fail closed, nothing over the limit.
   const rawLimit = c.settings.app_request_limit;
   const limit = rawLimit == null ? null : Number.isInteger(Number(rawLimit)) && Number(rawLimit) >= 0 && typeof rawLimit !== 'boolean' ? Number(rawLimit) : 0;
-  // Used: app first messages sent, or approved and in the outbox waiting to be sent (a request the user is
-  // about to send counts, or the next run would hand out more than the app allows).
+  // Used: anyone written to in the app at any step of their route, or with an app message approved and in the
+  // outbox waiting to be sent (a request the user is about to send counts, or the next run would hand out more than
+  // the app allows).
+  const inAppNow = limit == null ? new Set() : writtenInApp(c);
   const firstGoesInApp = (cid, s) =>
     (s.channel ? !/linkedin|e-?mail/i.test(s.channel) : routeOf(c, cid) ? routeOf(c, cid)[0] === 'app' : c.triage.channels?.[cid] === 'app' || !c.byId[cid]?.email) && isApp(cid);
   let appLeft =
@@ -894,8 +908,9 @@ function todo(opts) {
             !s.removed &&
             !s.dropped &&
             !(c.short.coordinate || []).includes(cid) &&
-            (s.sent?.[1] || isOut(s.touches?.[1]?.status)) &&
-            firstGoesInApp(cid, s)
+            (((s.sent?.[1] || isOut(s.touches?.[1]?.status)) && firstGoesInApp(cid, s)) ||
+              inAppNow.has(cid) ||
+              Object.entries(s.touches || {}).some(([t, x]) => isOut(x.status) && routeOf(c, cid)?.[Number(t) - 1] === 'app'))
         ).length;
   for (const id of c.short.approved) {
     const ct = c.byId[id];
@@ -937,7 +952,7 @@ function todo(opts) {
       followup = false;
     const t1 = st.touches[1]?.status;
     if (!lastSent) {
-      if (t1 !== 'outboxed' || redraft.has(id)) touch = 1;
+      if (t1 !== 'outboxed' || redraft.has(id) || whereMoved(c, id, 1)) touch = 1;
     } else {
       const sentKey = st.sent[lastSent];
       const sentMode = modeFor(daysUntilEvent(c.event, new Date(`${sentKey}T12:00:00Z`)));
@@ -945,7 +960,7 @@ function todo(opts) {
       const due = nextDue(sentKey, c.event, sentMode);
       let next = lastSent + 1;
       while (st.touches?.[next]?.skipped) next++;
-      if (next <= fit && due && due <= today && st.touches[next]?.status !== 'outboxed') {
+      if (next <= fit && due && due <= today && (st.touches[next]?.status !== 'outboxed' || whereMoved(c, id, next) || staleFor(c, id, next, savedDraft(c, id, next) || readJson(draftFile(c.paths, id, next), null)))) {
         touch = next;
         followup = true;
       }
@@ -1065,9 +1080,8 @@ function todo(opts) {
         if (c.state[j.id]?.touches?.[t]?.status === 'dropped') break;
         // Approved and still written for the message before it as it is now: nothing to do. Approved for an
         // older version of that message: back in todo, to be written again and approved again.
-        const prevNow = c.state[j.id]?.touches?.[t - 1]?.hash || null;
-        const writtenFor = (savedDraft(c, j.id, t) || readJson(draftFile(c.paths, j.id, t), null))?.previous_hash || null;
-        if (c.state[j.id]?.sent?.[t] || (c.state[j.id]?.touches?.[t]?.status === 'outboxed' && !(writtenFor && prevNow && writtenFor !== prevNow))) continue;
+        const outdated = staleFor(c, j.id, t, savedDraft(c, j.id, t) || readJson(draftFile(c.paths, j.id, t), null));
+        if (c.state[j.id]?.sent?.[t] || (c.state[j.id]?.touches?.[t]?.status === 'outboxed' && !outdated && !whereMoved(c, j.id, t))) continue;
         // A follow-up is written once the message before it has passed the critic: drafting all of them at
         // once piles up drafts nobody needs yet, and every rewrite of a first email would leave its follow-ups stale.
         const beforeT = touchBefore(c.state[j.id], t);
@@ -1089,6 +1103,7 @@ function todo(opts) {
           planned: true,
           planned_due: due,
           previous_hash_now: prevT?.hash || null,
+          previous_touch_now: beforeT,
           ...(!prevReady && !c.state[j.id]?.touches?.[t]?.hash ? { waits_for_previous: true } : {}),
           followup_note: `Follow-up ${t - 1}, planned for ${due}: goes out only if they haven't replied, booked or said stop by then. ${channelChangeNote(c, j.id, t) || `Write it as the next message in the same thread as message ${t - 1} of this sequence.`}`,
           previous_message: null,
@@ -1406,7 +1421,7 @@ function saveDraft(opts, given = null) {
     // it starts the count again, or a follow-up stuck at three saves could never follow its new first message.
     attempts:
       c.state[job.id]?.touches?.[touch]?.status === 'revising' ||
-      (touch > 1 && prev?.previous_hash && prev.previous_hash !== (c.state[job.id]?.touches?.[touch - 1]?.hash || null))
+      staleFor(c, job.id, touch, prev)
         ? 1
         : (prev?.attempts || 0) + 1,
     verdict: null,
@@ -1418,6 +1433,8 @@ function saveDraft(opts, given = null) {
     // Keep what the outbox needs, so older cards still render fully after later runs.
     // The message before this one, as it was when this one was written: a rewrite of it makes this one stale.
     previous_hash: touch > 1 ? c.state[job.id]?.touches?.[touch - 1]?.hash || null : null,
+    // Every earlier message as it is now, so a skip can't hide which message this one was written for (staleFor).
+    before_hashes: touch > 1 ? Object.fromEntries(Array.from({ length: touch - 1 }, (_, i) => [i + 1, c.state[job.id]?.touches?.[i + 1]?.hash || null])) : null,
     slot_ids: job.slot_ids || [],
     booked_slot: job.booked_slot || null,
     earliest: job.earliest || null,
@@ -1506,6 +1523,7 @@ function saveDraft(opts, given = null) {
     attempt: draft.attempts,
     booked_slot: draft.booked_slot || null,
     previous_hash: draft.previous_hash || null,
+    before_hashes: draft.before_hashes || null,
     ...(userEdited ? { user_edited: true, ...(typeof opts.said === 'string' ? { said: opts.said.slice(0, 200) } : {}) } : {})
   });
   // A text the critic already read (a rewrite that came back word for word as an earlier version): the ledger
@@ -1548,7 +1566,7 @@ function criticInput(opts, given = null) {
     fitReason: job.reason,
     userNote: c.triage.user_notes?.[job.id] ?? job.user_note,
     accountNote: job.account_note,
-    previousMessage: job.followup ? job.previous_message || earlierDraft(c, job.id, touch - 1)?.body || null : null,
+    previousMessage: job.followup ? job.previous_message || earlierDraft(c, job.id, touchBefore(c.state[job.id], touch))?.body || null : null,
     mailboxNote: job.mailbox_note || null,
     timesChanged: job.followup ? job.times_changed : null,
     contact: c.byId[job.id],
@@ -1725,6 +1743,9 @@ function allOutboxCards(c) {
     // The next message to go for each person: the first approved touch not yet sent. (With a sequence
     // approved up front, the later follow-ups wait their turn instead of standing in for the first.)
     if (c.state[j.id]?.sent?.[j.touch]) continue;
+    // A follow-up is next only once the message before it (a skipped step passed over) went: a step sent back or
+    // dropped holds the ones after it, here as at the send.
+    if (j.touch > 1 && !c.state[j.id]?.sent?.[touchBefore(c.state[j.id], j.touch)]) continue;
     if (!latest.has(j.id) || latest.get(j.id).touch > j.touch) latest.set(j.id, j);
   }
   const sentOrDone = (id) => {
@@ -1761,14 +1782,19 @@ function gate(opts) {
   // A line that can't be read is refused on its own and the rest applied (said back in "refused"), except beside
   // "approve all", or when the refused line names someone another line approves: it may have been meant to hold
   // them back, so nothing is approved.
-  const everyone = t.jobs.map((j) => ({ id: j.id, name: c.byId[j.id]?.name || '' }));
+  const everyone = t.jobs.map((j) => ({ id: j.id, name: c.byId[j.id]?.name || '', company: c.byId[j.id]?.company || '' }));
   const byName = gatePeople(everyone);
-  const g = parseGate(namesToIds(opts.answers, byName), { kind: 'draft', knownIds: ids, partial: true, unnamed: unnamedWords(everyone, byName) });
+  // Every listed name and company counts as unnamed: a remark beside "approve all" holding any word of one ("all but
+  // Lind", "all but the Acme person") may be holding that person back.
+  const g = parseGate(namesToIds(opts.answers, byName), { kind: 'draft', knownIds: ids, partial: true, unnamed: [...unnamedWords(everyone, []), ...companyWords(everyone)] });
   const approvedNamed = new Set(g.actions.filter((a) => a.verb === 'approve').flatMap((a) => a.ids.map((x) => x.replace(/:\d+$/, ''))));
   const refusedNames = g.refused.flatMap((r) => r.line.toLowerCase().match(/\bc\d{3,}\b/g) || []);
+  // A refused line may name them in words too: a name only resolves as a whole list item ("Bo Li not yet" stays words).
+  const approvedWords = unnamedWords(everyone.filter((p) => approvedNamed.has(p.id)), []);
+  const namesApproved = approvedWords.length && new RegExp(`(?<![\\p{L}\\d])(?:${approvedWords.join('|')})(?![\\p{L}\\d])`, 'iu');
   if (
     g.refused.length &&
-    (g.defaults || g.actions.some((a) => a.verb === 'approve-all') || !g.actions.length || refusedNames.some((x) => approvedNamed.has(x)))
+    (g.defaults || g.actions.some((a) => a.verb === 'approve-all') || !g.actions.length || refusedNames.some((x) => approvedNamed.has(x)) || (namesApproved && g.refused.some((r) => namesApproved.test(r.line))))
   )
     throw new Error(
       `${g.refused.map((r) => `"${r.line}": ${r.why}`).join(' ')}${g.actions.length || g.defaults ? ' Nothing was approved: with "approve all", a line that can\'t be read might have meant to hold someone back. Ask the user about it.' : ''}`
@@ -1837,8 +1863,7 @@ function gate(opts) {
       return {
         reason: ledgerTouch(c, j.id, j.touch).read ? 'its text changed after the critic read it: send it to the critic again' : "the critic hasn't read it"
       };
-    if (j.kind === 'message' && j.touch > 1 && d.previous_hash && j.previous_hash_now && d.previous_hash !== j.previous_hash_now)
-      return { reason: 'the message before it was rewritten: it needs a new draft' };
+    if (j.kind === 'message' && staleFor(c, j.id, j.touch, d)) return { reason: 'the message before it was rewritten: it needs a new draft' };
     if (j.kind === 'message' && d.verdict.verdict === 'FAIL' && !named.has(j.id))
       return {
         reason: `failed the critic (${d.verdict.reasons.join('; ')}); edit it, drop it, approve ${j.id} by name to send it anyway, or ask for a fresh attempt`
@@ -1856,9 +1881,7 @@ function gate(opts) {
       if (seq.length < 2) continue;
       // An approved follow-up counts only while it's written for the message before it as that is now.
       const current = (j) => {
-        const d = savedDraft(c, j.id, j.touch) || readJson(j.draft_file, null);
-        const before = c.state[id]?.touches?.[j.touch - 1]?.hash;
-        return !(j.touch > 1 && d?.previous_hash && before && d.previous_hash !== before);
+        return !staleFor(c, j.id, j.touch, savedDraft(c, j.id, j.touch) || readJson(j.draft_file, null));
       };
       const bad = seq
         .map((j) => ({
@@ -1904,7 +1927,8 @@ function gate(opts) {
       touch: j.touch,
       hash: approvalHash(d, to),
       to,
-      via: j.kind === 'coordinate' ? 'note' : sendRoute(c, j.id, d.channel)?.via || 'you',
+      via: j.kind === 'coordinate' ? 'note' : sendRoute(c, j.id, d.channel, j.touch)?.via || 'you',
+      ...(d.channel === 'paste' ? { where: whereAt(c, j.id, j.touch) } : {}),
       said: String(opts.answers).slice(0, 200),
       ...(failed ? { critic_override: true } : {})
     });
@@ -2072,7 +2096,7 @@ function taskList(opts) {
     crmOf: (id) => (crmIdOf(c, id) ? { ...(c.triage.pre?.[id]?.crm || {}), crm_id: crmIdOf(c, id) } : c.triage.pre?.[id]?.crm),
     today,
     now: c.now.toISOString(),
-    selfSends: (card) => sendingOn(c.settings) && !!sendRoute(c, card.id, card.channel)
+    selfSends: (card) => sendingOn(c.settings) && !!sendRoute(c, card.id, card.channel, card.touch)
   });
   const file = join(c.paths.dir, 'task-list.json');
   writeJson(file, items);
@@ -2289,9 +2313,11 @@ function logList(opts) {
       let create = false;
       if (tr?.not_found) {
         const mode = c.settings.crm_create_contacts || 'no';
-        const ok = c.entries.some((e) => e.type === 'crm_create_ok' && (e.ids || []).includes(id));
-        const declined = c.entries.some((e) => e.type === 'crm_create_declined' && (e.ids || []).includes(id));
-        if (mode === 'yes' || (mode === 'ask' && ok)) create = true;
+        // The latest answer about this person decides: a no outranks the general yes and any older yes.
+        const said = c.entries.filter((e) => ['crm_create_ok', 'crm_create_declined'].includes(e.type) && (e.ids || []).includes(id)).pop();
+        const declined = said?.type === 'crm_create_declined';
+        const ok = said?.type === 'crm_create_ok';
+        if (!declined && (mode === 'yes' || (mode === 'ask' && ok))) create = true;
         else if (mode === 'ask' && !declined) {
           needOk.push({ id, name: c.byId[id]?.name, company: c.byId[id]?.company });
           continue;
@@ -2955,7 +2981,7 @@ function batchCheck(opts) {
 function checkTouch(c, touch, inRun) {
   const insights = insightsOf(c);
   const drafts = touchBatch(c, touch, insights).map((d) => {
-    const previous = touch > 1 ? resolveInsight(earlierDraft(c, d.id, touch - 1), insights) : null;
+    const previous = touch > 1 ? resolveInsight(earlierDraft(c, d.id, touchBefore(c.state[d.id], touch)), insights) : null;
     return {
       id: d.id,
       subject: d.subject || '',
@@ -3318,11 +3344,13 @@ function sendRoute(c, id, channel, touch = 0) {
   if (channel === 'email')
     return ch.includes('email') && c.config?.connectors?.['email.send'] ? { via: 'email.send', to: recipientOf(ct, 'email', c.settings) } : null;
   const where = whereAt(c, id, touch);
+  // A route step decides the channel: a phone number and chat sending don't turn an app or LinkedIn step into a chat.
+  const routeStep = !!routeOf(c, id)?.[touch - 1];
   if (where === 'LinkedIn')
-    return ch.includes('linkedin') && c.settings.sending?.linkedin_ack && !(ch.includes('chat') && ct.phone)
-      ? { via: 'browser', to: recipientOf(ct, 'paste', c.settings), where }
+    return ch.includes('linkedin') && c.settings.sending?.linkedin_ack && (routeStep || !(ch.includes('chat') && ct.phone))
+      ? { via: 'browser', to: recipientOf(ct, 'paste', c.settings, { routeStep }), where }
       : null;
-  if (ch.includes('chat') && ct.phone && c.config?.connectors?.['chat.send'] && (c.triage.channels?.[id] === 'chat' || channel !== 'email')) {
+  if (!routeStep && ch.includes('chat') && ct.phone && c.config?.connectors?.['chat.send'] && (c.triage.channels?.[id] === 'chat' || channel !== 'email')) {
     const to = recipientOf(ct, 'paste', c.settings);
     // A chat number needs its country code; a local number ("0160 …") can't be guessed into one.
     return /^\+\d{8,15}$/.test(to)
@@ -3330,17 +3358,19 @@ function sendRoute(c, id, channel, touch = 0) {
       : { via: 'chat.send', to: null, why: `${ct.phone} has no country code: add it (e.g. +49…) to their record` };
   }
   // In the event's app people are found by name: the profile link when there is one, else name and company.
-  return ch.includes('app') && !(ch.includes('chat') && ct.phone) ? { via: 'browser', to: recipientOf(ct, 'paste', c.settings), where } : null;
+  return ch.includes('app') && (routeStep || !(ch.includes('chat') && ct.phone)) ? { via: 'browser', to: recipientOf(ct, 'paste', c.settings, { routeStep }), where } : null;
 }
 
-// The app's request limit counts everyone first written to there, whichever message of their route that is.
-function appLimitReached(c, id) {
+// The app's request limit counts everyone first written to there, whichever message of their route that is: the
+// people with an app message recorded as sent, plus (at send-list) those added to this list.
+function writtenInApp(c) {
+  return new Set(Object.entries(c.folded.people).filter(([id, p]) => Object.entries(p?.touches || {}).some(([t, x]) => kindAt(c, id, t, x) === 'app')).map(([id]) => id));
+}
+function appLimitReached(c, id, used) {
   const raw = c.settings.app_request_limit;
   if (raw == null) return false;
   const limit = Number.isInteger(Number(raw)) && Number(raw) >= 0 && typeof raw !== 'boolean' ? Number(raw) : 0;
-  const inApp = (p) => Object.values(p?.touches || {}).some((x) => sentKind(x.sent) === 'app');
-  if (inApp(c.folded.people[id])) return false;
-  return Object.values(c.folded.people).filter(inApp).length >= limit;
+  return !used.has(id) && used.size >= limit;
 }
 
 // Replies are checked before a follow-up goes: the last mailbox or CRM sync, thread check or CRM task read
@@ -3360,6 +3390,12 @@ function sendList(opts) {
   const items = [],
     waiting = [],
     noReplyIds = [];
+  const appUsed = writtenInApp(c);
+  // A note in the send window the user opened keeps the reply check that let it in, for the window's life: the check
+  // was asked once for the batch, and the window is short. Nothing outside the window is affected.
+  const win = readJson(join(home(), 'browser-send.json'), null);
+  const opened = win && !win.closed && win.event === c.event.slug && c.entries.filter((e) => e.type === 'browser_send_opened' && e.until === win.until && e.said).pop();
+  const windowIds = opened && c.now.getTime() - Date.parse(opened.at) <= 20 * 60000 && Date.parse(win.until) > c.now.getTime() ? new Set(win.ids || []) : null;
   const only = opts.ids ? new Set(idList(opts.ids)) : null;
   // --resend id:touch --said "<the user's words>": the user checked that a message let through earlier never
   // went, and says to send it again.
@@ -3397,7 +3433,7 @@ function sendList(opts) {
       waiting.push({ id, touch: t, why: 'the booking this confirms changed or was cancelled: redraft it' });
       continue;
     }
-    if (!appr.hash || appr.hash !== approvalHash(d, recipientOf(c.byId[id], d.channel, c.settings))) {
+    if (!appr.hash || appr.hash !== approvalHash(d, toOf(c, { ...d, id, touch: t }))) {
       waiting.push({
         id,
         touch: t,
@@ -3420,9 +3456,7 @@ function sendList(opts) {
       const open = planned
         .filter((x) => st.touches?.[x.touch]?.status !== 'dropped')
         .filter((x) => {
-          const dd = savedDraft(c, x.id, x.touch) || readJson(x.draft_file, null);
-          const before = st.touches?.[x.touch - 1]?.hash;
-          return !st.touches?.[x.touch]?.approved || (dd?.previous_hash && before && dd.previous_hash !== before);
+          return !st.touches?.[x.touch]?.approved || staleFor(c, x.id, x.touch, savedDraft(c, x.id, x.touch) || readJson(x.draft_file, null));
         });
       if (open.length) {
         waiting.push({ id, touch: t, why: `not sent: follow-up ${open.map((x) => x.touch - 1).join(', ')} of its sequence isn't approved yet` });
@@ -3434,7 +3468,7 @@ function sendList(opts) {
       const prev = st.sent?.[beforeT];
       if (!prev) continue;
       // Written for a first message that has changed since (and was approved again): written again first.
-      if (d.previous_hash && st.touches?.[t - 1]?.hash && d.previous_hash !== st.touches[t - 1].hash) {
+      if (staleFor(c, id, t, d)) {
         waiting.push({ id, touch: t, why: 'the message before it changed after it was written: it needs a new draft' });
         continue;
       }
@@ -3481,7 +3515,7 @@ function sendList(opts) {
       }
     }
     const route = sendRoute(c, id, d.channel, t);
-    if (route?.via === 'browser' && route.where !== 'LinkedIn' && t > 1 && appLimitReached(c, id)) {
+    if (route?.via === 'browser' && route.where !== 'LinkedIn' && t !== 0 && appLimitReached(c, id, appUsed)) {
       waiting.push({ id, touch: t, via: route.via, where: route.where, why: `the app's request limit (${c.settings.app_request_limit}) is used up: it stays here until someone else is cut` });
       continue;
     }
@@ -3489,11 +3523,13 @@ function sendList(opts) {
       waiting.push({ id, touch: t, why: route?.why || 'no way for floorboss to send it on this channel: it stays in the outbox for you' });
       continue;
     }
+    // Said about the inbox this message goes to: it answers for that one only (lib/sendcheck.mjs lastReplyCheck).
+    const channel = route.via === 'email.send' ? 'email' : route.via === 'browser' ? (route.where === 'LinkedIn' ? 'linkedin' : 'app') : null;
     if (
       noReplyIds.includes(id) &&
-      !c.entries.some((e) => ['no_reply_said', 'user_says_no_reply'].includes(e.type) && e.ids?.includes(id) && c.now.getTime() - Date.parse(e.at) < 60000)
+      !c.entries.some((e) => ['no_reply_said', 'user_says_no_reply'].includes(e.type) && e.ids?.includes(id) && (e.channel || null) === channel && c.now.getTime() - Date.parse(e.at) < 60000)
     ) {
-      const e = led(c, { type: 'user_says_no_reply', ids: [id], said: String(opts['no-reply-check']).slice(0, 200) });
+      const e = led(c, { type: 'user_says_no_reply', ids: [id], ...(channel ? { channel } : {}), said: String(opts['no-reply-check']).slice(0, 200) });
       c.entries.push(e);
     }
     // The thread to reply in: the message before it (a confirmation: the last one that went).
@@ -3511,11 +3547,13 @@ function sendList(opts) {
       reply_to_message_id: prevMsg?.message_id || null,
       listed_at: c.now.toISOString()
     };
-    const v = verifySend(item, { evDir: c.paths.dir, settings: c.settings, state: c.state, entries: c.entries, folded: c.folded, nowMs: c.now.getTime() });
+    const inWindow = item.via === 'browser' && !!windowIds?.has(`${id}:${t}`);
+    const v = verifySend(item, { evDir: c.paths.dir, settings: c.settings, state: c.state, entries: c.entries, folded: c.folded, nowMs: c.now.getTime(), replyCheck: !inWindow });
     if (!v.ok) {
       waiting.push({ id, touch: t, via: item.via, where: item.where || null, why: v.why, check: v.check });
       continue;
     }
+    if (item.via === 'browser' && item.where !== 'LinkedIn' && t !== 0) appUsed.add(id);
     items.push(item);
   }
 
@@ -3554,7 +3592,7 @@ function sentReceipts(opts) {
     // The list file is rewritten by every send-list call (--ids lists one person), so a receipt is matched
     // against the guard's release in the log first, and the list only as a fallback for browser items.
     const rel = [...c.entries].reverse().find((e) => e.type === 'send_released' && e.id === x?.id && e.touch === Number(x?.touch));
-    const item = listed.find((i) => i.id === x?.id && i.touch === Number(x?.touch)) || (rel ? { id: rel.id, touch: rel.touch, via: rel.via } : null);
+    const item = listed.find((i) => i.id === x?.id && i.touch === Number(x?.touch)) || (rel ? { id: rel.id, touch: rel.touch, via: rel.via, where: rel.where } : null);
     if (!item) {
       refused.push({ id: x?.id, touch: x?.touch, why: "the guard never let this send through, and it isn't on the send list" });
       continue;
@@ -3690,6 +3728,12 @@ function appResult(opts) {
     }
   }
   led(c, { type: 'app_result', who: 'floorboss', id, touch, result, page_says: page });
+  // A note typed and let through that the page says didn't go is settled, or it could never be sent again: only a
+  // browser release for a note in a window the user opened (an email's release waits for the mailbox or the user).
+  const typed = c.folded.people[id].touches[touch];
+  const windowed = c.entries.some((e) => e.type === 'browser_send_opened' && (e.items || []).includes(`${id}:${touch}`));
+  if (result !== 'sent' && result !== 'failed' && typed.released && typed.released_via === 'browser' && windowed && !typed.sent && !typed.release_cleared)
+    led(c, { type: 'release_cleared', who: 'floorboss', id, touch, said: page || `the app said ${result}` });
   if (result === 'sent')
     led(c, {
       type: 'sent',
@@ -3866,7 +3910,7 @@ function briefs(opts) {
     if (want && !want.has(j.id) && !want.has(`${j.id}:${j.touch}`)) continue;
     const f = join(c.paths.dir, 'briefs', `${j.id}-t${j.touch}.md`);
     // A follow-up planned with its first message: the message before it, once that's written.
-    const prev = j.planned && !j.previous_message ? earlierDraft(c, j.id, j.touch - 1) : null;
+    const prev = j.planned && !j.previous_message ? earlierDraft(c, j.id, touchBefore(c.state[j.id], j.touch)) : null;
     writeText(f, buildBrief(prev?.body ? { ...j, previous_message: prev.body } : j, { event: c.event, settings: c.settings, files }));
     out.push({ id: j.id, touch: j.touch, drafter: j.drafter.invoke, type: j.drafter.type, brief_file: f });
   }

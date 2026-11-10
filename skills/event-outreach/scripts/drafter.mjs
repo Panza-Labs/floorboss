@@ -7,7 +7,7 @@
 //              it who, why, where and when (the brief), and still checks and critiques every result.
 //   blend:     the user's tooling is partial, so it drafts what it covers, with floorboss's context added
 //              for what it lacks; floorboss drafts the rest (a channel or message kind it doesn't cover).
-// Whoever drafts, floorboss's checks and its independent critic read every message before the gate.
+// Whoever drafts, floorboss's checks and its separate critic read every message before the gate.
 import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, sep } from 'node:path';

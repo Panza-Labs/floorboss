@@ -217,6 +217,11 @@ export function planRecord(items, ctx) {
           errors.push(`${where}: message ${t} to ${who} already went`);
           return;
         }
+        // Let through and never settled, it may have reached them: a skip would lift the hold on the next message.
+        if (ctx.state[id]?.touches?.[t]?.released) {
+          errors.push(`${where}: message ${t} to ${who} was let through and may have gone: check it, then record it as sent or clear it, before skipping`);
+          return;
+        }
         entries.push({ type: 'step_skipped', ...base, touch: t });
         lines.push(`message ${t} to ${who} skipped; the next step goes on its day`);
         break;

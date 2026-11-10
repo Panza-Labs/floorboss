@@ -245,8 +245,18 @@ export function toolKinds(tools) {
     k.push('crm');
   if (has(/^(event|events|calendar|calendars|freebusy|availability|schedule)$/)) k.push('calendar');
   if (tools.some((t) => /whatsapp|telegram|signal|sms|imessage/i.test(t))) k.push('chat');
-  // Playwright's tools carry a browser_ prefix: one that navigates, so a stray browser_find alone never counts.
-  if (tools.some((t) => /^(navigate|read_page|get_page_text|computer|screenshot|browser_navigate)$/.test(t))) k.push('browser');
+  // A browser navigates and reads the page: one page tool alone, a search tool ("find"), or a name never counts. Tool
+  // names lose the prefix a browser server gives them (browser_, puppeteer_, browserbase_stagehand_ and the like).
+  const bare = (t) =>
+    String(t)
+      .toLowerCase()
+      .replace(/_mcp$/, '')
+      .replace(/^(?:browserbase_stagehand|browserbase|stagehand|browser|playwright|puppeteer|chrome|page)_/, '');
+  if (
+    tools.some((t) => /^(navigate|navigate_page|navigate_to|goto|go_to|open_url)$/.test(bare(t))) &&
+    tools.some((t) => /^(read_page|get_page_text|get_page_content|page_text|snapshot|take_snapshot|screenshot|take_screenshot)$/.test(bare(t)))
+  )
+    k.push('browser');
   return k;
 }
 
@@ -272,7 +282,8 @@ export function summarize(items, session = null) {
     const tools = typeof m === 'object' && Array.isArray(m.tools) ? m.tools.slice(0, 300).map(String) : [];
     // A CRM by name (Pipedrive, HubSpot) that reads the mail it logged is still a CRM, never the user's mailbox:
     // it has nothing to send from.
-    const named = kindsOf(name.replace(/[-_]/g, ' '));
+    // A browser is known by its tools only: a name ("file-browser", "chrome-history") could be anyone's.
+    const named = kindsOf(name.replace(/[-_]/g, ' ')).filter((k) => k !== 'browser');
     const crmOnly = named.includes('crm') && !/mail|inbox|outlook|gmail/i.test(name);
     const kinds = [...new Set([...named, ...toolKinds(tools).filter((k) => !(k === 'email' && crmOnly))])];
     const prev = all.find((x) => x.type === 'mcp' && x.name === name);

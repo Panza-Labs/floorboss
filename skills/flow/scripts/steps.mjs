@@ -1384,7 +1384,7 @@ export function nextStep(c) {
     if (!d) return null;
     // The same times in another order are the same times.
     if ([...(x.slot_ids || [])].sort().join() !== [...(j.slot_ids || [])].sort().join()) return 'times moved';
-    if (j.touch > 1 && d.previous_hash && j.previous_hash_now && d.previous_hash !== j.previous_hash_now) return 'the message before it was rewritten';
+    if (rewrittenSince(x, d, j)) return 'the message before it was rewritten';
     if (x.checks?.length) return x.checks.join('; ');
     return null;
   };
@@ -1579,7 +1579,7 @@ export function nextStep(c) {
     });
     return step(
       'critic',
-      `${plural(needCritic.length, 'draft')} for the independent critic: ${agents.length} ${agents.length === 1 ? 'critic' : 'critics'} at once (in parallel, one message). Paste each critic its whole batch file, exactly as written; never summarise it.`,
+      `${plural(needCritic.length, 'draft')} for the separate critic: ${agents.length} ${agents.length === 1 ? 'critic' : 'critics'} at once (in parallel, one message). Paste each critic its whole batch file, exactly as written; never summarise it.`,
       { ...stuckNote, agents, if_user_says: SKIP_REVIEW_HINT, accepts: ['skip_review'] }
     );
   }
@@ -1825,7 +1825,7 @@ export function nextStep(c) {
     // A send that may or may not have gone (its call failed or never answered) is settled before anything else.
     const unclear = Object.entries(e.state.people).flatMap(([id, p]) =>
       Object.entries(p.touches)
-        .filter(([, x]) => x.released && !x.sent && !x.release_cleared)
+        .filter(([, x]) => x.released && !x.sent && !x.release_cleared && x.released_via !== 'browser')
         .map(([t, x]) => ({ id, touch: Number(t), x, name: p.name, email: p.email_override || p.email }))
     );
     if (unclear.length) {
@@ -1929,7 +1929,7 @@ export function nextStep(c) {
     }
     if (follow.length) {
       const it = follow[0];
-      const elsewhere = otherChannelStep(c, e, cfg, it);
+      const elsewhere = otherChannelStep(c, e, cfg, it, follow);
       if (elsewhere) return elsewhere;
       // The guard's own rule: a mailbox or thread check, or (with nothing that can read replies) the user's word.
       // A reader that failed is asked about (retry, or the user answers instead); the user's word counts only
@@ -2005,6 +2005,7 @@ export function nextStep(c) {
             {
               ask: {
                 id: 'no_reply',
+                channels: ['email'],
                 people: due.map((x) => ({ id: x.id, name: x.name || nameOf(x.id) })),
                 question: `Follow-ups are due for ${due.map((x) => x.name || nameOf(x.id)).join(', ')}. Has anyone replied, booked or asked you to stop since your last message? Name them, or say "none".`,
                 options: ['none', 'some replied: <names>'],
@@ -2021,6 +2022,7 @@ export function nextStep(c) {
           {
             ask: {
               id: 'no_reply',
+              channels: ['email'],
               person: { id: it.id, name: it.name },
               question: `Has ${it.name} replied (or booked, or asked you to stop) since your last message?`,
               options: ['no reply', 'they replied', 'they asked to stop'],
@@ -2254,8 +2256,9 @@ function inboxStep(c, e, where, ids = null) {
 }
 
 // A follow-up waits on a channel other than its own that this person was written to earlier: read that inbox where
-// floorboss can, otherwise ask. w.check: the channels still to check (from verifySend).
-function otherChannelStep(c, e, cfg, w) {
+// floorboss can, otherwise ask, in one question for everyone waiting on that channel. w.check: the channels still to
+// check (from verifySend); others: the other items waiting, each with its own check.
+export function otherChannelStep(c, e, cfg, w, others = []) {
   const kind = w.check?.[0];
   if (!kind) return null;
   const name = w.name || (readJson(join(e.paths.derived, 'contacts.json'), []).find((x) => x.id === w.id) || {}).name || w.id;
@@ -2279,18 +2282,42 @@ function otherChannelStep(c, e, cfg, w) {
   } else if (e.settings.inbox_read?.[kind] === true && !e.state.tool_failed[`inbox.${kind}`]) {
     return inboxStep(c, e, kind === 'linkedin' ? 'LinkedIn' : 'app', [w.id]);
   }
-  return step('no_reply_check', `${name} was written to on ${label} earlier, and nothing can read that here, so the user is asked before the next message goes.`, {
+  const contacts = readJson(join(e.paths.derived, 'contacts.json'), []);
+  const nameOf = (x) => x.name || (contacts.find((y) => y.id === x.id) || {}).name || x.id;
+  // One question for everything floorboss can't read: the other channels, and the one the note itself goes on.
+  const ownOf = (x) => (x.via === 'browser' ? (x.where === 'LinkedIn' ? 'linkedin' : 'app') : null);
+  const canRead = (k) =>
+    k === 'email' ? !!(cfg.connectors?.['email.messages'] || cfg.connectors?.['crm.activity']) : e.settings.inbox_read?.[k] === true && !e.state.tool_failed[`inbox.${k}`];
+  const members = [...new Map([w, ...others].filter((x) => x.id === w.id || x.check?.includes(kind) || (ownOf(w) && !x.check?.length && ownOf(x) === ownOf(w))).map((x) => [x.id, x])).values()];
+  const batch = members.map((x) => ({ id: x.id, name: nameOf(x) }));
+  // Every channel anyone in the batch waits on, in the one question.
+  const channels = [...new Set(members.flatMap((x) => [...(x.check || []), ownOf(x)]).filter((k) => k && !canRead(k)))];
+  const words = (k) => (k === 'email' ? 'email' : k === 'linkedin' ? 'LinkedIn' : e.event.app_name || 'the event app');
+  const where = channels.map(words).join(' or ');
+  if (batch.length > 1)
+    return step('no_reply_check', `${batch.length} people were written to on ${where} earlier, and nothing can read that here, so the user is asked once before their next messages go.`, {
+      ask: {
+        id: 'no_reply',
+        channels,
+        people: batch,
+        question: `Follow-ups are due for ${batch.map((x) => x.name).join(', ')}. Has anyone replied, booked or said stop on ${where} since your message there? Name them, or say "none".`,
+        options: ['none', 'some replied: <names>'],
+        answer_format: '{"people":[<every id asked about>],"replied":["<id>"],"stopped":["<id>"],"said":"<the user\'s words>"} (replied and stopped may be empty); everyone in people not named counts as no reply'
+      }
+    });
+  return step('no_reply_check', `${name} was written to on ${where} earlier, and nothing can read that here, so the user is asked before the next message goes.`, {
     ask: {
       id: 'no_reply',
+      channels,
       person: { id: w.id, name },
-      question: `Has ${name} replied, booked or said stop on ${label} since your message there?`,
+      question: `Has ${name} replied, booked or said stop on ${where} since your message there?`,
       options: ['no reply', 'they replied', 'they asked to stop'],
       answer_format: '{"id":"<id>","answer":"no reply|they replied|they asked to stop","said":"<the user\'s words>"}'
     }
   });
 }
 
-function appStep(c, e, cfg) {
+export function appStep(c, e, cfg) {
   // LinkedIn messages go through the same browser path: either channel turns it on.
   const chans = e.settings.sending?.channels || [];
   if (!chans.includes('app') && !chans.includes('linkedin')) return null;
@@ -2304,15 +2331,13 @@ function appStep(c, e, cfg) {
         : e.event.app_name || 'the event app';
   const waitingCheck = (list.waiting || []).filter((w) => w.via === 'browser' && w.touch > 1 && /replies weren't checked/.test(w.why));
   // A note whose page said nothing clear: the user looks in the app before anything else.
+  // Or one typed in the window (the guard let it through) with no result: the prompt may have been declined.
   const unclear = Object.entries(e.state.people).flatMap(([id, p]) =>
     Object.entries(p.touches)
       .filter(
-        ([, x]) =>
-          x.app_result?.result === 'failed' &&
-          !x.sent &&
-          !(e.state.answered.app_outcome && Date.parse(e.state.answered.app_outcome.at) >= Date.parse(x.app_result.at))
+        ([, x]) => noteUnsettled(x, e.state.answered)
       )
-      .map(([t, x]) => ({ id, touch: Number(t), name: p.name, page: x.app_result.page_says }))
+      .map(([t, x]) => ({ id, touch: Number(t), name: p.name, page: x.app_result?.page_says }))
   );
   if (unclear.length) {
     const u = unclear[0];
@@ -2326,6 +2351,11 @@ function appStep(c, e, cfg) {
       }
     });
   }
+  // A send window none of whose notes is still listed is closed: inside it the browser opens only those notes'
+  // platform, so a reply read offered next would be refused and recorded as a failed inbox.
+  const winNow = readJson(join(c.home, 'browser-send.json'), null);
+  if (winNow && !winNow.closed && winNow.event === e.event.slug && !items.some((x) => (winNow.ids || []).includes(`${x.id}:${x.touch}`)))
+    cli('event-outreach', ['browser-send', '--event', e.event.slug, '--close'], c);
   if (e.state.tool_failed['app.send']) return toolDown(e, 'app.send', `${appName} in your browser`, ['retry', 'later']);
   if (e.state.app_limit_at && String(e.state.app_limit_at).slice(0, 10) === c.now.toISOString().slice(0, 10))
     return step('waiting', `${appName} won't take more messages today (its daily limit). The rest go tomorrow.`, {
@@ -2336,7 +2366,7 @@ function appStep(c, e, cfg) {
   // A follow-up waits on their replies: read the inbox when the user allowed it, rather than asking them.
   if (!items.length && waitingCheck.some((w) => w.check?.length)) {
     const w = waitingCheck.find((x) => x.check?.length);
-    return otherChannelStep(c, e, cfg, w);
+    return otherChannelStep(c, e, cfg, w, waitingCheck);
   }
   if (!items.length && waitingCheck.length) {
     const wantLi = waitingCheck.filter((w) => w.where === 'LinkedIn'),
@@ -2359,9 +2389,26 @@ function appStep(c, e, cfg) {
   if (!items.length && waitingCheck.length) {
     const w = waitingCheck[0];
     const name = (readJson(join(e.paths.derived, 'contacts.json'), []).find((x) => x.id === w.id) || {}).name || w.id;
+    const ownKind = w.where === 'LinkedIn' ? 'linkedin' : 'app';
+    const same = waitingCheck.filter((x) => (x.where === 'LinkedIn' ? 'linkedin' : 'app') === ownKind);
+    if (same.length > 1) {
+      const nameOf = (x) => (readJson(join(e.paths.derived, 'contacts.json'), []).find((y) => y.id === x.id) || {}).name || x.id;
+      const people = same.map((x) => ({ id: x.id, name: nameOf(x) }));
+      return step('no_reply_check', `Before ${people.length} follow-ups go in ${appName}, the user is asked once whether anyone replied there.`, {
+        ask: {
+          id: 'no_reply',
+          channels: [ownKind],
+          people,
+          question: `Follow-ups are due in ${appName} for ${people.map((x) => x.name).join(', ')}. Has anyone replied, booked or said no there since your note? Name them, or say "none".`,
+          options: ['none', 'some replied: <names>'],
+          answer_format: '{"people":[<every id asked about>],"replied":["<id>"],"stopped":["<id>"],"said":"<the user\'s words>"} (replied and stopped may be empty); everyone in people not named counts as no reply'
+        }
+      });
+    }
     return step('no_reply_check', `Before ${name}'s follow-up goes in ${appName}, the user is asked whether they replied there.`, {
       ask: {
         id: 'no_reply',
+        channels: [ownKind],
         person: { id: w.id, name },
         question: `Has ${name} replied, booked or said no in ${appName} (or anywhere else) since your note?`,
         options: ['no reply', 'they replied', 'they booked a time', 'they said stop'],
@@ -2427,6 +2474,38 @@ function draftFormat(list) {
   const fs = facts.length ? `"<one of that job's own fact_sources (in this batch: ${facts.join(', ')})>"` : '"none"';
   return `[{"id","touch","subject","body","brief","insight":"I3"|null,"structure":"<the job's structure: question-first|insight-first|plain-request|peer-note>","fact_source":${fs}}]`;
 }
+
+// Has the message before this follow-up (j.previous_touch_now, a skipped step passed over) been rewritten since it was
+// written? The hashes are the ledger's save, as in outreach's staleFor: previous_hash alone says nothing past a skip.
+export function rewrittenSince(x, d, j) {
+  const beforeNow = j.previous_touch_now ?? j.touch - 1;
+  const writtenFor = x?.before_hashes?.[beforeNow] ?? (beforeNow === j.touch - 1 ? (x?.previous_hash ?? d?.previous_hash) : null);
+  return !!(j.touch > 1 && writtenFor && j.previous_hash_now && writtenFor !== j.previous_hash_now);
+}
+
+// An app note whose fate is open: the page said nothing clear and the user hasn't answered since, or the guard let
+// it through when typed and no result came back.
+export const noteUnsettled = (x, answered) =>
+  !x.sent &&
+  ((x.app_result?.result === 'failed' && !(answered?.app_outcome && Date.parse(answered.app_outcome.at) >= Date.parse(x.app_result.at))) ||
+    (x.released && !x.release_cleared && x.released_via === 'browser'));
+// The note an app_outcome answer settles: the person the step asked about. With no step (floorboss's own unit tests,
+// saving out of turn), the first the step would ask about.
+export function appOutcomeTarget(folded, s) {
+  const open = (id, t, x) => ({ id, touch: Number(t), released: !!(x?.released && !x.release_cleared) });
+  if (s?.ask?.id === 'app_outcome' && s.ask.person) return open(s.ask.person.id, s.ask.person.touch, folded.people[s.ask.person.id]?.touches?.[s.ask.person.touch]);
+  return Object.entries(folded.people).flatMap(([id, p]) =>
+    Object.entries(p.touches)
+      .filter(([, x]) => noteUnsettled(x, folded.answered))
+      .map(([t, x]) => open(id, t, x))
+  )[0];
+}
+// The channels a no_reply question asked about, from the step: a word about one can't stand for another. [null]: no
+// step to read them from (the word then carries no channel, as an older one does).
+export const askedChannels = (s) => {
+  const list = (s?.ask?.channels || []).filter((k) => ['email', 'app', 'linkedin'].includes(k));
+  return list.length ? list : [null];
+};
 
 function countFails(e, j) {
   return e.entries.filter((x) => x.type === 'critic' && x.id === j.id && (x.touch ?? 1) === j.touch && x.verdict === 'FAIL').length;

@@ -32,25 +32,31 @@ function card(c, hosts = [], app = null) {
       ? `send it to ${e(c.holder || 'the colleague')} yourself (chat or email)`
       : c.channel === 'email'
         ? e(c.address || '')
-        : url
+        : c.routed === 'app' && app
+          ? `paste it in ${e(app)}`
+          : url
           ? `<a href="${e(url)}" rel="noopener noreferrer">${e(url)}</a>`
           : app
             ? `no address: paste it in ${e(app)}`
             : 'no address: paste it wherever you reach them';
+  const li = c.kind !== 'coordinate' && c.channel !== 'email' && c.routed !== 'app' && url && isLinkedInProfile(url);
   const channel =
     c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
       : c.channel === 'email'
         ? 'Email'
-        : app
-          ? `Paste message (${e(app)} or a DM)`
+        : li
+          ? 'Paste message (LinkedIn)'
+          : app
+          ? c.routed === 'app'
+            ? `Paste message (${e(app)})`
+            : `Paste message (${e(app)} or a DM)`
           : 'Paste message (a DM)';
   const slotOpts = (c.slots || []).map((s) => `<option value="${e(s.id)}">${e(s.label)}</option>`).join('');
   const failed =
     c.verdict && c.verdict.verdict === 'FAIL'
       ? `<p class="failnote">Failed the critic after one rewrite: ${e(c.verdict.reasons.join('; '))}. Edit before sending, or drop it.</p>`
       : '';
-  const li = c.kind !== 'coordinate' && c.channel !== 'email' && url && isLinkedInProfile(url);
   return `<article class="card${c.kind === 'coordinate' ? ' coord' : ''}" data-id="${e(c.id)}" data-touch="${e(c.touch ?? 1)}" data-earliest="${e(c.earliest || '')}"${li ? ` data-li="1" data-url="${e(url)}" data-name="${e(c.name)}" data-who="${e(`${c.title || ''}${c.title && c.company ? ', ' : ''}${c.company || ''}`)}" data-company="${e(c.company || '')}"` : ''}>
   <header><div>${c.pending ? '<span class="chip warn">pending your approval</span> ' : ''}<b>${e(c.name)}</b> · ${e(c.title)}, ${e(c.company)} <span class="id">${e(c.id)}${c.touch > 1 ? ` · touch ${c.touch}` : ''}</span>${c.kind === 'confirmation' ? ' <span class="chip ok">booked: confirmation</span>' : ''}${c.staged ? ' <span class="chip">in your mailbox drafts</span>' : ''}</div>${c.kind === 'coordinate' ? '' : verdictChip(c.verdict)}</header>
   <p class="meta">${channel} · ${addr}${c.mode ? ` · ${e(c.mode)}` : ''}</p>

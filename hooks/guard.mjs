@@ -27,6 +27,8 @@ import { home, allowedPath, readChecked, sensitiveKind, secretPlace, realPath, l
 import { readRun, readRunAnySession, stampRun, lockPath, endSession, touchSession, ranBefore } from '../lib/runlock.mjs';
 import {
   isBrowserCall,
+  isKnownBrowser,
+  siteKind,
   isBrowserServer,
   isBrowserTool,
   isScriptTool,
@@ -576,10 +578,12 @@ const isBrowser = (server, tool) => isBrowserCall(server, tool);
 const setupKinds = (inv) => (inv?.setup_found && typeof inv.setup_found === 'object' ? inv.setup_found : inv?.found || {});
 
 // A browser_* tool on a server nothing else says is a browser could be any server's: a browser's reads aren't held
-// to a server's limits, so it counts only on a server named as a browser (also through another server) or one the
-// first setup scan found to be one.
+// to a server's limits, so it counts only on a browser server known by its exact name, one of those reached through
+// remote devices (the one server that nests others, every part of the path exact), or one the first setup scan found
+// to be one.
 function browserServerKnown(server, tool) {
-  if (isBrowserServer(server) || String(tool).split('__').slice(0, -1).some((x) => isBrowserServer(x))) return true;
+  const nested = String(tool).split('__').slice(0, -1);
+  if (isKnownBrowser(server) || (/^remote[-_]devices$/i.test(server) && nested.length && nested.every((x) => isKnownBrowser(x)))) return true;
   const inv = readJsonStrict(join(home(), 'inventory.json'), {});
   return (setupKinds(inv).browser || []).some((x) => String(x).startsWith('mcp:') && sameServer(String(x).slice(4), server));
 }
@@ -616,7 +620,7 @@ export function foundServer(server) {
 }
 export function givenServer(server, config, run) {
   if (Object.values(config?.connectors || {}).some((r) => r && r.server && sameServer(server, r.server))) return true;
-  return !!(run?.browser && isBrowserServer(server));
+  return !!(run?.browser && isKnownBrowser(server));
 }
 
 // A browser call that opens LinkedIn messaging, or an app's inbox or messages page, without the user's yes.
@@ -761,6 +765,30 @@ function windowRefusal(tool, args) {
   return `${tool}${args?.action ? ` (${args.action})` : ''} isn't something the browser window allows: it opens the listed people's pages, clicks, and types the listed messages, nothing else.`;
 }
 
+// The send window opens only the platform of a note listed in it: LinkedIn only for a LinkedIn note with LinkedIn
+// sending and its warning accepted, a known event app only for an app note. The typing check can't see the page, so
+// this is where a note is kept on its platform, inbox pages included: the window already carries the reply check
+// that let its notes in, and reply reads happen outside it.
+function windowSiteRefusal(tool, args, w) {
+  const items = browserItems(w.event).filter((x) => (w.ids || []).includes(`${x.id}:${x.touch}`));
+  let sending = {};
+  try {
+    sending = loadEvent(w.event).settings.sending || {};
+  } catch {
+    /* no event settings: only what's listed below can pass, and LinkedIn can't */
+  }
+  const linkedinOk = items.some((x) => x.where === 'LinkedIn') && (sending.channels || []).includes('linkedin') && !!sending.linkedin_ack;
+  const appOk = items.some((x) => x.where !== 'LinkedIn');
+  const urls = leaves(args).filter(([p, v]) => (isNavigateTool(tool) || /(^|\.)(url|href|link|uri)$/i.test(p)) && String(v ?? '').trim());
+  for (const [, v] of urls) {
+    const u = readUrl(v);
+    const site = siteKind(u);
+    if (!site || (site === 'linkedin' ? linkedinOk : appOk)) continue;
+    return `${tool} was asked to open ${u.host}${u.path.slice(0, 40)}, and the send window is open for notes in ${site === 'linkedin' ? 'the event app' : 'LinkedIn'} only: it opens only the places its listed notes go.`;
+  }
+  return null;
+}
+
 // During a run, a tool floorboss has no recipe for may not be handed a web address or a path to keys and
 // credentials, and general-purpose tools (fetch, query, request, SQL) wait until the run ends.
 const GENERIC_WORDS = new Set(['fetch', 'query', 'request', 'get', 'read', 'sql', 'http', 'https', 'call', 'api', 'raw', 'execute', 'run']);
@@ -872,6 +900,8 @@ export function check(
       if (nav) return `${nav}${lockNote(run, hosts)}`;
       const logNav = crmLog && !browserSend ? logNavRefusal(m[2], input.tool_input || {}) : null;
       if (logNav) return logNav;
+      const siteNav = browserSend ? windowSiteRefusal(m[2], input.tool_input || {}, browserSend) : null;
+      if (siteNav) return `${siteNav}${lockNote(run, hosts)}`;
       if (run.active && isBrowserReadTool(m[2]) && leaves(input.tool_input || {}).some(([, v]) => typeof v === 'string' && (v.length > URL_CAP || /[\r\n]/.test(v))))
         return `${m[2]} was called with a value that is long or spans lines, and a floorboss run is under way: the browser's reads take short values only then.${note}`;
       if (windowOpen) return windowRefusal(m[2], input.tool_input || {});
@@ -1172,6 +1202,14 @@ function allow() {
     );
   process.exit(0);
 }
+// A message floorboss already let through once (then cleared to go again): said in the next prompt, since the user is
+// the one who can tell whether the first one went. before: the earlier send_released entries for it.
+function letThroughBefore(it, before) {
+  if (!before.length) return '';
+  const cleared = eventRecord(join(home(), 'events', it._event)).entries.filter((e) => e.id === it.id && e.touch === it.touch && ['release_cleared', 'bounced'].includes(e.type)).pop();
+  const last = before[before.length - 1];
+  return ` floorboss already let this message through ${before.length === 1 ? 'once' : `${before.length} times`}${last.to && fold(last.to) !== fold(it.to) ? ` (to ${promptAddr(last.to)})` : ''} (last at ${String(last.at).slice(0, 16).replace('T', ' ')} UTC); it was cleared to go again${cleared?.type === 'bounced' ? ' because it bounced' : cleared?.said ? ` because: ${promptLine(String(cleared.said).slice(0, 200))}` : ''}. If the first one may have gone, decline.`;
+}
 const refusedSends = [];
 // Today's send lists across events, each item checked against the record (approval fingerprint, draft,
 // contact, sending turned on, no stop or reply, not let through before). Items that fail are dropped: the
@@ -1215,7 +1253,7 @@ export function listedSends() {
   });
 }
 
-// The approved app and LinkedIn notes of an event, each checked against the record like an email send.
+// The approved app and LinkedIn notes listed for an event. Each is checked against the record when typed (noteWhy).
 export function browserItems(slug) {
   const dir = join(home(), 'events', slug);
   if (notRealEvent(slug)) return [];
@@ -1223,6 +1261,21 @@ export function browserItems(slug) {
   if (!Array.isArray(v) || !v.length) return [];
   // The list only names the person for the prompt; the user sees the text and the page and decides.
   return v.filter((x) => x && typeof x === 'object' && /^c\d+$/.test(String(x.id)) && x.via === 'browser');
+}
+
+// Why a listed note can't be typed in this send window now, or null: not a note the window was opened for, or what the
+// record says of it now (sent, let through, stopped, booked or replied, and the rest of verifySend). The reply-check
+// freshness is left out: it passed when the window opened, it lasts 90 seconds and a window 20 minutes, so it would
+// refuse every legitimate note after the first.
+function noteWhy(w, nowMs) {
+  const evDir = join(home(), 'events', w.event);
+  const rec = eventRecord(evDir);
+  const settings = loadEvent(w.event).settings;
+  return (x) => {
+    if (!(w.ids || []).includes(`${x.id}:${x.touch}`)) return { why: "this browser window wasn't opened for that note" };
+    const r = verifySend(x, { evDir, settings, ...rec, nowMs, replyCheck: false });
+    return r.ok ? { hash: r.hash } : { why: r.why };
+  };
 }
 
 // The browser send window, if one is open: browser-send.json must match a window opened in that event's log
@@ -2569,6 +2622,7 @@ if (isMain(import.meta.url)) {
       const { hosts, pages } = knownEventSites();
       const asks = [];
       const sent = [];
+      const typedNotes = [];
       const enrichPath = join(home(), 'enrich-window.json');
       const enrichWindow = !subagent && existsSync(enrichPath) ? readJsonStrict(enrichPath, null) : null;
       const enrichUsed = [];
@@ -2723,7 +2777,7 @@ if (isMain(import.meta.url)) {
         if (marker?.key !== key) {
           const what =
             win.kind === 'send'
-              ? `send your approved notes in the event app or LinkedIn (${(win.w.ids || []).length || 'the listed'} people)`
+              ? `send your approved notes in ${[...new Set(browserItems(win.w.event).filter((x) => (win.w.ids || []).includes(`${x.id}:${x.touch}`)).map((x) => promptLine(x.where || 'the event app')))].join(' and ') || 'the event app or LinkedIn'} (${(win.w.ids || []).length || 'the listed'} people)`
               : `log your sent messages in your CRM's web app (${logItems(win.w.event).length} listed)`;
           ask(
             `floorboss: open a browser window until ${String(win.w.until).slice(11, 16)} UTC to ${what} for ${promptLine(win.w.event)}. In it the browser may click and type the listed people's details without asking again; each message's text still asks.\n\nAllow only if you asked floorboss to do this now.`
@@ -2770,31 +2824,47 @@ if (isMain(import.meta.url)) {
       // box). Anything else is refused: the window is for the listed notes only.
       if (browserSend && browserCall && typing) {
         const texts = typed();
-        const items = browserItems(browserSend.event);
+        const whyNot = noteWhy(browserSend, nowMs);
+        const items = browserItems(browserSend.event).map((it) => {
+          const r = whyNot(it);
+          return { ...it, _why: r.why || null, hash: r.hash || null };
+        });
         // Every value is checked before anything is asked; a typed link is text like any other (refused).
         const hits = [];
         for (const t of texts) {
-          const hit = !isUrlText(t) && items.find((it) => squash(t) === squash(it.body));
+          const same = !isUrlText(t) ? items.filter((it) => squash(t) === squash(it.body)) : [];
+          const hit = same.find((it) => !it._why);
           if (hit) {
             hits.push([hit, t]);
             continue;
           }
-          if (!isUrlText(t) && items.some((it) => [it.name, it.company].some((x) => x && squash(t) === squash(x)))) continue;
+          if (same.length) {
+            process.stderr.write(`floorboss blocked this call: the note to ${promptPerson(same[0].name, same[0].id, same[0].to)} can't be typed: ${same[0]._why}.\n`);
+            process.exit(2);
+          }
+          if (!isUrlText(t) && items.some((it) => !it._why && [it.name, it.company].some((x) => x && squash(t) === squash(x)))) continue;
           process.stderr.write(
             `floorboss blocked this call: the browser send window is for the listed notes only, typed exactly as listed (or a listed person's name, to find them), and ${JSON.stringify(t.slice(0, 80))} isn't one of them.\n`
           );
           process.exit(2);
         }
+        if (hits.length > 1) {
+          process.stderr.write('floorboss blocked this call: one listed note per call, so the prompt can name the person it goes to.\n');
+          process.exit(2);
+        }
         if (hits.length) {
           const [hit] = hits[0];
+          for (const [it] of hits) typedNotes.push({ ...it, _event: browserSend.event });
+          const before = eventRecord(join(home(), 'events', browserSend.event)).entries.filter((e) => e.id === hit.id && e.touch === hit.touch && e.type === 'send_released');
           ask(
-            `floorboss: the browser is about to send the ${hit.touch > 1 ? `follow-up ${hit.touch - 1}` : 'note'} to ${promptPerson(hit.name, hit.id, hit.to)}.\n\nThe text you approved, as it is typed:\n${fullText(null, texts.join('\n\n'))}\n\nAllow only if this page is that person's and this is the approved note.`
+            `floorboss: the browser is about to send the ${hit.touch > 1 ? `follow-up ${hit.touch - 1}` : 'note'} to ${promptPerson(hit.name, hit.id, hit.to)} in ${promptLine(hit.where || 'the event app')}.${letThroughBefore({ ...hit, _event: browserSend.event }, before)}\n\nThe text you approved, as it is typed:\n${fullText(null, texts.join('\n\n'))}\n\nAllow only if this page is that person's and this is the approved note.`
           );
         }
       }
       // Each approved send goes once: an exclusive marker per message (created or refused, never both), then
       // the release in the event's log before the call runs. Two calls at once can't both get through.
-      for (const it of sent) {
+      // A browser note goes through the same: it is released when it is typed.
+      for (const it of [...sent, ...typedNotes]) {
         const evDir = join(home(), 'events', it._event);
         const resets = eventRecord(evDir).entries.filter(
           (e) => e.id === it.id && e.touch === it.touch && ['release_cleared', 'bounced'].includes(e.type)
@@ -2817,7 +2887,7 @@ if (isMain(import.meta.url)) {
         try {
           appendLine(
             join(evDir, 'ledger.jsonl'),
-            `${JSON.stringify({ at: new Date(nowMs).toISOString(), type: 'send_released', who: 'guard', id: it.id, touch: it.touch, hash: it.hash || null, via: it.via, to: it.to })}\n`
+            `${JSON.stringify({ at: new Date(nowMs).toISOString(), type: 'send_released', who: 'guard', id: it.id, touch: it.touch, hash: it.hash || null, via: it.via, to: it.to, ...(it.where ? { where: it.where } : {}) })}\n`
           );
         } catch (e) {
           try {
@@ -2853,21 +2923,8 @@ if (isMain(import.meta.url)) {
         const held = history.length ? ` Held before: ${history.join(' ')}` : '';
         // A message floorboss already let through once (then cleared to go again, on words the session wrote) says
         // so: the user is the one who can tell whether the first one went.
-        const evEntries = eventRecord(join(home(), 'events', it._event)).entries;
-        const mine = (e) => e.id === it.id && e.touch === it.touch;
-        const releases = evEntries.filter((e) => mine(e) && e.type === 'send_released');
-        const cleared = evEntries.filter((e) => mine(e) && ['release_cleared', 'bounced'].includes(e.type)).pop();
-        const again =
-          releases.length > 1
-            ? ` floorboss already let this message through ${releases.length - 1 === 1 ? 'once' : `${releases.length - 1} times`}${releases[releases.length - 2].to && fold(releases[releases.length - 2].to) !== fold(it.to) ? ` (to ${promptAddr(releases[releases.length - 2].to)})` : ''} (last at ${String(
-                releases[releases.length - 2].at
-              )
-                .slice(0, 16)
-                .replace(
-                  'T',
-                  ' '
-                )} UTC); it was cleared to go again${cleared?.type === 'bounced' ? ' because it bounced' : cleared?.said ? ` because: ${promptLine(String(cleared.said).slice(0, 200))}` : ''}. If the first one may have gone, decline.`
-            : '';
+        const releases = eventRecord(join(home(), 'events', it._event)).entries.filter((e) => e.id === it.id && e.touch === it.touch && e.type === 'send_released');
+        const again = letThroughBefore(it, releases.slice(0, -1));
         ask(
           `floorboss: send ${it.touch > 1 ? `follow-up ${it.touch - 1}` : it.touch === 0 ? 'the meeting confirmation' : 'the first message'} to ${promptPerson(name, it.id, callTo)} via ${it.via}.${again}${checked}${held}\n\nThe text you approved, as it goes:\n${fullText(it.subject, it.body)}\n\nAllow only if this is the approved message to the right person.`
         );
