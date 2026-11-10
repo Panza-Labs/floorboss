@@ -3,7 +3,7 @@
 // README counts the mock's questions right, and the shortlist and approval don't come back for nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT, NOW, setup, cli, triage, idOf } from './fixtures/harness.mjs';
 import { simplePersona } from './sims/lib/driver.mjs';
@@ -18,7 +18,8 @@ test('plural: one person, two people, one message', () => {
   assert.equal(plural(3, 'person', 'people'), '3 people');
   assert.equal(plural(1, 'message'), '1 message');
   assert.equal(plural(2, 'message'), '2 messages');
-  const src = readFileSync(join(ROOT, 'skills/flow/scripts/steps.mjs'), 'utf8');
+  // The steps are written in steps.mjs, context.mjs and the files of the steps/ folder.
+  const src = ['skills/flow/scripts/steps.mjs', 'skills/flow/scripts/context.mjs', ...readdirSync(join(ROOT, 'skills/flow/scripts/steps')).map((f) => `skills/flow/scripts/steps/${f}`)].map((f) => readFileSync(join(ROOT, f), 'utf8')).join('\n');
   assert.doesNotMatch(src, /\$\{[a-zA-Z.]+\.length\} (people need|messages to write|messages are ready)/);
 });
 

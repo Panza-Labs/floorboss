@@ -118,6 +118,28 @@ own is in `hooks/hooks.json`:
 - floorboss's scripts start only Node.js with floorboss's own scripts, and the outbox command opens the
   page with your system's `open` (`xdg-open` on Linux, `explorer` on Windows).
 
+The guard is the part to read first. `hooks/guard.mjs` is what the hooks run. It holds the rules for Bash
+and agents during a run and the ask-once logic for sends, staged drafts, CRM tasks, lookups and browser
+windows. The other rules are in `hooks/guard/`, one topic per file, so each can be read on its own:
+
+| File | What it covers |
+|---|---|
+| `hooks/guard.mjs` | The entry point the hooks run. It reads the call, picks the rules that apply and allows it, asks you, or blocks it. It also holds the rules for Bash and agents during a run, and the ask-once logic for sends, staged drafts, CRM tasks, lookups and browser windows. |
+| `hooks/guard/check.mjs` | The decision for one connected-tool (MCP) call: the run lock, the saved recipe, lookups, the browser, sends and staged drafts. |
+| `hooks/guard/connectors.mjs` | What a connected tool does, judged by its name. Whether its arguments fit the saved recipe. Which servers floorboss was given. |
+| `hooks/guard/test-calls.mjs` | The one test draft, task or contact that setup tries a connection with. |
+| `hooks/guard/lookups.mjs` | Contact-detail lookups: the window you agreed to, how many are left in it, and what one lookup may carry. |
+| `hooks/guard/sends.mjs` | Sends and staged drafts: each is checked against the text and recipient you approved. |
+| `hooks/guard/browser.mjs` | Where the browser may go during a run, and what may be clicked or typed in a send window or a CRM log window. |
+| `hooks/guard/prompts.mjs` | The permission prompts: the text you read before you say yes. |
+| `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records. |
+| `hooks/guard/shell.mjs` | Bash: calls to floorboss's own scripts, and saving or forgetting a connection during a run. |
+| `hooks/guard/web.mjs` | WebFetch and WebSearch during a run. |
+| `hooks/guard/run.mjs` | The run lock and the session: which tools are checked, subagents, forked sessions. |
+| `hooks/guard/after-call.mjs` | What is recorded after a call has run. |
+| `hooks/guard/shared.mjs` | Small helpers the rules share. |
+| `hooks/plugin-root.mjs` | The folder the plugin is installed in, which the file and shell rules compare paths against. |
+
 Run `/hooks` in Claude Code to see every hook and the command it runs. To see what the plugin contains
 before you install it, clone the repository and run
 `claude --plugin-dir ./floorboss plugin details floorboss`.
@@ -467,6 +489,19 @@ claude plugin validate . --strict
 bash scripts/privacy-check.sh
 bash scripts/privacy-check.sh --history   # before a release: every commit, its addresses and that it's in UTC
 ```
+
+Where the longer scripts are split up:
+
+- `hooks/guard.mjs` and `hooks/guard/`: the guard, listed under
+  [Dependencies and supply chain](#dependencies-and-supply-chain).
+- `skills/flow/scripts/cli.mjs` runs the `next` and `answer` commands, which are in `next.mjs` and `answer.mjs`.
+  The steps are in `steps.mjs` and `steps/`: one file per phase of a run, in the order `steps.mjs` calls them,
+  plus the helpers the phases share (`shared.mjs`, `wording.mjs`, `counts.mjs`, `channels.mjs`).
+  The code that saves each answer is in `savers/`.
+- `skills/event-outreach/scripts/cli.mjs` lists the commands, and `commands/` holds them by job: the drafting
+  list (`todo.mjs`), `drafting.mjs`, `review.mjs`, `approval.mjs`, `sending.mjs`, `outcomes.mjs`, `crm-log.mjs`,
+  `tasks.mjs`, `calendar.mjs`, `ratings.mjs` and the outbox page (`cards.mjs`). The other files there are
+  helpers these share.
 
 Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems
 privately, as [SECURITY.md](SECURITY.md) describes.

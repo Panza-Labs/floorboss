@@ -44,7 +44,8 @@ test('run lock: every command clears it at the end and names the window the code
     assert.match(s, /stays held to reads.*until it ends.*`\/clear` or a new session lifts them/, `${f} says the session stays held`);
     assert.doesNotMatch(s, /delete [^ ]*active\.json/, `${f} never tells Claude to delete the lock`);
   }
-  const code = read('lib/runlock.mjs') + read('lib/args.mjs') + read('hooks/guard.mjs');
+  // The guard is hooks/guard.mjs, hooks/plugin-root.mjs and the files of hooks/guard/.
+  const code = read('lib/runlock.mjs') + read('lib/args.mjs') + read('hooks/guard.mjs') + read('hooks/plugin-root.mjs') + readdirSync(join(ROOT, 'hooks/guard')).map((f) => read(join('hooks/guard', f))).join('');
   assert.doesNotMatch(code, /last hour|3 \* 60 \* 60|three hours/i, 'no other window named in the code');
 });
 

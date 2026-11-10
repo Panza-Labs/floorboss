@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { writeFileSync, readFileSync, mkdirSync, existsSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setup, cli, triage, todoJobs, draftApprove, idOf, ROOT, NOW } from './fixtures/harness.mjs';
@@ -544,7 +544,7 @@ test('a route answer it cannot read leaves the question open; "email only" keeps
 });
 
 test('the critic is the separate critic in everything shipped', () => {
-  for (const f of ['commands/event-draft.md', 'skills/flow/scripts/steps.mjs', 'skills/event-outreach/scripts/drafter.mjs', 'agents/outreach-critic.md'])
+  for (const f of ['commands/event-draft.md', 'skills/flow/scripts/steps.mjs', 'skills/flow/scripts/context.mjs', ...readdirSync(join(ROOT, 'skills/flow/scripts/steps')).map((f) => `skills/flow/scripts/steps/${f}`), 'skills/event-outreach/scripts/drafter.mjs', 'agents/outreach-critic.md'])
     assert.doesNotMatch(readFileSync(join(ROOT, f), 'utf8'), /independent critic/i, f);
 });
 

@@ -24,7 +24,7 @@ attendee notes are fenced as untrusted and never reach the critic, the outbox es
 to LinkedIn, known event apps and the event's own site, and its Content-Security-Policy blocks external
 loads, and all data lives in `~/.floorboss/` (or `FLOORBOSS_HOME`) with private file permissions.
 
-A guard hook (`hooks/guard.mjs`) checks every MCP call and Claude's own file tools. Commands pre-approve only
+A guard hook (`hooks/guard.mjs`, with most of its rules in `hooks/guard/`) checks every MCP call and Claude's own file tools. Commands pre-approve only
 floorboss's scripts and reads and writes in its data folder. Claude never reads keys, credentials, shell
 histories or browser profiles, and never edits floorboss's records. While a run is under way (tied to the
 Claude session that ran it, until that session ends), tools may only read, the browser opens only pages
@@ -36,6 +36,28 @@ search and task pages, only the listed messages and their people's own details t
 full text before each message goes in. During a run, saving a connection to a server setup didn't find, moving one to another server, or forgetting one asks you first; a subagent can do none of these, and a test call runs only on its own job's server. Every send, test call, CRM task, new CRM contact, browser note and logged message asks
 the user, showing the full text; a batch of mailbox drafts asks once, listing who each is to. Names and notes from lists and CRMs are scrubbed before they appear in a permission prompt (letters and a little punctuation only, cut short, quoted, with the person's id and address beside them); the approved text is shown verbatim under its own label. A message floorboss already let through once says so at its next prompt, and a draft batch's yes puts each draft in once. A PostToolUse hook records an ask (a lookup counted, a draft batch confirmed, a window allowed) only after the call has run, so a declined prompt is asked again and never counts as a yes. If the guard can't start, crashes or runs past its own 20-second deadline, the call is blocked. A guard that hangs outright, past Claude Code's 30-second hook timeout, is blocked only on Claude Code 2.1.295 or later (the hooks set `onFailure: "block"`); older versions let that call through, so use 2.1.295 or later. The records live in
 files a session could write, so that prompt is the final check: never set a send tool to "always allow".
+
+### Reading the guard
+
+The guard is split by topic, so a reviewer can take one file at a time:
+
+| File | What it covers |
+|---|---|
+| `hooks/guard.mjs` | The entry point the hooks run. It reads the call, picks the rules that apply and allows it, asks you, or blocks it. It also holds the rules for Bash and agents during a run, and the ask-once logic for sends, staged drafts, CRM tasks, lookups and browser windows. |
+| `hooks/guard/check.mjs` | The decision for one connected-tool (MCP) call: the run lock, the saved recipe, lookups, the browser, sends and staged drafts. |
+| `hooks/guard/connectors.mjs` | What a connected tool does, judged by its name. Whether its arguments fit the saved recipe. Which servers floorboss was given. |
+| `hooks/guard/test-calls.mjs` | The one test draft, task or contact that setup tries a connection with. |
+| `hooks/guard/lookups.mjs` | Contact-detail lookups: the window you agreed to, how many are left in it, and what one lookup may carry. |
+| `hooks/guard/sends.mjs` | Sends and staged drafts: each is checked against the text and recipient you approved. |
+| `hooks/guard/browser.mjs` | Where the browser may go during a run, and what may be clicked or typed in a send window or a CRM log window. |
+| `hooks/guard/prompts.mjs` | The permission prompts: the text you read before you say yes. |
+| `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records. |
+| `hooks/guard/shell.mjs` | Bash: calls to floorboss's own scripts, and saving or forgetting a connection during a run. |
+| `hooks/guard/web.mjs` | WebFetch and WebSearch during a run. |
+| `hooks/guard/run.mjs` | The run lock and the session: which tools are checked, subagents, forked sessions. |
+| `hooks/guard/after-call.mjs` | What is recorded after a call has run. |
+| `hooks/guard/shared.mjs` | Small helpers the rules share. |
+| `hooks/plugin-root.mjs` | The folder the plugin is installed in, which the file and shell rules compare paths against. |
 
 ## Where your data can go
 

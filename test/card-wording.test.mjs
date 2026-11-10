@@ -28,7 +28,7 @@ test('mapping caution notes name the cell: its line and what it says', () => {
 });
 
 test('inside the start loop, every "next" says to run flow next, never another command', () => {
-  const files = [join(ROOT, 'lib'), ...readdirSync(join(ROOT, 'skills')).map((s) => join(ROOT, 'skills', s, 'scripts'))].flatMap((d) => { try { return readdirSync(d).filter((f) => f.endsWith('.mjs')).map((f) => join(d, f)); } catch { return []; } });
+  const files = [join(ROOT, 'lib'), ...readdirSync(join(ROOT, 'skills')).map((s) => join(ROOT, 'skills', s, 'scripts'))].flatMap((d) => { try { return readdirSync(d, { recursive: true }).filter((f) => f.endsWith('.mjs')).map((f) => join(d, f)); } catch { return []; } });
   for (const f of files) {
     const src = readFileSync(f, 'utf8');
     assert.doesNotMatch(src, /\/floorboss:event-(triage|plan)\b/, f);
@@ -54,7 +54,8 @@ test('help links land on a section of asking.md, for every question', () => {
 
 test('the flow skill documents the step shapes the code returns: agents, with input or input_file', () => {
   const skill = readFileSync(join(ROOT, 'skills/flow/SKILL.md'), 'utf8');
-  const steps = readFileSync(join(ROOT, 'skills/flow/scripts/steps.mjs'), 'utf8');
+  // The steps are written in steps.mjs, context.mjs and the files of the steps/ folder.
+  const steps = ['skills/flow/scripts/steps.mjs', 'skills/flow/scripts/context.mjs', ...readdirSync(join(ROOT, 'skills/flow/scripts/steps')).map((f) => `skills/flow/scripts/steps/${f}`)].map((f) => readFileSync(join(ROOT, f), 'utf8')).join('\n');
   assert.match(steps, /\{\s*agents: /);
   assert.doesNotMatch(steps, /\{\s*agent: /,'the code returns agents (a list), never a single agent');
   assert.match(skill, /^- `agents`:/m);
