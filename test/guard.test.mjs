@@ -38,8 +38,8 @@ test('guard runs as a hook: exit 2 with the reason', () => {
 });
 
 test('connectors: real connector names pass, dangerous ones don\'t; query placeholders; full schema walk', () => {
-  for (const [task, n] of [['calendar.busy', 'list_gcal_events'], ['crm.lookup', 'hubspot-search-objects'], ['crm.lookup', 'crm_search_contacts'], ['crm.lookup', 'salesforce_query_records'], ['email.thread_has_reply', 'gmail_get_thread'], ['email.thread_has_reply', 'search_gmail_messages']]) assert.ok(screenTool(task, n).ok, n);
-  for (const n of ['gmail_send_draft', 'hubspot-batch-update-objects', 'crm_delete_contacts', 'run_soql_query']) assert.ok(!Object.keys({ 'calendar.busy': 1, 'crm.lookup': 1, 'email.thread_has_reply': 1, stage_draft: 1 }).some((t) => screenTool(t, n).ok), n);
+  for (const [task, n] of [['calendar.busy', 'list_gcal_events'], ['crm.lookup', 'hubspot-search-objects'], ['crm.lookup', 'crm_search_contacts'], ['crm.lookup', 'salesforce_query_records'], ['email.messages', 'gmail_get_thread'], ['email.messages', 'search_gmail_messages']]) assert.ok(screenTool(task, n).ok, n);
+  for (const n of ['gmail_send_draft', 'hubspot-batch-update-objects', 'crm_delete_contacts', 'run_soql_query']) assert.ok(!Object.keys({ 'calendar.busy': 1, 'crm.lookup': 1, 'email.messages': 1, stage_draft: 1 }).some((t) => screenTool(t, n).ok), n);
   assert.deepEqual(screenArgs({ query: "SELECT Id, Email FROM Contact WHERE Email = '{email}'" }, 'crm.lookup'), []);
   assert.ok(screenArgs({ query: "SELECT Id FROM Contact WHERE Email = '{email}'; DELETE FROM Contact" }, 'crm.lookup').length);
   assert.deepEqual(screenArgs({ showDeleted: false, $select: 'id,subject' }, 'calendar.busy'), []);

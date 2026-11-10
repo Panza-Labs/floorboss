@@ -743,18 +743,6 @@ function note(opts) {
   return { id: opts.id, note: text, known: !!opts.known };
 }
 
-function rename(opts) {
-  need(opts, 'event', 'id', 'name');
-  const c = ctxOf(opts.event, opts);
-  if (!c.state.people[opts.id]) throw new Error(`${opts.id} isn't on this list.`);
-  const name = String(opts.name)
-    .replace(/[\u0000-\u001f]/g, '')
-    .trim()
-    .slice(0, 120);
-  log(c, { type: 'renamed', who: 'user', id: opts.id, name, said: name });
-  return { id: opts.id, now: name };
-}
-
 function channel(opts) {
   need(opts, 'event', 'id', 'to');
   if (!['app', 'email', 'chat', 'none', 'auto'].includes(opts.to)) throw new Error('--to is app, email, chat, none or auto.');
@@ -1532,7 +1520,6 @@ run({
   keep,
   cap,
   note,
-  rename,
   channel,
   view,
   gate,

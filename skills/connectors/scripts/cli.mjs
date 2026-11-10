@@ -6,19 +6,17 @@ import { allowedPath, expandHome, home, configPath, assertSlug, readChecked } fr
 import { normEmail } from '../../../lib/normalize.mjs';
 import { sameServer } from '../../../lib/security.mjs';
 import { anySessionHeld } from '../../../lib/runlock.mjs';
-import { existsSync, unlinkSync } from 'node:fs';
+import { unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { run, need } from '../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../lib/jsonio.mjs';
 import { loadConfig, saveConfig } from '../../../lib/config.mjs';
-import { loadEvent } from '../../../lib/event.mjs';
 import {
   TASKS,
   screenTools,
   screenTool,
   validateBusy,
   validateCrmRecords,
-  validateThreads,
   checkRecipe,
   schemaFlags,
   toolHash,
@@ -83,18 +81,6 @@ function validateRead(task, data, opts) {
   if (task === 'crm.read_tasks') {
     const r = validateTaskStatus(data);
     if (!r.errors.length && !r.tasks.length) return { errors: ['the probe read no task; read the test task back'] };
-    return r;
-  }
-  if (task === 'email.thread_has_reply') {
-    // The probe is the test draft's own thread: it must read back, with no reply yet.
-    const list = Array.isArray(data?.threads) ? data.threads : [];
-    const r = validateThreads(
-      data,
-      list.map((t) => ({ id: t?.id, touch: Number(t?.touch ?? 1) }))
-    );
-    if (!r.errors.length && !r.threads.length) return { errors: ["the probe read no thread; use the test draft's thread"] };
-    if (!r.errors.length && r.threads.some((t) => t.has_reply))
-      return { errors: ["the test draft's thread shows a reply; a reply must be a message from someone else after yours, and a draft alone isn't one"] };
     return r;
   }
   throw new Error(`${task} results are checked by the step that uses them (outreach staged).`);
@@ -364,56 +350,6 @@ function status() {
   });
 }
 
-// What triage tells the user before anything else: the checks that are off because no connector does them,
-// and what the user has to give by hand instead. A saved recipe counts as connected here; triage still
-// checks it against the live tool list before use and falls back if that fails.
-function missing(opts) {
-  need(opts, 'event');
-  const { event, config, settings, paths } = loadEvent(opts.event);
-  const has = (task) => {
-    const r = config.connectors?.[task];
-    return !!r && checkRecipe(task, r).length === 0;
-  };
-  const known = [
-    ...(settings.known_contacts_paths || config.known_contacts_paths || []),
-    ...(config.known_contacts_path ? [config.known_contacts_path] : [])
-  ].filter((p) => {
-    try {
-      return existsSync(p) && !!allowedPath(p, { list: true });
-    } catch {
-      return false;
-    }
-  });
-  const slotsRaw = existsSync(paths.slots) ? readJson(paths.slots) : null;
-  const slots = Array.isArray(slotsRaw) ? slotsRaw.length : Array.isArray(slotsRaw?.slots) ? slotsRaw.slots.length : 0;
-  const off = [];
-  if (!has('email.history'))
-    off.push({
-      check: 'already_in_touch',
-      supplied: known.length > 0,
-      line: known.length
-        ? `Already-in-touch check: no mailbox is connected. floorboss uses your contacts export instead (${known.length} file${known.length > 1 ? 's' : ''}), so anyone you've emailed who isn't in it looks like a stranger.`
-        : "Already-in-touch check is OFF: no mailbox is connected and no contacts export was given, so floorboss can't tell who you already know or are already talking to. Give a contacts export (LinkedIn Connections.csv, Gmail or Outlook contacts) with --known, or name the people you're already in touch with."
-    });
-  if (!has('crm.lookup'))
-    off.push({
-      check: 'crm_ownership',
-      supplied: !!event.crm?.path,
-      line: event.crm?.path
-        ? "CRM ownership check: no CRM is connected. floorboss uses your CRM export instead, so it's only as current as that file."
-        : "CRM ownership check is OFF: no CRM is connected and no CRM export was given, so floorboss can't see who a colleague owns, who opted out, or who is already a customer. Give a CRM export with --crm, or confirm you have no CRM."
-    });
-  if (!has('calendar.busy'))
-    off.push({
-      check: 'calendar_free_time',
-      supplied: slots > 0,
-      line: slots
-        ? `Calendar-based free time is off: no calendar is connected. The ${slots} time${slots > 1 ? 's' : ''} floorboss offers come from the free time you typed or the .ics you gave, so a meeting booked since then won't show; tell me about any.`
-        : 'Calendar-based free time is OFF: no calendar is connected and no free time was given, so floorboss has no times to offer. Type your free time or give an .ics export when /floorboss:start asks for your free time.'
-    });
-  return { none_connected: off.length === 3, off, by_hand: off.filter((o) => !o.supplied).map((o) => o.check) };
-}
-
 function recipe(opts) {
   need(opts, 'task');
   if (opts['tools-file']) checkLive(opts['tools-file']);
@@ -433,4 +369,4 @@ function check(opts) {
   return screenTool(opts.task, opts.tool);
 }
 
-run({ 'test-allow': testAllow, missing, tasks, screen, validate, 'save-recipe': saveRecipe, forget, status, recipe, check });
+run({ 'test-allow': testAllow, tasks, screen, validate, 'save-recipe': saveRecipe, forget, status, recipe, check });

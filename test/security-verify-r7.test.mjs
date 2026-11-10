@@ -16,8 +16,6 @@ import { planRecord } from '../skills/event-outreach/scripts/record.mjs';
 import { fold, legacyState } from '../lib/ledger.mjs';
 import { parseGate } from '../lib/gate.mjs';
 import { buildCriticInput } from '../skills/event-outreach/scripts/critic-input.mjs';
-import { trackerHtml } from '../skills/event-outreach/scripts/tracking.mjs';
-import { createHash } from 'node:crypto';
 import { sameHolder, ownerIsUserFor } from '../skills/crm-triage/scripts/resolve.mjs';
 
 // 1. A match answer carries to another event only for the same attendee, and "not this person" never carries
@@ -197,7 +195,7 @@ test('5: "unsent" never takes back a send floorboss made or the mailbox shows; o
     const state = legacyState(fold([{ type: 'person', id: 'c001', name: 'Ana Berg', company: 'Acme', at: '2026-10-10T00:00:00Z' }, { ...sent, at: '2026-10-12T09:00:00Z' }]));
     return planRecord([{ who: 'c001', what: 'unsent', said: 'undo that' }], { byId, approved: new Set(['c001']), state, slots: [], zone: 'UTC', now: new Date('2026-10-13T10:00:00Z'), coordinate: new Map() });
   };
-  for (const [label, sent] of [['floorboss', { via: 'floorboss' }], ['mailbox sync', { source: 'gmail', ext: 'm1#t1' }], ['thread status', { source: 'mailbox' }], ['crm task', { via: 'crm task' }]]) {
+  for (const [label, sent] of [['floorboss', { via: 'floorboss' }], ['mailbox sync', { source: 'gmail', ext: 'm1#t1' }], ['mailbox', { source: 'mailbox' }], ['crm task', { via: 'crm task' }]]) {
     const r = plan({ type: 'sent', id: 'c001', touch: 1, date: '2026-10-12', ...sent });
     assert.equal(r.entries.filter((e) => e.type === 'sent_undone').length, 0, label);
     assert.match(r.errors[0] || '', /not from a report of yours: it isn't undone here/, label);
@@ -293,19 +291,6 @@ test('8: a recorded reply, the critic\'s note and the agenda keep no U+202E, BEL
   const text = JSON.stringify(a) + (a.file && existsSync(a.file) ? readFileSync(a.file, 'utf8') : '');
   assert.ok(/Tuesday works/.test(text), text.slice(0, 300));
   assert.ok(!dirty(text), text.slice(0, 400));
-});
-
-// 9. The tracker page runs only its own script, allowed by its hash, and takes no base or form target.
-test('9: the tracker page allows only its own script, by hash, with base-uri and form-action none', () => {
-  const html = trackerHtml({ event: { name: 'Test Expo' }, rows: [{ name: 'Ana Berg', company: 'Acme', channel: 'email', status: 'sent', tone: 'ok' }], counts: { sent: 1 }, at: '2026-10-12' });
-  const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(html)?.[1] || '';
-  const scriptSrc = /script-src ([^;]*)/.exec(csp)?.[1] || '';
-  assert.doesNotMatch(scriptSrc, /unsafe-inline/);
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
-  assert.equal(scripts.length, 1);
-  assert.equal(scriptSrc, `'sha256-${createHash('sha256').update(scripts[0], 'utf8').digest('base64')}'`);
-  assert.match(csp, /base-uri 'none'/);
-  assert.match(csp, /form-action 'none'/);
 });
 
 // 10. An address is the user's only at one of their own domains.

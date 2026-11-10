@@ -320,8 +320,8 @@ export function planRecord(items, ctx) {
           errors.push(`${where}: ${who} has no recorded send${item.touch != null ? ` for message ${item.touch}` : ''} to undo`);
           return;
         }
-        // Only a send recorded from a report of the user's: one floorboss sent, one the mailbox shows (a sync, a
-        // thread check) or one logged any other way went out, and taking it back would let it be sent again.
+        // Only a send recorded from a report of the user's: one floorboss sent, one the mailbox shows (a sync)
+        // or one logged any other way went out, and taking it back would let it be sent again.
         if (st.sent_via[touch] === 'mailbox') {
           errors.push(`${where}: ${whichMessage(touch)} to ${who} (${st.sent[touch]}) shows in your mailbox as sent: it went, so it isn't undone here`);
           return;

@@ -15,7 +15,6 @@ test('note_passed (or sent to:"colleague") marks the coordinate note done; a pla
   const diane = idOf(H, 'Diane Woo');
   const d = draftApprove(H);
   assert.ok(d.jobs.some((j) => j.id === diane && j.kind === 'coordinate'), 'a note to Jordan was drafted');
-  assert.equal(cli(H, 'event-outreach', ['tracker', '--event', H.slug]).counts['Note to colleague ready'], 1);
   const rec = (items) => { const f = join(H.dir, 'report.json'); writeFileSync(f, JSON.stringify({ items })); return cli(H, 'event-outreach', ['record', '--event', H.slug, '--file', f]); };
   const plain = rec([{ who: diane, what: 'sent', channel: 'slack' }]);
   assert.match(plain.ERROR || '', /held by Jordan Fisk\. If you passed the note on to Jordan Fisk, record \{"who":"c\d+","what":"note_passed"\}/);
@@ -24,9 +23,6 @@ test('note_passed (or sent to:"colleague") marks the coordinate note done; a pla
   assert.match(ok.recorded[0], /note to Jordan Fisk about Diane Woo .* passed on via slack; nothing went to Diane Woo/);
   const again = rec([{ who: diane, what: 'note_passed' }]);
   assert.match(again.notes[0], /already recorded as passed on/);
-  const tr = cli(H, 'event-outreach', ['tracker', '--event', H.slug]);
-  assert.equal(tr.counts['Note to colleague ready'], undefined, JSON.stringify(tr.counts));
-  assert.equal(tr.counts['Colleague told'], 1);
   const led = readFileSync(join(H.dir, 'ledger.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.id === diane);
   assert.ok(!led.some((e) => e.type === 'sent' || e.type === 'decide'), 'nothing recorded about Diane herself');
   assert.equal(led.filter((e) => e.type === 'note_passed').length, 1);

@@ -54,7 +54,8 @@ test('calendar: typed times minus busy; all-day markers named and ignorable; no 
   const cli = cliIn(home);
   cli('mock', ['--goal', 'buyers', '--now', NOW]);
   const ev = JSON.parse(readFileSync(join(home, 'events', SLUG, 'event.json'), 'utf8'));
-  const win = cli('slot-finder', ['calendar-window', '--event', SLUG]);
+  // The event's days as whole days in Lisbon (UTC+0 at the end of October).
+  const win = { from: `${ev.start_date}T00:00:00Z`, to: new Date(Date.parse(`${ev.end_date}T00:00:00Z`) + 864e5).toISOString() };
   const bf = join(home, 'busy.json');
   writeFileSync(bf, JSON.stringify({ busy: [{ start: win.from, end: win.to, summary: 'Lisbon trip', all_day: true }, { start: `${ev.start_date}T10:00:00Z`, end: `${ev.start_date}T11:00:00Z`, summary: 'Board call' }] }));
   const none = cli('slot-finder', ['build', '--event', SLUG, '--busy-file', bf]);

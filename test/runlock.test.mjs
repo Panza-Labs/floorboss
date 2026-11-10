@@ -96,34 +96,6 @@ test('run lock: reading a list in the browser now limits the browser to reads fo
   assert.equal(guard(home, 'mcp__claude_ai_Claude_Docs__guide').code, 0);
 });
 
-test('triage notice: with no connectors, it says which checks are off and what to give by hand', () => {
-  const home = mkdtempSync(join(tmpdir(), 'fb-missing-'));
-  const dir = join(home, 'events', 'tx-expo');
-  execFileSync('mkdir', ['-p', dir]);
-  writeFileSync(join(dir, 'event.json'), JSON.stringify({ slug: 'tx-expo', name: 'Travel Buyers Expo', tz: 'America/Chicago', start: '2027-03-16', end: '2027-03-17' }));
-  const missing = () => JSON.parse(execFileSync('node', [join(ROOT, 'skills/connectors/scripts/cli.mjs'), 'missing', '--event', 'tx-expo'], { env: { ...process.env, FLOORBOSS_HOME: home }, encoding: 'utf8' }));
-  let r = missing();
-  assert.equal(r.none_connected, true);
-  assert.deepEqual(r.by_hand, ['already_in_touch', 'crm_ownership', 'calendar_free_time']);
-  assert.match(r.off[0].line, /Already-in-touch check is OFF.*--known/);
-  assert.match(r.off[1].line, /CRM ownership check is OFF.*--crm/);
-  assert.match(r.off[2].line, /Calendar-based free time is OFF.*\.ics/);
-  writeFileSync(join(dir, 'slots.json'), JSON.stringify([{ id: 's1', start: '2027-03-16T14:00:00Z' }]));
-  writeFileSync(join(dir, 'event.json'), JSON.stringify({ slug: 'tx-expo', name: 'Travel Buyers Expo', tz: 'America/Chicago', crm: { path: join(home, 'crm.csv') } }));
-  r = missing();
-  assert.deepEqual(r.by_hand, ['already_in_touch'], 'files given by hand cover the checks they can');
-  assert.match(r.off[2].line, /The 1 time floorboss offers come from the free time you typed/);
-  // Complete saved recipes (as discovery saves them) for the mailbox and the CRM.
-  const done = { tool_hash: 'a'.repeat(64), reading: 'x', probe: { ok: true } };
-  writeFileSync(join(home, 'config.json'), JSON.stringify({ connectors: {
-    'email.history': { server: 'mail', tool: 'search_threads', args: { query: 'from:{email} OR to:{email}' }, ...done },
-    'crm.lookup': { server: 'crm', tool: 'search_contacts', args: { query: '{email}', limit: 5 }, opt_out_source: 'none-confirmed', ...done },
-  } }));
-  r = missing();
-  assert.equal(r.none_connected, false);
-  assert.deepEqual(r.off.map((o) => o.check), ['calendar_free_time'], 'saved recipes count as connected');
-});
-
 test('guard: a recipe edited to a send tool is refused, and a staged draft must match an approved one', async () => {
   const { check, approvedText } = await import('../hooks/guard.mjs');
   const bad = { connectors: { stage_draft: { server: 'gmail', tool: 'send_message', args: { to: '{to}', body: '{body}' }, reading: 'x', tool_hash: 'a'.repeat(64), test_draft: { draft_id: 'd', user_confirmed: true } } } };

@@ -1931,7 +1931,7 @@ export function nextStep(c) {
       const it = follow[0];
       const elsewhere = otherChannelStep(c, e, cfg, it, follow);
       if (elsewhere) return elsewhere;
-      // The guard's own rule: a mailbox or thread check, or (with nothing that can read replies) the user's word.
+      // The guard's own rule: a mailbox check, or (with nothing that can read replies) the user's word.
       // A reader that failed is asked about (retry, or the user answers instead); the user's word counts only
       // once they chose that, after the latest failure.
       const failedAt = e.state.tool_failed['email.messages'] ? Date.parse(e.state.tool_failed['email.messages'].at) : null;
@@ -1963,7 +1963,7 @@ export function nextStep(c) {
       };
       const sentAt = sentOf(it);
       const at = lastReplyCheck(e.entries, it.id, 'email.send', rdr, sentAt);
-      const noReader = readerDown || (!cfg.connectors?.['email.messages'] && !cfg.connectors?.['email.thread_has_reply']);
+      const noReader = readerDown || !cfg.connectors?.['email.messages'];
       const fresh = at && at >= sentAt && c.now.getTime() - at <= REPLY_CHECK_SECONDS * 1000;
       const check = at ? { at: new Date(at).toISOString() } : null;
       if (!fresh && cfg.connectors?.['email.messages'] && !readerDown)

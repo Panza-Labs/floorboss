@@ -93,6 +93,20 @@ test('follow-ups: only on their day, only after replies were checked, never afte
   assert.ok(changed.waiting.some((w) => w.id === ana && /changed after you approved/.test(w.why)));
 });
 
+// A thread-reply recipe saved by an older floorboss: nothing reads with it any more, so it isn't a reply reader.
+test('a saved email.thread_has_reply recipe is ignored: with no other reader, the user\'s "no reply" counts and the follow-up is listed', () => {
+  const H = ready();
+  const old = { server: 'gmail', tool: 'get_thread', args: { threadId: '{thread_id}' }, reading: 'x', tool_hash: 'b'.repeat(64), probe: { ok: true } };
+  writeFileSync(join(H.HOME, 'config.json'), JSON.stringify({ connectors: { 'email.send': RECIPE, 'email.thread_has_reply': old } }));
+  draftApprove(H);
+  const ana = idOf(H, 'Ana Berg'), bo = idOf(H, 'Bo Li');
+  sendListed(H);
+  const ok = cli(H, 'event-outreach', ['send-list', '--event', H.slug, '--no-reply-check', 'nobody answered'], LATER(8));
+  assert.ok(!ok.ERROR, ok.ERROR);
+  assert.deepEqual(JSON.parse(readFileSync(ok.file, 'utf8')).map((x) => [x.id, x.touch]).sort(), [[ana, 2], [bo, 2]].sort(), JSON.stringify(ok));
+  assert.ok(!cli(H, 'connectors', ['status']).some((r) => r.task === 'email.thread_has_reply'), 'not a task any more');
+});
+
 test('each_round: a due follow-up waits for the round to be approved', () => {
   const H = ready({ sending: { ...SENDING, followups: 'each_round' } });
   draftApprove(H);

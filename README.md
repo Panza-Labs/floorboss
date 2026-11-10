@@ -327,10 +327,10 @@ script enforces that from the tool's name alone, so a tool's description can't t
 
 | Job | Connected | Not connected |
 |---|---|---|
-| Your free time | read busy times from your calendar | type it, or give an `.ics` export |
+| Your free time | read busy times from your calendar | type it |
 | Your CRM | look each person up | a CSV export |
 | New people | anyone about to get a first email who isn't in your CRM is added as a contact first (name, email, company, title; nothing else changed), so the CRM logs their replies | import the CSV floorboss gives you, or go on without and be asked about their replies |
-| Drafts | saved as drafts in your mailbox, exactly as approved (one test draft to yourself first, on your yes) | copy from the outbox, or open `.eml` files as drafts in Mail or Outlook |
+| Drafts | saved as drafts in your mailbox, exactly as approved (one test draft to yourself first, on your yes) | copy from the outbox |
 | Replies | read from your mailbox, or from your CRM (which logs your email), at the start of every run and again right before each follow-up; a CRM read counts for someone only when it shows the CRM has their email since your last message and has logged incoming email at this event at all (a CRM that logs only what you send can't see a reply), and you're asked about anyone it can't see | you're asked what came in at the start of every run, before anything is drafted or sent |
 | Event-app and LinkedIn messages | a CRM task per message with the exact text and a due date; you send it, mark the task done, and write "replied", "booked Tue 10:00" or "stop" in it | copy from the outbox and tick Sent |
 | Already in touch | anyone you've emailed with is held before a first draft, from a search of your mailbox | a contacts export (`--known`) |
@@ -339,8 +339,7 @@ script enforces that from the tool's name alone, so a tool's description can't t
 | Missing emails | one lookup per person in your people-data tool, only as many as you agreed to | a CSV to fill in |
 | LinkedIn and event-app replies | read in your browser, read-only, only for the inboxes you said yes to | you're asked "has X replied?" before each follow-up |
 
-Everything lands in one log per event. Ask Claude for "the tracker" (it runs floorboss's `tracker` command)
-for a page with one row per person: their status on every channel, the last touch and what's next.
+Everything lands in one log per event.
 
 floorboss translates every answer a tool gives into its own format, and a script checks it before anything
 uses it. If a tool's answers stop passing that check, floorboss tells you and goes back to the manual step.
@@ -378,8 +377,8 @@ Each event is a folder in `events/`:
 - **Research**: person profiles in `profiles/` and company briefs in `companies/`, each claim with its
   source.
 - **Drafts**, in `drafts/`, each saved under a fingerprint of its text, never edited in place.
-- **Pages** you open: `outbox.html`, `tracker.html` and, on a meeting day, `agenda.html` (with `agenda.md`
-  and `agenda.ics`).
+- **Pages** you open: `outbox.html` and, on a meeting day, `agenda.html` (with `agenda.md` and
+  `agenda.ics`).
 - **Derived and working files** in `derived/` and `work/` (the shortlist, the list of what to draft, the
   rating set, the critic's batches), rebuilt from the others on every run and safe to delete. The pages
   are rebuilt the same way.
@@ -414,10 +413,10 @@ private claude.ai page. Floorboss says which before each of these.
   and the event sites you named, and refuses any web address or search query over 300 characters or with a
   line break (a link can carry data out), so don't put WebFetch on "always allow" in a floorboss session. The
   JSON files floorboss's steps pass around are read only from floorboss's data folder and the temp folder;
-  the lists you point it at (attendees, CRM export, contacts, do-not-contact, calendar file) are read from
+  the lists you point it at (attendees, CRM export, contacts, do-not-contact) are read from
   the data folder, the temp folder or the folder you started Claude Code in, never from key or config
   folders. A list in Downloads works if you start Claude Code there or copy it to one of those. A list is taken only as a plain file of its own kind (csv, tsv,
-  txt, xlsx or xls; a calendar file as ics; a do-not-contact list as txt or csv; the lookups floorboss's steps write as json), never a
+  txt, xlsx or xls; a do-not-contact list as txt or csv; the lookups floorboss's steps write as json), never a
   folder or a pipe, up to 50 MB, never from inside `.git` or `node_modules`, and is copied
   into the data folder, where Claude reads without asking. So any list-shaped file in your project folder
   can be read this way.

@@ -178,10 +178,9 @@ export function readContacts(c) {
   const { contacts, entries, merges } = assignIds(merged.contacts, c.state.people);
   for (const e of entries) log(c, e);
   for (const mg of merges) log(c, { type: 'person_merged', who: 'floorboss', id: mg.id, into: mg.into, why: mg.why });
-  // What the user said about each person stands: their spelling of a name, their channel, their notes.
+  // What the user said about each person stands: their channel, their notes.
   for (const ct of contacts) {
     const p = c.state.people[ct.id];
-    if (p?.renamed_to) ct.name = p.renamed_to;
     if (p?.email_override) {
       ct.emails = [...new Set([p.email_override, ...ct.emails])];
       ct.email = p.email_override;

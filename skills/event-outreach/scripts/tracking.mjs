@@ -3,8 +3,6 @@
 // Tracking across channels. Email is read from the mailbox; meetings from the calendar; everything that has
 // no connector (event-app messages, LinkedIn, colleague notes, decisions for the user) becomes a CRM task,
 // and the task's completion and outcome come back into the contact log. One log, every channel.
-import { createHash } from 'node:crypto';
-import { escapeHtml } from '../../../lib/escape.mjs';
 import { timeMentioned } from './checks.mjs';
 // A name in a task title: one line, no longer than a name.
 const short = (x) =>
@@ -165,48 +163,3 @@ export function bookingsFrom(events, contacts, { slots = [], window = null, mine
   }
   return out;
 }
-
-// The tracker: one row per person, from the log. rows: [{name, company, channel, status, last, next, note, tone}].
-export function trackerHtml({ event, rows, counts, at }) {
-  const CSP = `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${TRACKER_HASH}'; img-src 'none'; base-uri 'none'; form-action 'none'`;
-  const tr = rows
-    .map(
-      (r) =>
-        `<tr data-tone="${escapeHtml(r.tone)}"><td>${escapeHtml(r.name)}<div class="sub">${escapeHtml(r.company)}</div></td><td>${escapeHtml(r.channel)}</td><td class="st">${escapeHtml(r.status)}</td><td>${escapeHtml(r.last || '')}</td><td>${escapeHtml(r.next || '')}</td><td class="sub">${escapeHtml(r.note || '')}</td></tr>`
-    )
-    .join('\n');
-  const chips = Object.entries(counts)
-    .map(([k, v]) => `<button data-f="${escapeHtml(k)}">${escapeHtml(k)} <b>${v}</b></button>`)
-    .join('');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="${CSP}">
-<title>${escapeHtml(event.name)} tracker</title>
-<style>
-:root{--bg:#fbfaf8;--fg:#1d1d1b;--mute:#6b6a66;--line:#e4e1db;--ok:#2f6f4f;--warn:#9a5b00;--stop:#8a2b2b;--chip:#efece6}
-@media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#ecebe7;--mute:#9a9893;--line:#2c2b29;--ok:#7cc4a0;--warn:#e0a85a;--stop:#e08a8a;--chip:#22211f}}
-body{margin:0;padding:24px 16px;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
-h1{font-size:20px;margin:0 0 4px}.sub{color:var(--mute);font-size:12px}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin:14px 0}.chips button{background:var(--chip);border:1px solid var(--line);color:var(--fg);border-radius:999px;padding:4px 10px;cursor:pointer;font:inherit}
-.chips button[aria-pressed=true]{border-color:var(--fg)}
-input{width:100%;max-width:360px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
-.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:720px;margin-top:10px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-th{font-size:12px;color:var(--mute);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-tr[data-tone=ok] .st{color:var(--ok)}tr[data-tone=warn] .st{color:var(--warn)}tr[data-tone=stop] .st{color:var(--stop)}
-</style></head><body>
-<h1>${escapeHtml(event.name)}</h1><div class="sub">Who you're reaching and where each person stands, from floorboss's log. Updated ${escapeHtml(at)}. This page only shows; change things with /floorboss:start.</div>
-<div class="chips">${chips}</div>
-<input id="q" placeholder="Filter by name, company or status" aria-label="Filter">
-<div class="wrap"><table><thead><tr><th>Person</th><th>Channel</th><th>Status</th><th>Last touch</th><th>Next</th><th>Why</th></tr></thead><tbody>
-${tr}
-</tbody></table></div>
-<script>${TRACKER_SCRIPT}</script></body></html>`;
-}
-// The tracker's one script, fixed text: the page allows exactly this by its hash, so nothing put in the page
-// from the log can run, even past the escaping.
-const TRACKER_SCRIPT = `
-const rows=[...document.querySelectorAll('tbody tr')];let f=null;
-function apply(){const q=document.getElementById('q').value.toLowerCase();rows.forEach(r=>{const st=r.querySelector('.st').textContent;r.hidden=!(r.textContent.toLowerCase().includes(q)&&(!f||st.toLowerCase().startsWith(f.toLowerCase())))})}
-document.getElementById('q').addEventListener('input',apply);
-document.querySelectorAll('.chips button').forEach(b=>b.addEventListener('click',()=>{f=f===b.dataset.f?null:b.dataset.f;document.querySelectorAll('.chips button').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.f===f)));apply()}));
-`;
-const TRACKER_HASH = createHash('sha256').update(TRACKER_SCRIPT, 'utf8').digest('base64');

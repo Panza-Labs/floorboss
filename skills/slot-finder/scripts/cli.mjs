@@ -4,7 +4,7 @@
 // Plan: create the event, turn free times into slots, remove slots the user can't do.
 import { run, need } from '../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../lib/jsonio.mjs';
-import { allowedPath, notSensitive, expandHome } from '../../../lib/paths.mjs';
+import { allowedPath } from '../../../lib/paths.mjs';
 import { loadEvent, files, saveEvent, nowFrom } from '../../../lib/event.mjs';
 import { loadConfig } from '../../../lib/config.mjs';
 import { slugify, assertSlug } from '../../../lib/paths.mjs';
@@ -85,13 +85,9 @@ function eventWindow(event) {
   return { from: z({ ...a }, event.time_zone).toISOString(), to: z({ ...b }, event.time_zone).toISOString() };
 }
 
-// Busy blocks from a calendar connector's answer (already in floorboss's format) or an .ics file.
-async function readBusy(opts, event) {
+// Busy blocks from a calendar connector's answer (already in floorboss's format).
+function readBusy(opts, event) {
   const win = eventWindow(event);
-  let busy,
-    warnings = [],
-    source,
-    wholeDay = [];
   const ignoreAllDay = !!opts['ignore-all-day'];
   // --ignore "staff meeting|prep call": calendar items whose title contains one of these don't count as busy.
   const skip = String(opts.ignore || '')
@@ -105,49 +101,22 @@ async function readBusy(opts, event) {
         .toLowerCase()
         .includes(x)
     );
-  if (opts['busy-file']) {
-    const raw = readJson(allowedPath(opts['busy-file']));
-    const r = validateBusy({ ...raw, busy: (raw.busy || []).filter(keep) }, { ...win, ignoreAllDay });
-    if (r.errors.length) throw new Error(`The calendar's busy times didn't validate: ${r.errors.slice(0, 3).join('; ')}`);
-    busy = r.busy;
-    wholeDay = r.whole_day;
-    source = 'calendar connector';
-  } else {
-    const { parseIcsBusy } = await import('./ics.mjs');
-    const { readFileSync } = await import('node:fs');
-    // Read from where floorboss reads lists (its data folder, the temp folder, the folder Claude Code started in).
-    const p = notSensitive(allowedPath(expandHome(opts.ics), { list: true, ext: /\.ics$/i }));
-    const { statSync, existsSync } = await import('node:fs');
-    if (!existsSync(p)) throw new Error(`${opts.ics} isn't there: give the path to your calendar's .ics export.`);
-    const { listFileProblem } = await import('../../../lib/security.mjs');
-    const problem = listFileProblem(p, statSync(p).size, 'ics') || (statSync(p).isFile() ? null : `${opts.ics} isn't a plain file.`);
-    if (problem) throw new Error(problem);
-    const text = readFileSync(p, 'utf8');
-    // The calendar's own zone (X-WR-TIMEZONE) places all-day and floating items, unless --zone says otherwise.
-    const calZone = (/^X-WR-TIMEZONE:(.+)$/m.exec(text) || [])[1]?.trim();
-    const r = parseIcsBusy(text, { ...win, assumeZone: opts.zone || (calZone && isValidZone(calZone) ? calZone : event.time_zone) });
-    const v = validateBusy(
-      { busy: r.busy.filter(keep).map((b) => ({ start: b.start, end: b.end, summary: b.summary, all_day: b.all_day })) },
-      { ...win, ignoreAllDay }
-    );
-    busy = v.busy;
-    wholeDay = v.whole_day;
-    warnings = r.warnings || [];
-    source = `.ics file (${opts.ics})`;
-  }
-  return { busy, warnings, source, wholeDay, ignoreAllDay };
+  const raw = readJson(allowedPath(opts['busy-file']));
+  const r = validateBusy({ ...raw, busy: (raw.busy || []).filter(keep) }, { ...win, ignoreAllDay });
+  if (r.errors.length) throw new Error(`The calendar's busy times didn't validate: ${r.errors.slice(0, 3).join('; ')}`);
+  return { busy: r.busy, source: 'calendar connector', wholeDay: r.whole_day, ignoreAllDay };
 }
 
-// Free ranges from busy blocks: a calendar connector's answer (already in floorboss's format) or an .ics file.
-async function rangesFromBusy(opts, event, settings) {
-  const { busy, warnings, source, wholeDay, ignoreAllDay } = await readBusy(opts, event);
+// Free ranges from busy blocks: a calendar connector's answer (already in floorboss's format).
+function rangesFromBusy(opts, event, settings) {
+  const { busy, source, wholeDay, ignoreAllDay } = readBusy(opts, event);
   const { ranges, busy_hours } = freeFromBusy(busy, {
     eventDays: eventDays(event),
     eventZone: event.time_zone,
     hours: settings.hours,
     minMinutes: settings.meeting_minutes
   });
-  return { ranges, source, busy_blocks: busy.length, busy_hours, warnings, wholeDay, ignoreAllDay };
+  return { ranges, source, busy_blocks: busy.length, busy_hours, wholeDay, ignoreAllDay };
 }
 
 const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -204,7 +173,7 @@ export function rangesFromDays(raw, event) {
   return { ranges: out, errors, except, notes: (Array.isArray(raw?.notes) ? raw.notes : []).map((n) => String(n).slice(0, 200)) };
 }
 
-async function build(opts) {
+function build(opts) {
   need(opts, 'event');
   if (opts['days-file']) {
     const ev = loadEvent(opts.event).event;
@@ -212,8 +181,8 @@ async function build(opts) {
     if (r.errors.length) throw new Error(`The free days didn't validate: ${r.errors.slice(0, 4).join('; ')}. Nothing was saved.`);
     opts = { ...opts, _days: r };
   }
-  if (!opts.free && !opts._days && !opts['busy-file'] && !opts.ics)
-    throw new Error('Give --free "<times>", --busy-file <calendar answer> or --ics <calendar export>.');
+  if (!opts.free && !opts._days && !opts['busy-file'])
+    throw new Error('Give --free "<times>" or --busy-file <calendar answer>.');
   const { event, settings, paths } = loadEvent(opts.event);
   let zone = opts.zone ? zoneFrom(opts.zone) : event.time_zone;
   if (!zone || !isValidZone(zone))
@@ -244,11 +213,11 @@ async function build(opts) {
     if (a1 > a2) ampmNote = `Times without am/pm like "3-5" were read as afternoon in ${zone}. If you meant morning, add "am".`;
     return first;
   };
-  if ((opts.free || opts._days) && (opts['busy-file'] || opts.ics)) {
+  if ((opts.free || opts._days) && opts['busy-file']) {
     // Typed free times, minus whatever the calendar says is busy.
     ({ ranges, unparsed, except } = typed());
     refuseUnparsed(unparsed, event);
-    const b = await readBusy(opts, event);
+    const b = readBusy(opts, event);
     const typedRanges = ranges;
     const sub = subtractBusy(ranges, b.busy, { sourceZone: zone, eventZone: event.time_zone, minMinutes: settings.meeting_minutes });
     // Say which typed times the calendar took away, so nothing disappears silently.
@@ -268,7 +237,6 @@ async function build(opts) {
       source: `${b.source}, subtracted from your typed times`,
       busy_blocks: b.busy.length,
       busy_hours: null,
-      warnings: b.warnings,
       wholeDay: b.wholeDay,
       ignoreAllDay: b.ignoreAllDay
     };
@@ -276,7 +244,7 @@ async function build(opts) {
     ({ ranges, unparsed, except } = typed());
     refuseUnparsed(unparsed, event);
   } else {
-    fromCal = await rangesFromBusy(opts, event, settings);
+    fromCal = rangesFromBusy(opts, event, settings);
     ranges = fromCal.ranges;
     zone = event.time_zone;
   }
@@ -317,7 +285,6 @@ async function build(opts) {
           source: fromCal.source,
           busy_blocks: fromCal.busy_blocks,
           busy_hours_in_working_hours: fromCal.busy_hours ?? undefined,
-          warnings: fromCal.warnings.length ? fromCal.warnings : undefined,
           all_day_items: fromCal.wholeDay.length ? fromCal.wholeDay : undefined,
           all_day_note:
             fromCal.wholeDay.length && !fromCal.ignoreAllDay
@@ -373,13 +340,6 @@ function remove(opts) {
   return { slots: data.slots.length, by_day: view(event, settings, data.slots) };
 }
 
-// The window to ask a calendar for, so the agent calls the tool with the right range.
-function calendarWindow(opts) {
-  need(opts, 'event');
-  const { event, settings } = loadEvent(opts.event);
-  return { ...eventWindow(event), event_zone: event.time_zone, working_hours: settings.hours };
-}
-
 function show(opts) {
   need(opts, 'event');
   const { event, settings, paths } = loadEvent(opts.event);
@@ -408,7 +368,7 @@ function alias(opts) {
   return { event: event.name, short_names: aliases };
 }
 
-// The event's app for messages and meetings (Brella, Swapcard…): tasks and the tracker name it.
+// The event's app for messages and meetings (Brella, Swapcard…): tasks name it.
 function app(opts) {
   need(opts, 'event', 'name');
   const { event } = loadEvent(opts.event);
@@ -421,4 +381,4 @@ function app(opts) {
   return { event: event.name, app_name: name || null, no_app: !name || undefined };
 }
 
-run({ create, build, remove, show, alias, app, 'calendar-window': calendarWindow });
+run({ create, build, remove, show, alias, app });

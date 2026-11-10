@@ -51,21 +51,17 @@ test('onboarding answer file: a question id maps to its answer; a setting questi
   assert.match(ans({ favourite_colour: 'blue' }).ERROR, /isn't an answer id or a question id/);
 });
 
-test('stage-list and eml leave out the emails sending covers; confirmations still stage', () => {
+test('stage-list leaves out the emails sending covers; confirmations still stage', () => {
   const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\n', settings: { sending: { channels: ['email'], followups: 'scheduled', linkedin_ack: false } } });
   writeFileSync(join(H.HOME, 'config.json'), JSON.stringify({ connectors: { 'email.send': RECIPE } }));
   triage(H); draftApprove(H);
   const s = cli(H, 'event-outreach', ['stage-list', '--event', H.slug]);
   assert.equal(s.to_stage, 0, JSON.stringify(s).slice(0, 300));
-  const e = cli(H, 'event-outreach', ['eml', '--event', H.slug]);
-  assert.equal(e.written, 0, JSON.stringify(e).slice(0, 300));
 });
 
-test('the mock event runs hands-off: no contacts-file question, no incomplete-list warning, a drafting mode set', () => {
+test('the mock event runs hands-off: no incomplete-list warning, a drafting mode set', () => {
   const H = setup({ attendees: 'Name,Title,Company,Email\nx,y,z,\n' });
   execFileSync('node', [join(ROOT, 'examples/mock-event/load.mjs'), 'buyers'], { env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: NOW }, encoding: 'utf8' });
-  const m = cli({ ...H, slug: 'mock-harbour-haul' }, 'connectors', ['missing', '--event', 'mock-harbour-haul']);
-  assert.deepEqual(m.by_hand, [], JSON.stringify(m.by_hand));
   const load = cli(H, 'crm-triage', ['load', '--event', 'mock-harbour-haul']);
   assert.ok(!JSON.stringify(load).includes("can't tell whether this is the whole list"));
   assert.equal(load.accounts.crm_accounts, 'apply');

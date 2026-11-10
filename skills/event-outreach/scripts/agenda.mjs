@@ -13,8 +13,8 @@ import { todayKeyIn } from '../../../lib/tz.mjs';
 import { readCompanyBrief } from '../../attendee-research/scripts/companies.mjs';
 import { readProfile } from '../../attendee-research/scripts/profiles.mjs';
 
-// As in the outbox and the tracker: the page loads nothing, runs no script and sends nothing anywhere, so
-// text from a web page or an attendee note can't act in it.
+// The page loads nothing, runs no script and sends nothing anywhere, so text from a web page or an attendee
+// note can't act in it.
 const AGENDA_CSP = "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'";
 // One line, no control or invisible characters (a bidi override in a note or a reply reorders what's shown).
 const clip = (t, n) => {

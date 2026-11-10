@@ -86,7 +86,7 @@ The first public version.
 - Telling floorboss "sent" after a booking records the confirmation, and `unsent` takes back a send you
   recorded yourself by mistake (never one floorboss sent or found in your mailbox). A reply you report
   shows in the meeting brief.
-- One ledger per event, a tracker page, and CRM logging that fills blank fields only. Logging through
+- One ledger per event and CRM logging that fills blank fields only. Logging through
   your browser types only listed details, and asks you before each message text. With your yes in setup, someone
   the CRM doesn't have is added there so the message can be logged; the recommended answer asks once per batch, naming them.
 - Someone who sent an out-of-office is noted as away until the day they're back in the run's summary, and their

@@ -1,5 +1,5 @@
-// Tracking across channels: CRM tasks for event-app and LinkedIn messages, their outcomes, calendar bookings,
-// and the tracker page. Runs against the stand-in CRM through the real CLIs.
+// Tracking across channels: CRM tasks for event-app and LinkedIn messages, their outcomes and calendar
+// bookings. Runs against the stand-in CRM through the real CLIs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -73,12 +73,6 @@ test('event-app messages become CRM tasks; done tasks and their outcomes come ba
   writeFileSync(join(H.dir, 'ev.json'), JSON.stringify({ events: [{ start: diSlot.start, end: diSlot.end, summary: 'Coffee', self_response: 'accepted', attendees: [{ email: 'di@hooli.test', response: 'accepted' }], status: 'confirmed' }] }));
   const cb = cli(H, 'event-outreach', ['calendar-bookings', '--event', H.slug, '--file', join(H.dir, 'ev.json')]);
   assert.deepEqual(cb.booked.map((b) => b.id), [di]);
-  // The tracker shows it all.
-  const tr = cli(H, 'event-outreach', ['tracker', '--event', H.slug]);
-  const html = readFileSync(tr.tracker, 'utf8');
-  assert.ok(tr.counts.Booked === 2 && tr.counts.Stopped === 1, JSON.stringify(tr.counts));
-  assert.match(html, /Ana Berg/);
-  assert.match(html, /Content-Security-Policy/);
 });
 
 test('stops in any phrasing, negations ask, long notes read whole, no double bookings, calendar only inside the event', async () => {

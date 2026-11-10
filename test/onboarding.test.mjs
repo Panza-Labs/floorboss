@@ -56,7 +56,7 @@ test('onboarding: colleagues by name are never contacted; "none" isn\'t an app; 
   assert.ok(p.held['no email'] >= 1, JSON.stringify(p.held));
 });
 
-test('onboarding: event opt-in asks, the right duplicate is kept, must-meet companies, recent negatives ask, rename, none', async () => {
+test('onboarding: event opt-in asks, the right duplicate is kept, must-meet companies, recent negatives ask, none', async () => {
   const H = setup({ attendees: 'Name,Title,Company,Email,Matchmaking opt-in\nAna Berg,Partner,Coral Seed,ana@coralseed.test,No\nDaniel Wong,Partner,Banyan Partners,daniel.wong.example@gmail.com,Yes\nDaniel Wong,Partner,Banyan Partners,dwong@banyan.test,Yes\nY?lmaz Kaya,COO,Bergmann,yk@bergmann.test,Yes\nBernd Kaiser,COO,Bergmann,bk@bergmann.test,Yes\nBo Li,VP Ops,Globex,,Yes\n',
     crm: 'Name,Email,Company,Owner,Status,Last Contact,Unsubscribed\nDaniel Wong,dwong@banyan.test,Banyan Partners,,Investor,2026-09-01,false\nBernd Kaiser,bk@bergmann.test,Bergmann,,Lost,2026-10-05,false\n',
     settings: { must_meet: ['all Bergmann buyers', 'Mira (Lindqvist Foundation, Oslo)'] } });
@@ -83,10 +83,6 @@ test('onboarding: event opt-in asks, the right duplicate is kept, must-meet comp
   cli(H, 'event-context', ['config', '--set-file', cfg]);
   cli(H, 'crm-triage', ['load', '--event', H.slug]);
   assert.notEqual(JSON.parse(readFileSync(join(H.dir, 'derived', 'compat', 'triage.json'), 'utf8')).pre[all.find((c) => c.email === 'ana@coralseed.test').id].group, 'suppressed');
-  const y = all.find((c) => c.email === 'yk@bergmann.test').id;
-  assert.equal(cli(H, 'crm-triage', ['rename', '--event', H.slug, '--id', y, '--name', 'Yılmaz Kaya']).now, 'Yılmaz Kaya');
-  cli(H, 'crm-triage', ['load', '--event', H.slug]);
-  assert.equal(JSON.parse(readFileSync(join(H.dir, 'derived', 'compat', 'contacts.json'), 'utf8')).contacts.find((c) => c.id === y).name, 'Yılmaz Kaya', 'kept across loads');
   // No app, and Bo has no email: nobody can reach him.
   cli(H, 'slot-finder', ['app', '--event', H.slug, '--name', 'none']);
   const f = join(H.dir, 'f.json');

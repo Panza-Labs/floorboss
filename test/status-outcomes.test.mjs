@@ -98,11 +98,6 @@ test('someone away is noted in the summary and their follow-up stays due', () =>
     'both are due'
   );
   assert.deepEqual(s.away, [{ id: ana, name: 'Ana Berg', until: '2026-10-25', note: 'away until 2026-10-25: follow-ups go on as planned' }]);
-  cli(H, 'event-outreach', ['tracker', '--event', H.slug], LATER);
-  const html = readFileSync(join(H.dir, 'tracker.html'), 'utf8');
-  const row = (name) => html.split('<tr').find((r) => r.includes(name));
-  assert.match(row('Ana Berg'), /Follow up now/);
-  assert.match(row('Bo Li'), /Follow up now/);
   // Back on the 25th: no longer noted.
   const back = cli(H, 'event-outreach', ['summary', '--event', H.slug], '2026-10-25T08:00:00Z');
   assert.deepEqual(

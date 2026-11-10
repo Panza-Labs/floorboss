@@ -1996,7 +1996,7 @@ export function testOnItsServer(pending, config) {
   const foundAs = (kind) => atSetup && (setupKinds(inv)[kind] || []).some((x) => String(x).startsWith('mcp:') && sameServer(String(x).slice(4), server));
   const saved = (...tasks) => tasks.some((t) => config.connectors?.[t]?.server && sameServer(config.connectors[t].server, server));
   if (['crm.create_task', 'crm.create_contact'].includes(pending?.task)) return config.connectors?.['crm.lookup']?.server ? saved('crm.lookup') : foundAs('crm');
-  if (['stage_draft', 'email.send'].includes(pending?.task)) return foundAs('email') || saved('stage_draft', 'email.send', 'email.history', 'email.messages', 'email.thread_has_reply');
+  if (['stage_draft', 'email.send'].includes(pending?.task)) return foundAs('email') || saved('stage_draft', 'email.send', 'email.history', 'email.messages');
   if (pending?.task === 'chat.send') return foundAs('chat') || saved('chat.send');
   return false;
 }

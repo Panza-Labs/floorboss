@@ -7,19 +7,18 @@ license: Apache-2.0
 # Connectors
 
 floorboss works with nothing connected. When the user has a calendar, CRM or email tool connected (an MCP
-server, a claude.ai connector), floorboss can use it for the tasks below (`connectors/scripts/cli.mjs tasks` lists them all: calendar.busy, calendar.events, crm.lookup, enrich.person, crm.activity, crm.create_contact, crm.create_task, crm.read_tasks, email.history, email.messages, email.thread_has_reply, stage_draft, and, with sending on,
+server, a claude.ai connector), floorboss can use it for the tasks below (`connectors/scripts/cli.mjs tasks` lists them all: calendar.busy, calendar.events, crm.lookup, enrich.person, crm.activity, crm.create_contact, crm.create_task, crm.read_tasks, email.history, email.messages, stage_draft, and, with sending on,
 email.send and chat.send). Each one replaces a manual step, and
 each keeps its manual fallback:
 
 | Task | Replaces | Without it |
 |---|---|---|
-| `calendar.busy` | typed free times | type free times, or give an .ics export |
+| `calendar.busy` | typed free times | type free times |
 | `crm.lookup` | the CRM export | export the CRM to CSV |
 | `crm.activity` | telling floorboss who replied | you're asked what came in |
 | `crm.create_contact` | adding new people to the CRM before you write to them | import the CSV floorboss gives you |
 | `enrich.person` | finding missing emails yourself | fill in floorboss's CSV |
-| `stage_draft` | copying from the outbox | copy from the outbox, or open the .eml drafts |
-| `email.thread_has_reply` | ticking Replied by hand | tick it in the outbox |
+| `stage_draft` | copying from the outbox | copy from the outbox |
 
 `node "${CLAUDE_PLUGIN_ROOT}/skills/connectors/scripts/cli.mjs" tasks` prints each task's exact output
 format.
@@ -88,18 +87,13 @@ guard lets the recipe send only messages the user approved, word for word, each 
      state which you saw); `opted_out` from the tool's unsubscribe or marketing-status field. If the tool
      has no such field, ask the user to confirm the CRM doesn't track opt-outs, and record
      `opt_out_source: "none-confirmed"`.
-   - `email.thread_has_reply`: nothing to probe until a draft exists; it's probed on the test draft's
-     thread (step 4).
    Write your translation to a file in `~/.floorboss/work/` (floorboss's data folder) and run `… cli.mjs validate --task <task> --file <file>`. If it fails,
    read the errors, fix the translation, and validate again. After two failed attempts, tell the user what
    the tool returns and fall back for that task.
 4. **Test draft (stage_draft), only on the user's yes.** Ask: "Create one test draft addressed to you, so
    you can check it lands in your drafts?" On yes, create a draft to the user's own address, subject
    "floorboss test draft", body "floorboss can stage drafts here. You can delete this." Ask the user to
-   confirm they see it. Then read the test draft's thread with the thread tool and translate it into
-   `{"threads":[{"id":"test","touch":1,"thread_id":"…","has_reply":false,"reply_at":null,"sent_at":null}]}`:
-   that's the `email.thread_has_reply` probe. Never send the test draft. If they don't see it, don't save
-   `stage_draft`.
+   confirm they see it. Never send the test draft. If they don't see it, don't save `stage_draft`.
 5. **Save.** Write a recipe per task: `{"server","tool","args":<argument template with {placeholders}>,
    "reading":"<how you translated the output, in two or three sentences, including the field names>",
    "opt_out_source"?}`, write the tool's entry exactly as this session lists it (`name`, `description`,
