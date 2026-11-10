@@ -126,12 +126,12 @@ test('browser sends: the browser may click only inside a send window the approva
   const list = cli(H, 'event-outreach', ['send-list', '--event', H.slug]);
   assert.equal(list.in_browser, 1, JSON.stringify(list));
   writeFileSync(join(H.HOME, 'active.json'), JSON.stringify({ at: new Date().toISOString() }));
-  assert.equal(guard(H, 'mcp__claude-in-chrome__computer', { action: 'left_click' }, new Date().toISOString()).status, 2, 'no window: the browser only reads during a run');
-  assert.match(cli(H, 'event-outreach', ['browser-send', '--event', H.slug], new Date().toISOString()).ERROR, /--said/);
-  cli(H, 'event-outreach', ['browser-send', '--event', H.slug, '--said', 'go ahead, send them in Grip'], new Date().toISOString());
-  assert.equal(guard(H, 'mcp__claude-in-chrome__computer', { action: 'left_click' }, new Date().toISOString()).status, 0, 'inside the window');
+  assert.equal(guard(H, 'mcp__claude-in-chrome__computer', { action: 'left_click' }, NOW).status, 2, 'no window: the browser only reads during a run');
+  assert.match(cli(H, 'event-outreach', ['browser-send', '--event', H.slug], NOW).ERROR, /--said/);
+  cli(H, 'event-outreach', ['browser-send', '--event', H.slug, '--said', 'go ahead, send them in Grip'], NOW);
+  assert.equal(guard(H, 'mcp__claude-in-chrome__computer', { action: 'left_click' }, NOW).status, 0, 'inside the window');
   cli(H, 'event-outreach', ['browser-send', '--event', H.slug, '--close']);
-  assert.equal(guard(H, 'mcp__claude-in-chrome__computer', { action: 'left_click' }, new Date().toISOString()).status, 2, 'closed again');
+  assert.equal(guard(H, 'mcp__claude-in-chrome__computer', { action: 'left_click' }, NOW).status, 2, 'closed again');
 });
 
 test('sending off: nothing is listed to send, and no send tool passes', () => {
