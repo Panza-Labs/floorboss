@@ -15,7 +15,8 @@ license: Apache-2.0
 - `prompt --event <slug> [--url <list page>] [--must-meet "A, B"]`: writes `collect-prompt.md`.
 
 Research is done by the `attendee-researcher` agent (web search and fetch only), one contact at a time,
-with only name, title, company, segment, source hints and a search budget (never the user's goal). Professional public information only;
+with only name, title, company, segment, source hints and a search budget. A company brief also gets the user's
+company and goal; no search query ever contains either. Professional public information only;
 nothing about anyone's personal life.
 
 The collection prompt is generic: no code for any particular platform. It tells the user's own browser
