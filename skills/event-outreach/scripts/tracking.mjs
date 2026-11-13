@@ -4,6 +4,7 @@
 // no connector (event-app messages, LinkedIn, colleague notes, decisions for the user) becomes a CRM task,
 // and the task's completion and outcome come back into the contact log. One log, every channel.
 import { timeMentioned } from './checks.mjs';
+import { isLinkedInUrl } from '../../../lib/route.mjs';
 // A name in a task title: one line, no longer than a name.
 const short = (x) =>
   String(x ?? '')
@@ -16,7 +17,7 @@ const short = (x) =>
 // they have.
 export function whereTo(contact, event, pick = contact?.routed) {
   if (pick === 'app') return event.app_name || 'the event app';
-  return /linkedin\.com\//i.test(contact?.profile_url || '') ? 'LinkedIn' : event.app_name || 'the event app';
+  return isLinkedInUrl(contact?.profile_url) ? 'LinkedIn' : event.app_name || 'the event app';
 }
 
 const OUTCOME_HELP =

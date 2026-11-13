@@ -23,7 +23,7 @@ const profileKey = (url) => {
     .replace(/^https?:\/\/(www\.)?/, '')
     .replace(/[?#].*$/, '')
     .replace(/\/+$/, '');
-  return /(^|\.)linkedin\.com\/(in|pub)\/[^/]+|\/(in|people|person|profiles?|users?|u|speakers?|attendees?|members?|participants?|delegates?|team)\/[^/]+$/.test(
+  return /(?:^(?:[a-z0-9-]+\.)*linkedin\.com\/(?:in|pub)\/[^/]+)|(?:\/(?:in|people|person|profiles?|users?|u|speakers?|attendees?|members?|participants?|delegates?|team)\/[^/]+$)/.test(
     u
   )
     ? u

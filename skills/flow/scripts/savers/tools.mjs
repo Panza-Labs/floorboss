@@ -88,7 +88,7 @@ export const TOOLS_SAVERS = {
   },
   crm_create_contacts: (v, c) => {
     const t = String(v).toLowerCase();
-    const mode = /^yes|create them/.test(t) ? 'yes' : /ask/.test(t) ? 'ask' : /^no|list them/.test(t) ? 'no' : null;
+    const mode = /(?:^yes)|create them/.test(t) ? 'yes' : /ask/.test(t) ? 'ask' : /(?:^no)|list them/.test(t) ? 'no' : null;
     if (!mode) throw new Error('Say yes, ask me each time, or no.');
     return config(c, { crm_create_contacts: mode });
   },
@@ -128,7 +128,7 @@ export const TOOLS_SAVERS = {
     const ids = typeof v === 'object' && v && Array.isArray(v.ids) ? v.ids.map(String).slice(0, 200) : undefined;
     return ledger(c, { type: 'answered', who: 'user', ask: 'crm_contacts', value, said, ...(ids ? { ids } : {}) });
   },
-  crm_fill_blanks: (v, c) => config(c, { crm_fill_blanks: /^y|fill/i.test(String(v)) && !/^no|don/i.test(String(v)) ? 'yes' : 'no' }),
+  crm_fill_blanks: (v, c) => config(c, { crm_fill_blanks: /(?:^y)|fill/i.test(String(v)) && !/(?:^no)|don/i.test(String(v)) ? 'yes' : 'no' }),
   // A browser window opens only on a plain yes: anything else ("no", "later", "skip it") is a not-now.
   crm_log_window: (v, c) => {
     const said = String(typeof v === 'object' && v ? v.said || v.answer || '' : v).trim();
@@ -339,7 +339,7 @@ export const TOOLS_SAVERS = {
   },
   lost_deals: (v, c) => {
     const s = String(typeof v === 'object' ? (v.months ?? v.rejected_months ?? '') : v).toLowerCase();
-    const n = /no wait|^none|^0\b|never mind|like anyone/.test(s)
+    const n = /no wait|(?:^none)|(?:^0\b)|never mind|like anyone/.test(s)
       ? 0
       : /(\d+)\s*(year|yr)/.test(s)
         ? 12 * Number(/(\d+)\s*(?:year|yr)/.exec(s)[1])
@@ -353,7 +353,7 @@ export const TOOLS_SAVERS = {
     config(c, { rejected_months: n });
     return answers(c, { lost_deals_asked: true });
   },
-  mailbox_use: (v, c) => answers(c, { mailbox_choice: /^y|yes/i.test(String(v)) ? 'yes' : 'no' }),
+  mailbox_use: (v, c) => answers(c, { mailbox_choice: /(?:^y)|yes/i.test(String(v)) ? 'yes' : 'no' }),
   known_contacts: (v, c) => {
     if (isNo(v)) return answers(c, { known_asked: true });
     const p = allowedPath(pathOf(v), { list: true });
@@ -363,7 +363,7 @@ export const TOOLS_SAVERS = {
     config(c, { known_contacts_paths: [...new Set([...have, p])] });
     return answers(c, { known_asked: true });
   },
-  calendar_use: (v, c) => answers(c, { calendar_choice: /^y|yes/i.test(String(v)) ? 'yes' : 'no' }),
+  calendar_use: (v, c) => answers(c, { calendar_choice: /(?:^y)|yes/i.test(String(v)) ? 'yes' : 'no' }),
   // Claude reads the user's words into days ({"days":[…]}); the typed words are kept with them. The old
   // sentence parser is the fallback for a plain string.
   free_time: (v, c) => {

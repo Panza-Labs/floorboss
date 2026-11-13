@@ -5,6 +5,7 @@
 // do count toward a company's cap), and
 // one that can't be reached is reported, never dropped in silence.
 import { scaleOf, BAND_LABEL } from './sizes.mjs';
+import { isLinkedInUrl } from '../../../lib/route.mjs';
 import { companyKey as keyOf, companyRelated, nameMatchKey, sameName, normPersonName, levenshtein } from '../../../lib/normalize.mjs';
 
 // Can floorboss reach this person on the channels the user turned on? Email first; the event app and
@@ -15,7 +16,7 @@ export function reachable(c, settings, channel = null) {
   if (c.email && channel !== 'app' && chans.includes('email')) return true;
   if (c.phone && (settings.sending?.channels || []).includes('chat') && channel !== 'app') return true;
   if (!chans.includes('paste')) return false;
-  const li = channel !== 'app' && /linkedin\.com\//i.test(c.profile_url || '');
+  const li = channel !== 'app' && isLinkedInUrl(c.profile_url);
   if (li) return settings.linkedin_messages !== false;
   return !settings.no_app;
 }

@@ -1028,7 +1028,7 @@ export function schemaFlags(schema, at = '', depth = 0, seen = new Set()) {
       toolWords(k).some((w) => FLAG_KEY.test(w) && w !== 'consent' && !/^(represent|present|absent|assent|resent)/.test(w)) &&
       !FLAG_HARMLESS.test(k) &&
       !kind.includes('array') &&
-      !(kind.includes('string') && /date|time|at$/i.test(k) && !/send|schedul|deliver|publish/i.test(k))
+      !(kind.includes('string') && /date|time|(?:at$)/i.test(k) && !/send|schedul|deliver|publish/i.test(k))
     )
       flags.push(`has a "${name}" input`);
     flags.push(...schemaFlags(p, `${name}.`, depth + 1, seen));

@@ -177,7 +177,7 @@ export const DRAFTS_SAVERS = {
     const task = String(o.task || failed[0]?.[0] || '');
     if (!task) throw new Error('No tool has failed: nothing to retry.');
     const a = String(o.answer || '').trim();
-    if (/^retry|^back|^try again|reconnected/i.test(a)) return cli('event-outreach', ['tool-back', '--event', c.slug, '--task', task, '--said', a], c);
+    if (/(?:^retry)|(?:^back)|(?:^try again)|reconnected/i.test(a)) return cli('event-outreach', ['tool-back', '--event', c.slug, '--task', task, '--said', a], c);
     if (/^later|^not now|^stop/i.test(a))
       return ledger(c, { type: 'answered', who: 'user', ask: 'tool_down', value: 'later', said: a.slice(0, 200), task, run: sessionRun() || null });
     if (['email.messages', 'crm.activity'].includes(task) && /ask me|instead|myself|i'?ll (say|tell)/i.test(a))
@@ -199,7 +199,7 @@ export const DRAFTS_SAVERS = {
   // After the warning: run without the CRM, confirming each person (safer) or going ahead; or go back.
   crm_independent: (v, c) => {
     const a = String(typeof v === 'object' && v ? v.answer || v.said || '' : v).trim();
-    if (/go back|^back|^no\b|retry|export/i.test(a))
+    if (/go back|(?:^back)|(?:^no\b)|retry|export/i.test(a))
       return ledger(c, { type: 'answered', who: 'user', ask: 'crm_choice_after_failure', value: 'back', said: a.slice(0, 200) });
     const mode = /confirm|each|safe|myself/i.test(a) ? 'confirm_each' : /go ahead|proceed|without confirming|^yes|independently/i.test(a) ? 'go_ahead' : null;
     if (!mode) throw new Error('Say "confirm each person", "go ahead", or "go back".');
@@ -211,7 +211,7 @@ export const DRAFTS_SAVERS = {
     if (typeof v === 'object' && v) return config(c, { company_caps: v });
     const t = String(v).toLowerCase();
     const own = parseScale(t);
-    const mode = /^one|one per|1 per/.test(t)
+    const mode = /(?:^one)|one per|1 per/.test(t)
       ? 'one'
       : /more|teams|whole team|several/.test(t)
         ? 'teams'

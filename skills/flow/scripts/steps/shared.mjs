@@ -56,7 +56,7 @@ export const followupsModeOf = (v) => {
   // Asking first wins over any mention of "its day" ("never on its day automatically" means each round).
   if (/never .*(on its day|automatic)|not automatic|round|approve|ask me|before each|let me|myself|manual|in bulk|check (them|each) first/.test(t))
     return 'each_round';
-  if (/^\s*sched|on its day|automatic|just send|go on (its|their) day/.test(t)) return 'scheduled';
+  if (/(?:^\s*sched)|on its day|automatic|just send|go on (its|their) day/.test(t)) return 'scheduled';
   return null;
 };
 // What Claude runs when a connected tool's call fails: the error is recorded, and the next step says what to do.

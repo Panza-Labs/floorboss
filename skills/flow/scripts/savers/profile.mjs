@@ -24,7 +24,7 @@ export const PROFILE_SAVERS = {
     if (cold === every) throw new Error('Didn\'t catch that: say "yes, on every email" or "only on cold emails". Nothing was saved.');
     return config(c, { optout_known: every });
   },
-  seller_framing: (v, c) => answers(c, { seller_framing: /^y|yes/i.test(String(v)) ? 'yes' : 'no' }),
+  seller_framing: (v, c) => answers(c, { seller_framing: /(?:^y)|yes/i.test(String(v)) ? 'yes' : 'no' }),
   profile: (v, c) => {
     const name =
       typeof v === 'object'

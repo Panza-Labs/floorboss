@@ -139,7 +139,7 @@ const col = (headers, re) => headers.find((h) => re.test(h.trim()));
 export function readAccounts({ headers, records }) {
   const company =
     col(headers, /^(company|company name|account|account name|organi[sz]ation( name)?|org|customer|name|firma|empresa|soci[eé]t[eé])$/i) ||
-    headers.find((h) => !/id$|^id\b|domain|owner|status|created|date/i.test(h)) ||
+    headers.find((h) => !/(?:id$)|(?:^id\b)|domain|owner|status|created|date/i.test(h)) ||
     headers[0];
   const domain = col(headers, /domain|website|url|web/i);
   const owner = col(headers, /^(owner|account owner|company owner|holder|rep|account manager|am|manager|claimed by|assigned to)( name)?$/i);

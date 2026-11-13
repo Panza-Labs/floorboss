@@ -286,7 +286,7 @@ export const SETUP_SAVERS = {
     const o =
       typeof v === 'object' && v
         ? v
-        : { own_company: isNo(v) || /^no company|^none|independent|between jobs/i.test(String(v)) ? null : text(v), own_domains: [] };
+        : { own_company: isNo(v) || /(?:^no company)|(?:^none)|independent|between jobs/i.test(String(v)) ? null : text(v), own_domains: [] };
     if (o.own_company) config(c, { own_company: o.own_company, own_domains: o.own_domains || [] });
     return answers(c, { company_asked: true });
   },
