@@ -6,8 +6,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJson, appendLine } from '../../../../lib/jsonio.mjs';
 import { context, nextStep } from '../steps.mjs';
-import { namedCompanies, unclearSkip } from '../../../../lib/names.mjs';
-import { ledger, writeWork, cli, pathOf, mapping, decisions, gateWords, isNo, peopleScaleOf } from './helpers.mjs';
+import { skipNames, unclearSkip } from '../../../../lib/names.mjs';
+import { INTERPRETED, ledger, writeWork, writeWorkText, cli, pathOf, mapping, decisions, gateWords, isNo, peopleScaleOf } from './helpers.mjs';
 
 export const SHORTLIST_SAVERS = {
   // Not onboarding: the steps after it.
@@ -93,7 +93,10 @@ export const SHORTLIST_SAVERS = {
   map_columns_attendees: (v, c) => mapping(c, 'attendees', v),
   map_columns_crm: (v, c) => mapping(c, 'crm', v),
   check_these: (v, c) => decisions(c, v),
-  gate: (v, c) => cli('crm-triage', ['gate', '--event', c.slug, '--answers', gateWords(v, 'shortlist')], c),
+  gate: (v, c) =>
+    v && typeof v === 'object' && v[INTERPRETED]
+      ? cli('crm-triage', ['gate', '--event', c.slug, '--answers', String(v.answers), '--interpreted', '--said-file', writeWorkText(c, 'interpreted-said.txt', v.said)], c)
+      : cli('crm-triage', ['gate', '--event', c.slug, '--answers', gateWords(v, 'shortlist')], c),
   fit_doubts: (v, c) => {
     const step = nextStep(context(c.slug, {}));
     const people = step.ask?.people || [];
@@ -128,7 +131,10 @@ export const SHORTLIST_SAVERS = {
   // Quick setup: web research on the shortlisted companies only on a yes.
   // "skip Acme, Globex": those get a brief that says they weren't researched; the rest are looked up.
   company_research: (v, c) => {
-    const t = String(typeof v === 'object' && v ? v.answer || '' : v).trim();
+    // "please skip Acme", "ok, skip Acme": read as the skip they are.
+    const t = String(typeof v === 'object' && v ? v.answer || '' : v)
+      .trim()
+      .replace(/^(?:please|pls|ok|okay|so|alright|yes)(?![\p{L}\p{N}])[\s,]+(?=skip|leave out|not)/iu, '');
     if (unclearSkip(t)) throw new Error('Name the companies to skip ("skip Acme, Globex"), or say "skip all".');
     const listed = nextStep(context(c.slug, {})).ask?.companies || [];
     // The people question asked in the same breath ("go, and people: top 5", "skip all research"): saved too, so
@@ -139,7 +145,11 @@ export const SHORTLIST_SAVERS = {
       ledger(c, { type: 'answered', who: 'user', ask: 'research_scale', value: scale, said: t.slice(0, 200) });
       return { research_scale: scale };
     };
-    const some = /^(skip|leave out|not)\b/i.test(t) ? namedCompanies(t, listed) : [];
+    const read = /^(skip|leave out|not)\b/i.test(t) ? skipNames(t, listed) : { named: [], unclear: false };
+    // A company's name inside other words ("skip this step", with a company called Step) is asked again: read as a
+    // list it would start web research on the others.
+    if (read.unclear) throw new Error('Name the companies to skip as they are listed, with commas ("skip Acme, Globex"), or say "skip all".');
+    const some = read.named;
     if (some.length && some.length < listed.length) {
       cli('attendee-research', ['skip-companies', '--event', c.slug, '--companies', JSON.stringify(some)], c);
       return { ...ledger(c, { type: 'answered', who: 'user', ask: 'company_research', value: 'yes', said: t.slice(0, 200) }), skipped: some, ...people() };
@@ -151,11 +161,16 @@ export const SHORTLIST_SAVERS = {
   // The heads-up before the agenda's news searches: "go", "skip <companies>", or "skip the news". A company
   // skipped gets an empty news file (nothing looked up), so the agenda goes on without it.
   agenda_news: (v, c) => {
-    const t = String(typeof v === 'object' && v ? v.answer || '' : v).trim();
+    const t = String(typeof v === 'object' && v ? v.answer || '' : v)
+      .trim()
+      .replace(/^(?:please|pls|ok|okay|so|alright|yes)(?![\p{L}\p{N}])[\s,]+(?=skip|leave out|not)/iu, '');
     // The companies the heads-up named (the step as it is when the agenda is asked for).
     if (unclearSkip(t)) throw new Error('Name the companies to skip ("skip Acme, Globex"), or say "skip all".');
     const listed = nextStep(context(c.slug, { agenda: true })).ask?.companies || [];
-    const named = namedCompanies(t, listed);
+    // Only a skip names companies: "go for Acme and Globex" and "yes, especially Acme" are a go.
+    const read = /^(skip|leave out|not)\b/i.test(t) ? skipNames(t, listed) : { named: [], unclear: false };
+    if (read.unclear) throw new Error('Name the companies to skip as they are listed, with commas ("skip Acme, Globex"), or say "skip the news".');
+    const named = read.named;
     const all = /^(skip|no|none|don'?t|not)\b/i.test(t) && !named.length;
     const some = all ? listed : /^(skip|leave out|not)\b/i.test(t) ? named : [];
     if (!some.length && !/^(yes|y|go|ok|sure|look)/i.test(t)) throw new Error('Say "go", "skip <companies>", or "skip the news".');

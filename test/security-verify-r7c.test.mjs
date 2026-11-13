@@ -31,7 +31,9 @@ function twoTouches(answer, verdicts = {}) {
     cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, message ${j.touch} about Test Expo. ${times}\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x' })]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', verdicts[j.touch] || 'PASS']);
   }
-  const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', answer(idOf(H, 'Ana Berg'))]);
+  // Run 6, round 3: "approve all" with another clause is read back first and saved on the user's yes.
+  const g0 = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', answer(idOf(H, 'Ana Berg'))]);
+  const g = g0.pending ? cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']) : g0;
   return { H, g, ana: idOf(H, 'Ana Berg') };
 }
 const sendFirst = (H, id) => {

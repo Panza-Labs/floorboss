@@ -98,20 +98,35 @@ export function todo(opts) {
   const inAppNow = limit == null ? new Set() : writtenInApp(c);
   const firstGoesInApp = (cid, s) =>
     (s.channel ? !/linkedin|e-?mail/i.test(s.channel) : routeOf(c, cid) ? routeOf(c, cid)[0] === 'app' : c.triage.channels?.[cid] === 'app' || !c.byId[cid]?.email) && isApp(cid);
-  let appLeft =
+  const appUsers =
     limit == null
-      ? Infinity
-      : limit -
-        Object.entries(c.state).filter(
-          ([cid, s]) =>
-            c.byId[cid] &&
-            !s.removed &&
-            !s.dropped &&
-            !(c.short.coordinate || []).includes(cid) &&
-            (((s.sent?.[1] || isOut(s.touches?.[1]?.status)) && firstGoesInApp(cid, s)) ||
-              inAppNow.has(cid) ||
-              Object.entries(s.touches || {}).some(([t, x]) => isOut(x.status) && routeOf(c, cid)?.[Number(t) - 1] === 'app'))
-        ).length;
+      ? new Set()
+      : new Set(
+          Object.entries(c.state)
+            .filter(
+              ([cid, s]) =>
+                // Written to in the app, or let through to it, keeps the place whatever happened since (dropped, cut).
+                inAppNow.has(cid) ||
+                (c.byId[cid] &&
+                  !s.removed &&
+                  !s.dropped &&
+                  !(c.short.coordinate || []).includes(cid) &&
+                  (((s.sent?.[1] || isOut(s.touches?.[1]?.status)) && firstGoesInApp(cid, s)) ||
+                    Object.entries(s.touches || {}).some(([t, x]) => isOut(x.status) && routeOf(c, cid)?.[Number(t) - 1] === 'app')))
+            )
+            .map(([cid]) => cid)
+        );
+  let appLeft = limit == null ? Infinity : limit - appUsers.size;
+  // A later message in the app (a follow-up whose step is the app) takes a place too, for someone not yet written to
+  // there: false when the limit is used up, and the message waits as a backup.
+  const laterAppFits = (cid, touch, channel) => {
+    if (limit == null || touch === 1 || channel !== 'paste' || whereAt(c, cid, touch) === 'LinkedIn' || appUsers.has(cid)) return true;
+    if (appLeft <= 0) return false;
+    appLeft -= 1;
+    appUsers.add(cid);
+    return true;
+  };
+  const appBackup = (cid, touch) => ({ id: cid, touch, reason: `backup: the app's request limit (${limit}) is used up by people already written to, or planned to be written to, in the app` });
   for (const id of c.short.approved) {
     const ct = c.byId[id];
     const st = c.state[id] || { touches: {}, sent: {} };
@@ -169,10 +184,15 @@ export function todo(opts) {
     if (steps) channel = steps[touch - 1] === 'email' ? 'email' : 'paste';
     if (touch === 1 && channel === 'paste' && isApp(id)) {
       if (appLeft <= 0) {
-        skipped.push({ id, reason: `backup: the app's request limit (${limit}) is taken by people ranked above them` });
+        skipped.push({ id, reason: `backup: the app's request limit (${limit}) is used up by people already written to, or planned to be written to, in the app` });
         continue;
       }
       appLeft -= 1;
+      appUsers.add(id);
+    }
+    if (!laterAppFits(id, touch, channel)) {
+      skipped.push(appBackup(id, touch));
+      continue;
     }
     // A draft that failed the critic twice waits for the user (edit, drop or approve by ID); it isn't
     // drafted a third time.
@@ -293,6 +313,11 @@ export function todo(opts) {
             prevT.review_skipped ||
             !!c.state[j.id]?.sent?.[beforeT]);
         const channel = steps ? (steps[t - 1] === 'email' ? 'email' : 'paste') : j.channel;
+        // Past the app's limit the sequence stops here: what follows would follow a note never sent.
+        if (!laterAppFits(j.id, t, channel)) {
+          skipped.push(appBackup(j.id, t));
+          break;
+        }
         jobs.push({
           ...j,
           ...messageFields(c, j.id, t, channel, true),

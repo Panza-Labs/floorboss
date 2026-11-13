@@ -21,5 +21,8 @@ test('a draft that failed the critic twice is held for the user, not offered wit
   const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all']);
   assert.equal(g.approved, 1);
   assert.deepEqual(g.held_for_you.map((x) => x.id), [bad.id]);
-  assert.equal(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${bad.id}`]).approved, 1, 'the user can still approve it by ID');
+  // Run 6, round 5: a failed draft approved by name is read back first, saying it didn't pass, and saved on yes.
+  const named = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${bad.id}`]);
+  assert.match(named.say_to_user || '', /whose draft did not pass the checks/);
+  assert.equal(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']).approved, 1, 'the user can still approve it by ID');
 });

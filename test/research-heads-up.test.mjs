@@ -2,9 +2,9 @@
 // leave some out; the per-person offer is sized to the shortlist ("the top 20" of 3 people is no offer).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeHome, drive, simplePersona, ROOT } from './sims/lib/driver.mjs';
+import { makeHome, drive, simplePersona, ROOT, cli as simCli } from './sims/lib/driver.mjs';
 
 const LIST = 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP Ops,Globex,bo@globex.test\nCy Ng,Head of Ops,Initech,cy@initech.test\n';
 
@@ -14,7 +14,14 @@ test('company research: one heads-up naming the companies; "skip Globex" researc
   const researched = [];
   const persona = simplePersona({ asks: {
     setup_level: 'standard', attendee_list: join(H.HOME, 'inputs', 'attendees.csv'),
-    company_research: (s) => { asked.company_research = s.ask; return 'skip Globex, the rest is fine'; },
+    // Run 6, round 3: "the rest" beside a company makes a skip answer unclear, so it's asked again; the plain one reads.
+    company_research: (s) => {
+      asked.company_research = s.ask;
+      const f = join(H.HOME, 'work', 'cr.txt');
+      writeFileSync(f, 'skip Globex, the rest is fine');
+      assert.match(simCli(H, 'flow', ['answer', '--event', s.event, '--ask', 'company_research', '--value-file', f]).ERROR || '', /Name the companies/);
+      return 'skip Globex';
+    },
     research_scale: (s) => { asked.research_scale = s.ask; return 'none'; },
   } });
   const { trail, slug } = drive(H, persona, { onStep: (s) => { if (s.step === 'company_briefs') researched.push(...s.agents.map((a) => a.input.company)); } });

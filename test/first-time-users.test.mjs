@@ -165,7 +165,10 @@ test('gate: the wording the question offers is wording the parser takes, with na
 test('gate: skip, warm, hold and "is mine" save what they say through the triage CLI', () => {
   const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,COO,Globex,bo@globex.test\nCy Ng,COO,Initech,cy@initech.test\nDee Ho,COO,Hooli,dee@hooli.test\n' });
   fitAll(H, cli(H, 'crm-triage', ['load', '--event', H.slug]));
-  const g = cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'skip Ana Berg because she moved on; warm Bo; hold Cy until Dana says yes; Dee Ho is mine']);
+  // Run 6, round 3: first names ("warm Bo") are read back first, and saved on the user's yes.
+  const g0 = cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'skip Ana Berg because she moved on; warm Bo; hold Cy until Dana says yes; Dee Ho is mine']);
+  assert.ok(!g0.ERROR && g0.pending, g0.ERROR);
+  const g = cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'yes']);
   assert.ok(!g.ERROR, g.ERROR);
   const led = ledger(H);
   const dec = (name) => led.filter((e) => e.type === 'decide' && e.id === idOf(H, name)).pop();

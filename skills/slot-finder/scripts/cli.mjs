@@ -2,10 +2,11 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Plan: create the event, turn free times into slots, remove slots the user can't do.
+import { existsSync } from 'node:fs';
 import { run, need } from '../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../lib/jsonio.mjs';
 import { allowedPath } from '../../../lib/paths.mjs';
-import { loadEvent, files, saveEvent, nowFrom } from '../../../lib/event.mjs';
+import { loadEvent, files, saveEvent, nowFrom, isMockSlug } from '../../../lib/event.mjs';
 import { loadConfig } from '../../../lib/config.mjs';
 import { slugify, assertSlug } from '../../../lib/paths.mjs';
 import { isValidZone, addDays, daysBetween, zoneFrom } from '../../../lib/tz.mjs';
@@ -27,7 +28,12 @@ function create(opts) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.start) || !/^\d{4}-\d{2}-\d{2}$/.test(opts.end) || opts.end < opts.start) {
     throw new Error('Dates must look like 2026-10-27, with the end on or after the start.');
   }
-  const slug = assertSlug(opts.slug || slugify(opts.name));
+  // An event's file is never replaced: that would drop its settings, its lists and the mock's mark. A slug asked for
+  // that is taken is refused; one made from the name takes the next free one ("test-expo-2"), as for a yearly event.
+  const taken = (s) => existsSync(files(s).dir) || isMockSlug(s);
+  let slug = assertSlug(opts.slug || slugify(opts.name));
+  if (opts.slug && taken(slug)) throw new Error(`An event called "${slug}" already exists: floorboss never replaces it. Pick another --slug, or leave it out to get a new one.`);
+  for (let n = 2, base = slug.slice(0, 60); taken(slug); n++) slug = assertSlug(`${base}-${n}`);
   const aliases = opts['short-name']
     ? String(opts['short-name'])
         .split(/[|,]/)

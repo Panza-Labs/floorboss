@@ -51,7 +51,10 @@ test('the simulated tester\'s Oliver and Kate: not question-first, and told to o
   const kate = idOf(H, 'Kate Lindqvist'), oliver = idOf(H, 'Oliver Grant');
   const d = cli(H, 'crm-triage', ['decide-batch', '--event', H.slug, '--text', `${kate} same-person crm:5 warm because we met at Tillcon in March`]);
   assert.ok(!d.ERROR, d.ERROR);
-  const g = cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'warm Oliver Grant because Lena introduced us at Tillcon Europe in June']);
+  // Run 6, round 4: the reason names a listed person (Lena Vogt), so the answer is read back first and saved on yes.
+  const g0 = cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'warm Oliver Grant because Lena introduced us at Tillcon Europe in June']);
+  assert.ok(g0.pending && /is kept as a note, and acts on nobody else/.test(g0.say_to_user), JSON.stringify(g0).slice(0, 300));
+  const g = cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'yes']);
   assert.ok(!g.ERROR, g.ERROR);
   const t = cli(H, 'event-outreach', ['todo', '--event', H.slug]);
   assert.ok(!t.ERROR, t.ERROR);

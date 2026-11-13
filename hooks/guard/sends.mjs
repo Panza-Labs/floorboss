@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { home } from '../../lib/paths.mjs';
 import { verifySend, eventRecord, eventDay, approvalHash } from '../../lib/sendcheck.mjs';
 import { contactable } from '../../lib/ledger.mjs';
-import { loadEvent } from '../../lib/event.mjs';
+import { loadEvent, isMockSlug } from '../../lib/event.mjs';
 import { createHash } from 'node:crypto';
 import { nowMs as clockNow } from '../../lib/clock.mjs';
 import { readJsonStrict, recent, fold, leaves } from './shared.mjs';
@@ -19,6 +19,7 @@ export const refusedSends = [];
 // The mock event, or a folder that can't be shown to be a real one (no event.json, or a damaged one): its lists are
 // never read, and a damaged file stops nothing else.
 export const notRealEvent = (slug) => {
+  if (isMockSlug(slug)) return true;
   try {
     const v = readJsonStrict(join(home(), 'events', slug, 'event.json'), null);
     return !v || typeof v !== 'object' || Array.isArray(v) || v.mock === true;
@@ -36,7 +37,7 @@ export function listedSends() {
     try {
       // The mock event's made-up people never reach a real connector.
       const loaded = loadEvent(slug);
-      if (loaded.event.mock === true) return [];
+      if (loaded.event.mock === true || isMockSlug(slug)) return [];
       settings = loaded.settings;
     } catch {
       return [];

@@ -153,7 +153,9 @@ test('beside approve all, a name left unresolved holds the approval: nothing is 
     assert.match(r.ERROR || '', /Nothing was approved|can't be read/, `${a}: ${JSON.stringify(r).slice(0, 200)}`);
   }
   assert.equal(entries(H).filter((e) => e.type === 'approved').length, 0);
-  const r = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all, the critic is being picky']);
+  // Run 6, round 3: a remark beside "approve all" is read back first, and kept as a comment on the user's yes.
+  assert.equal(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all, the critic is being picky']).pending, true);
+  const r = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']);
   assert.equal(r.approved, 3, JSON.stringify(r).slice(0, 300));
   assert.deepEqual(r.read_as_comment, ['the critic is being picky']);
 });
@@ -162,7 +164,8 @@ test('an attendee named after a connecting word never rewrites the answer into a
   const people = (more) => [{ id: 'c001', name: 'Ana Berg' }, { id: 'c002', name: 'Bo Li' }, ...more];
   assert.equal(namesToIds('approve ana, not bo', people([{ id: 'c003', name: 'Not Sure' }])), 'approve c001, not bo');
   assert.equal(namesToIds('approve ana but bo', people([{ id: 'c003', name: 'But Ter' }])), 'approve ana but bo');
-  assert.equal(namesToIds('approve ana and bo', people([{ id: 'c003', name: 'Ana And Bo' }])), 'approve c001 and c002', 'the row "Ana And Bo" goes by id only, so the two named are the two meant');
+  // Run 6: the row "Ana And Bo" goes by id only, but "Ana" and "Bo" may still mean it, so both are left for the gate to ask.
+  assert.equal(namesToIds('approve ana and bo', people([{ id: 'c003', name: 'Ana And Bo' }])), 'approve ana and bo', 'the row "Ana And Bo" makes both names shared');
   const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP,Globex,bo@globex.test\nNot Sure,CFO,Initech,not@initech.test\n' });
   triage(H);
   draftApprove(H, NOW, 'edit c001');
@@ -251,7 +254,7 @@ test('a step sent back or dropped holds the next approved step out of the mailbo
   assert.equal(after.to_stage, 1, 'a skipped step passes on to the next');
 });
 
-test('the app limit counts later-step app requests and first-in-app ones together, at todo and at send-list', () => {
+test('the app limit counts later-step app requests and first-in-app ones together: one app note listed, the other never approved past the limit', () => {
   const S = { sending: { channels: ['email', 'app'], followups: 'scheduled' }, app_request_limit: 1, route: ['email', 'app'], ...NOTES };
   const people = 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP,Globex,\n';
   const H = setup({ attendees: people, event: { app_name: 'Grip' }, settings: S });
@@ -262,7 +265,8 @@ test('the app limit counts later-step app requests and first-in-app ones togethe
   add(H, { type: 'no_reply_said', ids: [ana], channel: 'email', said: 'nothing by email' }, later(8));
   const list = listAt(H, later(8), ['--no-reply-check', 'nobody replied']);
   assert.equal(list.in_browser, 1, JSON.stringify(list));
-  assert.match(list.waiting.find((w) => w.id !== browserList(H)[0].id).why, /request limit/);
+  // Run 6: the over-limit app note is held at todo as a backup, so it is never written or approved to wait here.
+  assert.ok(!entries(H).some((e) => e.type === 'approved' && e.touch === 2), 'no second app note past the limit is approved');
 
   const T = setup({ attendees: people, event: { app_name: 'Grip' }, settings: S });
   triage(T);
@@ -423,7 +427,7 @@ test('a browser word inside a server or tool name no longer gets the browser rea
     assert.ok(browserCall('mcp__notes__chrome__find', { query: 'x'.repeat(301) }), 'a long value too');
     for (const t of ['mcp__claude-in-chrome__find', 'mcp__Claude_Browser__get_page_text', 'mcp__playwright__browser_snapshot', 'mcp__remote-devices__Claude_Browser__browser_snapshot', 'mcp__remote-devices__Claude_Browser__navigate', 'mcp__chrome-devtools__take_snapshot'])
       assert.equal(browserCall(t, { url: t.includes('navigate') ? 'https://www.linkedin.com/in/ana' : undefined }), null, t);
-    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ setup_servers: ['pw'], setup_found: { browser: ['mcp:pw'] }, found: {} }));
+    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ setup_servers: ['pw'], setup_found: { browser: ['mcp:pw'] }, setup_browser_tools: ['mcp:pw'], found: {} }));
     assert.equal(browserCall('mcp__pw__browser_snapshot', {}), null, 'a browser the first scan found still reads');
     assert.ok(browserCall('mcp__filebrowser__get_text', { path: '/x' }, { active: { ...RUN, browser: true } }), 'a run reading a page does not make filebrowser given');
   } finally {
@@ -607,7 +611,7 @@ test('during a run the browser read rule goes by exact names or what setup found
       assert.equal(browserCall(t, {}), null, t);
     const inv = summarize([], { tools: ['mcp__hyperbrowser__navigate', 'mcp__hyperbrowser__get_page_text', 'mcp__hyperbrowser__click'] });
     assert.ok(inv.found.browser.includes('mcp:hyperbrowser'), JSON.stringify(inv.found));
-    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ setup_servers: ['hyperbrowser'], setup_found: { browser: ['mcp:hyperbrowser'] }, found: {} }));
+    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ setup_servers: ['hyperbrowser'], setup_found: { browser: ['mcp:hyperbrowser'] }, setup_browser_tools: ['mcp:hyperbrowser'], found: {} }));
     assert.equal(browserCall('mcp__hyperbrowser__get_page_text', {}), null, 'a browser setup found has a way in');
     assert.ok(browserCall('mcp__file-browser__get_text', { path: '/x' }, { active: { ...RUN, browser: true } }));
   } finally {
@@ -679,9 +683,11 @@ test('beside approve all, a company word holds the approval too; an ordinary rem
   triage(H);
   draftApprove(H, NOW, 'edit c001');
   for (const a of ['approve all but Zento', 'approve all but the Zento person'])
-    assert.match(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', a]).ERROR || '', /can't be read/, a);
+    assert.match(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', a]).ERROR || '', /can't be read|isn't a list of IDs or listed names|may be about someone/, a);
   assert.equal(entries(H).filter((e) => e.type === 'approved').length, 0);
-  assert.equal(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all, the critic is being picky']).approved, 2);
+  // Run 6, round 3: an ordinary remark is read back first and saved on yes.
+  assert.equal(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all, no changes']).pending, true);
+  assert.equal(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']).approved, 2);
 });
 
 test('the app name found inside a channel label counts as the app, before any chat test', () => {
@@ -901,21 +907,37 @@ test('only a plainly shaped name, with no word the list grammar reads, stands fo
 
 test('a full name that starts with a first name someone else on the list has never soaks up a remark, through the real gate', () => {
   const rows = 'Ana Berg,COO,Acme,ana@acme.test\nBo Li,VP,Globex,bo@globex.test\nCy Ek,CTO,Hooli,cy@hooli.test\n';
-  for (const [row, answer, wrong] of [
-    ['Ana Please', 'approve all except Ana please', 'Ana Berg'],
-    ['Ana Ok', 'approve Ana ok', 'odd'],
-    ['Bo Thanks', 'approve Ana, drop Bo thanks', 'odd']
+  // Run 6, round 3: none of these saves anything at once, so the remark can't be soaked up unseen. Each is asked again
+  // or read back by ID and name, and the reading names the crafted row whenever it would touch it.
+  for (const [row, answer] of [
+    ['Ana Please', 'approve all except Ana please'],
+    ['Ana Ok', 'approve Ana ok'],
+    ['Bo Thanks', 'approve Ana, drop Bo thanks']
   ]) {
     const H = setup({ attendees: `Name,Title,Company,Email\n${rows}${row},CFO,Initech,odd@initech.test\n` });
     triage(H);
     draftApprove(H, NOW, 'edit c001');
     const odd = entries(H).find((e) => e.type === 'person' && /Initech/.test(e.company || ''))?.id;
-    cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', answer]);
-    const done = entries(H).filter((e) => e.type === 'approved' || e.type === 'dropped').map((e) => e.id);
-    assert.ok(!done.includes(wrong === 'odd' ? odd : idOf(H, wrong)), `${row}: ${done}`);
+    const r = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', answer]);
+    assert.ok(r.ERROR || r.pending, `${row}: ${JSON.stringify(r).slice(0, 200)}`);
+    assert.equal(entries(H).filter((e) => e.type === 'approved' || e.type === 'dropped').length, 0, `${row}: nothing saved`);
+    if (r.pending && /drop/.test(answer)) assert.match(r.say_to_user, new RegExp(`drop ${odd} "Bo Thanks"`), `${row}: the reading names the row it would drop: ${r.say_to_user}`);
+    // Run 6, round 6: the read-back goes on to the yes, which saves exactly the people it named, and something.
+    if (r.pending) {
+      const y = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']);
+      assert.ok(!y.ERROR, y.ERROR);
+      const done = entries(H).filter((e) => e.type === 'approved' || e.type === 'dropped');
+      assert.ok(done.length, `${row}: the yes saved the reading`);
+      // Round 7: exactly the IDs the reading listed under "approve" (or "drop"), each one, and no other.
+      const listed = (verb) => new Set(r.say_to_user.split(/;\s*|\.\s+/).filter((p) => new RegExp(`(?:^|reads as: )${verb} `).test(p.trim())).flatMap((p) => p.match(/\bc\d{3,}\b/g) || []));
+      for (const e of done) assert.ok(listed(e.type === 'approved' ? 'approve' : 'drop').has(e.id), `${row}: ${e.type} ${e.id} was listed under ${e.type === 'approved' ? 'approve' : 'drop'}: ${r.say_to_user}`);
+      for (const id of listed('approve')) assert.ok(done.some((e) => e.type === 'approved' && e.id === id), `${row}: ${id} was listed and approved`);
+    }
   }
   const twoAnas = [{ id: 'c1', name: 'Ana Berg' }, { id: 'c2', name: 'Ana Silva' }, { id: 'c3', name: 'Bo Li' }];
-  assert.equal(namesToIds('approve Ana Berg and Bo Li', twoAnas), 'approve ana berg and c3', 'with two Anas, both go by id');
+  // Run 6: with two Anas a bare "Ana" is asked about, but the whole name, typed as listed, says which.
+  assert.equal(namesToIds('approve Ana Berg and Bo Li', twoAnas), 'approve c1 and c3', 'with two Anas, the whole name still resolves');
+  assert.equal(namesToIds('approve Ana and Bo Li', twoAnas), 'approve ana and c3', 'and "Ana" alone does not');
 });
 
 test('a browser needs a navigate tool and a real page tool, under whatever prefix its server gives them', () => {

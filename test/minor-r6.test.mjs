@@ -13,7 +13,8 @@ test('reaching someone at a coworker\'s account: "(Sam Okafor owns the Retailio 
   const H = ftu6();
   const g = cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'reach Petra Lind']);
   const why = g.ERROR || JSON.stringify(g.refused);
-  assert.match(why, /Petra Lind is at Sam Okafor's account \(Sam Okafor owns the Retailio account: their CRM record says \\?"Open Deal\\?"\)\./);
+  // Run 6, round 6: CRM text in a message carries no quote marks.
+  assert.match(why, /Petra Lind is at Sam Okafor's account \(Sam Okafor owns the Retailio account: their CRM record says Open Deal\)\./);
   assert.doesNotMatch(why, /\(crm,/);
 });
 

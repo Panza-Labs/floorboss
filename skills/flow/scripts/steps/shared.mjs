@@ -141,3 +141,26 @@ export function mappingStep(c, e, kind) {
     }
   });
 }
+
+// A reading a gate showed back and is holding for the user's yes (lib/reading.mjs): the question is that text, word
+// for word, and the answer is the user's own, saved like any other.
+// Judged by the gate itself, as a yes would judge it (the list, the time, the event): a stale reading is never shown.
+const waitingText = (e, gate) => {
+  const r = spawnSync(process.execPath, [script(gate === 'shortlist' ? 'crm-triage' : 'event-outreach'), 'gate', '--event', e.event.slug, '--pending-check', '--answers', 'check'], { encoding: 'utf8', env: process.env });
+  try {
+    const out = JSON.parse(r.stdout);
+    return out.pending ? out.text : null;
+  } catch {
+    return null;
+  }
+};
+export function pendingLine(e, gate) {
+  const text = waitingText(e, gate);
+  return text
+    ? `A reading of the user's last answer is waiting for their yes. Show them exactly this, word for word, and wait for their own reply (never answer it for them): ${JSON.stringify(text)} If they say yes, save "yes"; if they say anything else, save that instead, as a new answer. `
+    : '';
+}
+export const pendingAsk = (e, gate) => {
+  const text = waitingText(e, gate);
+  return text ? { pending_confirmation: text } : {};
+};

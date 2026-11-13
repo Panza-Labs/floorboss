@@ -104,7 +104,9 @@ test('1: approving a failed draft by name records the override the send reads', 
   const H = drafted(ATT3);
   const bo = idOf(H, 'Bo Li');
   cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', bo, '--touch', '1', '--text', 'FAIL\n- too long']);
-  const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${bo}`]);
+  // Run 6, round 5: read back first, saying the draft didn't pass, and saved on the user's yes.
+  assert.match(cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${bo}`]).say_to_user || '', /whose draft did not pass the checks/);
+  const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']);
   assert.equal(g.approved, 1, JSON.stringify(g));
   assert.equal(ledgerOf(H).find((e) => e.id === bo && e.type === 'approved')?.critic_override, true);
 });

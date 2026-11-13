@@ -11,7 +11,7 @@ import { todayKeyIn } from '../../../../lib/tz.mjs';
 import { taskMark } from '../../../../lib/sendcheck.mjs';
 import { validateTaskReceipts, validateTaskStatus } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig } from '../../../../lib/config.mjs';
-import { sendRoute } from './routes.mjs';
+import { sendRoute, writtenInApp, appLimitReached, whereAt } from './routes.mjs';
 import { ctxOf, crmIdOf, sendingOn, led, isOut, labelOf } from './context.mjs';
 import { readTodo } from './saved-drafts.mjs';
 import { allOutboxCards } from './cards.mjs';
@@ -61,8 +61,21 @@ export function taskList(opts) {
       reason: `Don't send the message in the open task for them, and close that task: they can't be contacted now (${x.why}).`
     }));
   c.config = loadConfig();
+  // The app's request limit holds for notes the user sends by hand too: a send task for someone not yet written to in
+  // the app takes a place, and past the limit it isn't made (the note stays in the outbox).
+  const inApp = (card) => card.channel === 'paste' && card.kind === 'message' && card.touch !== 0 && whereAt(c, card.id, card.touch) !== 'LinkedIn';
+  const appUsed = writtenInApp(c);
+  for (const [id, s] of Object.entries(c.state))
+    for (const tk of Object.values(s.tasks || {})) if (tk?.kind === 'send' && Number(tk.touch) > 0 && whereAt(c, id, Number(tk.touch)) !== 'LinkedIn') appUsed.add(id);
+  const cards = allOutboxCards(c).filter((card) => {
+    if (!inApp(card) || (card.planned_due && card.planned_due > today) || created.has(`${card.id}:${card.touch}`)) return true;
+    if (sendingOn(c.settings) && sendRoute(c, card.id, card.channel, card.touch)) return true;
+    if (appLimitReached(c, card.id, appUsed)) return false;
+    appUsed.add(card.id);
+    return true;
+  });
   const items = taskItems({
-    cards: allOutboxCards(c),
+    cards,
     review: [...held, ...unclear, ...cancel],
     stops,
     created,

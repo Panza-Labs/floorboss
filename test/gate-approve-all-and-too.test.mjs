@@ -13,6 +13,7 @@ const known = new Set(['c001', 'c016', 'c019', 'c027']);
 const parse = (t, partial = true) => parseGate(t, { kind: 'draft', knownIds: known, partial });
 
 test('approve all with "and <id> too / as is" and a trailing remark', () => {
+  // Run 6, round 3: the remark is a comment again; the gate reads the whole answer back and saves it only on yes.
   const g = parse('approve all, and c016 too as it is, the critic is being picky about the subject');
   assert.deepEqual(g.actions.map((a) => ({ ...a })), [{ verb: 'approve-all', except: [] }, { verb: 'approve', ids: ['c016'] }]);
   assert.deepEqual(g.comments, ['the critic is being picky about the subject']);
@@ -26,7 +27,7 @@ test('approve all with "and <id> too / as is" and a trailing remark', () => {
 test('what can\'t be read beside approve all is refused, never guessed', () => {
   const g = parse('approve all, c016 maybe');
   assert.equal(g.actions.length, 0);
-  assert.match(g.refused[0].why, /can't be read beside "approve all"/);
+  assert.match(g.refused[0].why, /beside "approve all" may be about someone/);
   assert.throws(() => parse('approve all, c016 maybe', false), GateError);
 });
 
@@ -50,7 +51,11 @@ function drafted() {
 
 test('the simulated tester\'s answer at the draft gate: everything approved, the failed draft by name, the remark said back', () => {
   const { H, bo, n } = drafted();
-  const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve all, and ${bo} too as it is, the critic is being picky about the subject`]);
+  // Run 6, round 3: read back first, with the remark said as not taken for an instruction; saved on the user's yes.
+  const r = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve all, and ${bo} too as it is, the critic is being picky about the subject`]);
+  assert.ok(r.pending, JSON.stringify(r).slice(0, 300));
+  assert.match(r.say_to_user, /Not taken as an instruction: "the critic is being picky about the subject"/);
+  const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']);
   assert.ok(!g.ERROR, g.ERROR);
   assert.equal(g.approved, n, JSON.stringify(g));
   assert.deepEqual(g.read_as_comment, ['the critic is being picky about the subject']);
@@ -61,7 +66,10 @@ test('at the draft gate, a line that can\'t be read beside "approve all" approve
   const ana = idOf(H, 'Ana Berg');
   const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all; frobnicate Cy']);
   assert.match(g.ERROR || '', /Nothing was approved/);
-  const h = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${ana}; frobnicate Cy`]);
+  // Run 6, round 3: a line not read sends the answer back for a yes, naming that line; the rest is saved on yes.
+  const h0 = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${ana}; frobnicate Cy`]);
+  assert.match(h0.say_to_user || '', /Not read, and not done: "frobnicate cy"/);
+  const h = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']);
   assert.ok(!h.ERROR, h.ERROR);
   assert.equal(h.approved, 1);
   assert.equal(h.refused.length, 1);

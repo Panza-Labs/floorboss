@@ -4,7 +4,7 @@
 import { join } from 'node:path';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { plural } from '../../../../lib/plural.mjs';
-import { step, node } from './shared.mjs';
+import { step, node, pendingLine, pendingAsk } from './shared.mjs';
 
 // Approval: drafts that are stuck, what the user should know before approving, and the approval itself.
 export function approvalSteps(x) {
@@ -141,7 +141,8 @@ export function approvalSteps(x) {
           : {}),
         ask: {
           id: 'approve',
-          question: `${warnLine}Show each message (or the review page). Approve all, approve all except some, approve by name, edit or drop?`,
+          ...pendingAsk(e, 'approval'),
+          question: `${pendingLine(e, 'approval')}${warnLine}Show each message (or the review page). Approve all, approve all except some, approve by name, edit or drop? Once saved, show the answer's say_to_user line word for word: who each name was read as, and who was approved, held back or dropped.`,
           answer_format:
             '"approve all" | "approve all except <ids>" | "approve <ids>" | "edit <ids>" | "drop <ids>" | "skip review <ids|all>" (drafts the critic hasn\'t read go on unreviewed, and their cards say so)'
         }

@@ -92,9 +92,18 @@ export function sendRoute(c, id, channel, touch = 0) {
 }
 
 // The app's request limit counts everyone first written to there, whichever message of their route that is: the
-// people with an app message recorded as sent, plus (at send-list) those added to this list.
+// people with an app message recorded as sent, those with an app note the guard ever let through (it may have reached
+// the app, whatever was said about it since: a resend, "it did not go", a page that said it was too long or not
+// found, a step dropped or skipped after), plus (at send-list) those added to this list. A resend to the same person
+// needs no new place.
+export const releasedInApp = (c, id, t, x) =>
+  Number(t) !== 0 && !!x?.ever_released_where && (x.ever_released_where === 'browser' ? whereAt(c, id, Number(t)) : x.ever_released_where) !== 'LinkedIn';
 export function writtenInApp(c) {
-  return new Set(Object.entries(c.folded.people).filter(([id, p]) => Object.entries(p?.touches || {}).some(([t, x]) => kindAt(c, id, t, x) === 'app')).map(([id]) => id));
+  return new Set(
+    Object.entries(c.folded.people)
+      .filter(([id, p]) => Object.entries(p?.touches || {}).some(([t, x]) => kindAt(c, id, t, x) === 'app' || releasedInApp(c, id, t, x)))
+      .map(([id]) => id)
+  );
 }
 export function appLimitReached(c, id, used) {
   const raw = c.settings.app_request_limit;

@@ -10,7 +10,7 @@ import { append } from '../../../lib/ledger.mjs';
 import { sessionEvent } from '../../../lib/scope.mjs';
 import { nowFrom } from '../../../lib/event.mjs';
 import { makeCurrent } from './next.mjs';
-import { answers, text, setSavingAsk } from './savers/helpers.mjs';
+import { answers, text, setSavingAsk, INTERPRETED } from './savers/helpers.mjs';
 import { SETUP_SAVERS } from './savers/setup.mjs';
 import { TOOLS_SAVERS } from './savers/tools.mjs';
 import { PROFILE_SAVERS } from './savers/profile.mjs';
@@ -72,6 +72,13 @@ export function answer(opts) {
     }
   } else if (opts.value !== undefined) value = opts.value;
   else throw new Error("Give the answer with --value-file <file> (the user's words, or JSON).");
+  // --interpreted: the value is Claude's reading, by ID, of words the gate couldn't read, and --said-file holds the
+  // user's exact words. Only the two gates take one, and they always show it back for the user's yes.
+  if (opts.interpreted) {
+    if (!['gate', 'approve'].includes(opts.ask)) throw new Error('--interpreted is for the shortlist gate (gate) and the drafts\' approval (approve) only. Nothing was saved.');
+    if (typeof opts.said !== 'string' || !opts.said.trim()) throw new Error("--interpreted needs the user's exact words in --said-file. Nothing was saved.");
+    value = { [INTERPRETED]: true, answers: typeof value === 'string' ? value : JSON.stringify(value), said: opts.said.trim() };
+  }
   setSavingAsk(opts.ask);
   let result;
   try {
@@ -115,7 +122,9 @@ export function answer(opts) {
       /* onboarding answers before the event exists live in onboarding.json */
     }
   }
-  return { saved: opts.ask, result, next: 'run flow next again' };
+  // What a gate read each name as, and who it approved, held back or dropped: shown to the user every time.
+  const said = result && typeof result === 'object' && typeof result.say_to_user === 'string' ? { say_to_user: result.say_to_user } : {};
+  return { saved: opts.ask, result, ...said, next: 'run flow next again' };
 }
 
 export function ids(opts) {

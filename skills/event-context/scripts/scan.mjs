@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, lstatSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
+import { isKnownBrowser, startsBrowserPackage } from '../../../lib/security.mjs';
 
 export const KINDS = {
   outbound:
@@ -150,7 +151,9 @@ function agentsIn(dir, source) {
       ];
     });
 }
-// MCP servers from a config object: names and kind only.
+// MCP servers from a config object: names and kind only. A browser is known by its exact name here, or by the browser
+// package it starts ("npx @playwright/mcp"); its tools, when the session file lists them, are read in summarize. A
+// browser word in a name, command or args ("file-browser", "chrome-history") could be anyone's server.
 function serversIn(obj, source) {
   return Object.entries(obj?.mcpServers || {})
     .slice(0, 200)
@@ -167,7 +170,8 @@ function serversIn(obj, source) {
         name: String(name).slice(0, 80),
         transport: v?.type || (v?.url ? 'http' : 'stdio'),
         source,
-        kinds: kindsOf(`${name} ${String(v?.command || '')} ${args} ${host}`)
+        kinds: [...new Set([...kindsOf(`${name} ${String(v?.command || '')} ${args} ${host}`).filter((k) => k !== 'browser' || isKnownBrowser(name)), ...(startsBrowserPackage(v?.command, v?.args) ? ['browser'] : [])])],
+        ...(startsBrowserPackage(v?.command, v?.args) ? { browser_by_tools: true } : {})
       };
     });
 }
@@ -286,9 +290,11 @@ export function summarize(items, session = null) {
     const named = kindsOf(name.replace(/[-_]/g, ' ')).filter((k) => k !== 'browser');
     const crmOnly = named.includes('crm') && !/mail|inbox|outlook|gmail/i.test(name);
     const kinds = [...new Set([...named, ...toolKinds(tools).filter((k) => !(k === 'email' && crmOnly))])];
+    // Marked when its tools show a browser: the first scan keeps that as the only proof besides an exact known name.
+    const byTools = kinds.includes('browser') ? { browser_by_tools: true } : {};
     const prev = all.find((x) => x.type === 'mcp' && x.name === name);
-    if (prev) prev.kinds = [...new Set([...prev.kinds, ...kinds])];
-    else all.push({ type: 'mcp', name, transport: 'session', source: 'this session', kinds });
+    if (prev) Object.assign(prev, { kinds: [...new Set([...prev.kinds, ...kinds])], ...byTools });
+    else all.push({ type: 'mcp', name, transport: 'session', source: 'this session', kinds, ...byTools });
   }
   for (const s of (session?.skills || []).filter((x) => !own(x)))
     if (!all.some((x) => x.type === 'skill' && x.name === (s.name || s)))

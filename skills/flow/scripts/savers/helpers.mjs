@@ -44,13 +44,13 @@ export function cli(skill, args, c) {
     env: { ...process.env, FLOORBOSS_NOW: c.now.toISOString(), FLOORBOSS_SAVED_BY: savingAsk }
   });
   // The command's own "floorboss: " is dropped: this answer's error gets one of its own.
-  if (r.status !== 0)
-    throw new Error(
-      `${skill} ${args[0]}: ${String(r.stderr || r.stdout)
-        .trim()
-        .replace(/^floorboss:\s*/, '')
-        .slice(0, 1200)}`
-    );
+  // The hint a gate ends a refusal with (can_interpret and the people by ID) is kept whole, apart from the cut.
+  if (r.status !== 0) {
+    const all = String(r.stderr || r.stdout).trim().replace(/^floorboss:\s*/, '');
+    const at = all.indexOf('\ncan_interpret: true');
+    const body = at >= 0 ? all.slice(0, at) : all;
+    throw new Error(`${skill} ${args[0]}: ${body.slice(0, 1200)}${at >= 0 ? all.slice(at) : ''}`);
+  }
   try {
     return JSON.parse(r.stdout);
   } catch {
@@ -63,6 +63,8 @@ export const text = (v) => (typeof v === 'string' ? v.trim() : v);
 export const zoneExample = (c) => c.event?.event?.time_zone || 'Europe/Amsterdam or America/Chicago';
 // A gate answer is the user's words. A JSON file that landed here instead (another question's answer file) is
 // said for what it is, never read as the word "undefined".
+// Marks a value as Claude's interpreted reading, set by flow answer --interpreted only: a JSON value file can't carry it.
+export const INTERPRETED = Symbol('interpreted');
 export const gateWords = (v, what) => {
   if (typeof v !== 'object' || v == null) return String(v ?? '');
   if (typeof v.answers === 'string') return v.answers;
@@ -253,7 +255,8 @@ export function editWithText(c, t) {
   if (!e) throw new Error(`${id} has no draft to edit. Nothing was saved.`);
   writeText(e.file, withSubject(e.file, text));
   const saved = cli('event-outreach', ['save-draft', '--event', c.slug, '--id', id, '--touch', String(e.touch), '--md-file', e.file], c);
-  return { edited: id, file: e.file, ...saved };
+  // The gate says when this answer replaced a reading it was holding for a yes.
+  return { edited: id, file: e.file, ...saved, ...(r.dropped_reading ? { note: 'The reading shown before was dropped, since this is a new answer.' } : {}) };
 }
 export function skipReview(c, said) {
   const t = said.trim();

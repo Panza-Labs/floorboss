@@ -284,7 +284,15 @@ calendar.
 6. **Your ratings.** Before the first approval, you rate a blind set of drafts 1 to 10, the way the
    reader would. Anything rated 3 or less is rewritten with your note (a rewrite after the critic fails a
    draft carries the critic's reasons too), and you can apply your notes to every draft. You can skip this.
-7. **Approval and sending.** You approve in the terminal. With sending on, each person's whole sequence
+7. **Approval and sending.** You approve in the terminal. An answer made only of the gate's own words, IDs and
+   whole names that can mean one person ("approve all", "approve all except c004", "approve John Lind") is saved
+   at once. Anything else ("approve Ana" when the list has two, "drop Cy please", "looks good") is read back to
+   you first, by ID and name ("This answer reads as: drop c003 "Cy Ek". Reply yes to save, or answer again."), and
+   nothing is saved until you say yes ("ok" or "sure" then agrees to that reading, not to approving everyone). A
+   plain "ok" or "looks good" here is read back too, listing by ID who would be approved and who wouldn't.
+   An answer the code can't read at all is read by the model and always shown back the same way, quoting your
+   words, for a yes before anything is saved. Every saved answer says back who was approved, held back and dropped.
+   With sending on, each person's whole sequence
    (first message and follow-ups) is approved together, and Claude Code asks you before every send.
    Each message goes on its step of the route: by default email, then the event app, then LinkedIn, then email.
    Anyone you can't reach on a step skips it, and you can set a longer, shorter or different route in full setup

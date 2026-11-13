@@ -26,7 +26,7 @@ export function status(opts) {
   const st = { last_at: c.folded.last.paste_at || null };
   if (opts.none || /^nothing changed$/i.test(String(opts.text || '').trim())) {
     // The user's word that nothing changed is a reply check for everyone, for the next few minutes: their
-    // own words, never a bare flag.
+    // own words, never a bare flag. It names no inbox, so it never answers for LinkedIn or the app (lastReplyCheck).
     const said = opts.none ? String(opts.said || '').trim() : String(opts.text).trim();
     if (!said) throw new Error('status --none needs --said with the user\'s own words (e.g. "nobody replied"): it counts as a reply check.');
     led(c, { type: 'status_pasted', nothing_changed: true, said: said.slice(0, 200) });

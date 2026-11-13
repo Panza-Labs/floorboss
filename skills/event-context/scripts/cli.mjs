@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { run, need } from '../../../lib/args.mjs';
 import { loadConfig, saveConfig, DEFAULTS } from '../../../lib/config.mjs';
 import { parseRoute } from '../../../lib/route.mjs';
+import { trustedBrowsers } from '../../../lib/security.mjs';
 import { contextDir, ensureDir, configPath, home } from '../../../lib/paths.mjs';
 import { loadEvent, contextFor, saveEvent, nowFrom } from '../../../lib/event.mjs';
 import { isValidZone } from '../../../lib/tz.mjs';
@@ -477,7 +478,16 @@ function scanCmd(opts) {
   // What each of them was found to be is kept from the first scan the same way: "found" below comes from this scan's
   // session file, which the model writes, so a rescan mid-run could call any server a CRM.
   const mcpKinds = (f) => Object.fromEntries(Object.entries(f || {}).map(([k, l]) => [k, (Array.isArray(l) ? l : []).filter((x) => String(x).startsWith('mcp:'))]));
-  const setupFound = earlier ? (earlier.setup_found ?? mcpKinds(earlier.found)) : mcpKinds(inv.found);
+  // A browser in it is one known by its exact name or one the first scan found by its tools: an older inventory's
+  // browser named only by a word ("file-browser") is dropped when it is carried (lib/security.mjs trustedBrowsers).
+  const firstFound = earlier ? (earlier.setup_found ?? mcpKinds(earlier.found)) : mcpKinds(inv.found);
+  // An older inventory without the list keeps the browsers its own items show came from the session's tools.
+  const setupBrowserTools = earlier
+    ? Array.isArray(earlier.setup_browser_tools)
+      ? earlier.setup_browser_tools
+      : trustedBrowsers(firstFound.browser, null, earlier.items)
+    : inv.items.filter((x) => x.type === 'mcp' && x.browser_by_tools).map((x) => `mcp:${x.name}`);
+  const setupFound = { ...firstFound, browser: trustedBrowsers(firstFound.browser, setupBrowserTools) };
   // Setup still offers whatever the scan found (a CRM connected after a restart included): only the guard's "may a
   // run read this server" answer is held to setup_servers.
   const found = inv.found || {};
@@ -495,6 +505,7 @@ function scanCmd(opts) {
     found,
     setup_servers: setupServers,
     setup_found: setupFound,
+    setup_browser_tools: setupBrowserTools,
     ...(unconfirmed.length ? { found_since_setup: unconfirmed } : {}),
     scanned_at: new Date().toISOString()
   };

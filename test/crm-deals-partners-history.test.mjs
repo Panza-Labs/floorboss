@@ -96,7 +96,8 @@ test('triage: live partners are warm partners, a lost deal is held as a lost sta
   assert.match(row('Eli Varga').crm_history, /note: "Met at Quayside Europe; interested in multi-site"/);
   // Held, the lost deal is named where the user sees who's left out and why, so "warm <id> because …" brings them back.
   const out = card.left_out.find((g) => g.e_g.some((x) => x.startsWith(`${idOf(H, 'Dina Roth')} `)));
-  assert.match(out?.why || '', /a lost deal "Maasbulk - Scheduling"/, JSON.stringify(card.left_out));
+  // Run 6, round 6: a card line shows CRM text with no quote marks (the says field keeps them, as data).
+  assert.match(out?.why || '', /a lost deal Maasbulk - Scheduling/, JSON.stringify(card.left_out));
 });
 
 test('a live partner owned by the user is never held as their own coworker, even with a bare "Partner" status', () => {

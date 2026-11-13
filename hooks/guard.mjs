@@ -28,7 +28,7 @@ import { join } from 'node:path';
 import { home, recordFile } from '../lib/paths.mjs';
 import { readRun, readRunAnySession, stampRun, lockPath, endSession, touchSession, ranBefore } from '../lib/runlock.mjs';
 import { bareBrowserTool, readUrl, looksLikeUrl } from '../lib/security.mjs';
-import { eventRecord, lastReplyCheck, readersOf } from '../lib/sendcheck.mjs';
+import { eventRecord, oldestReplyCheck } from '../lib/sendcheck.mjs';
 import { withLock } from '../lib/lock.mjs';
 import { loadEvent } from '../lib/event.mjs';
 import { randomBytes } from 'node:crypto';
@@ -664,8 +664,9 @@ if (isMain(import.meta.url)) {
           } catch {
             /* the prompt still goes */
           }
-          const at = lastReplyCheck(eventRecord(join(home(), 'events', it._event)).entries, it.id, it.via, readersOf(settings));
-          if (at) checked = ` Their replies were checked ${Math.max(0, Math.round((nowMs - at) / 1000))} seconds ago; if anything came in since, decline.`;
+          // The oldest of the checks this send needs (its own inbox and every other one they were written to).
+          const at = oldestReplyCheck(it, { evDir: join(home(), 'events', it._event), settings, entries: eventRecord(join(home(), 'events', it._event)).entries });
+          if (at) checked = ` Their replies were checked ${Math.max(0, Math.round((nowMs - at) / 1000))} seconds ago (the oldest check, of every inbox they were written to); if anything came in since, decline.`;
         }
         const name = it.name || personName(join(home(), 'events', it._event), it.id);
         const history = holdHistory(eventRecord(join(home(), 'events', it._event)).entries, it.id, name);

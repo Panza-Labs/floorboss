@@ -7,12 +7,20 @@ import { parseScale, SCALES } from '../../../crm-triage/scripts/sizes.mjs';
 import { writeText } from '../../../../lib/jsonio.mjs';
 import { context, nextStep, appOutcomeTarget } from '../steps.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
+import { join } from 'node:path';
 import { asRule } from '../../../event-outreach/scripts/sameness.mjs';
-import { gateWords, EDIT_WITH_TEXT, editWithText, SKIP_REVIEW, skipReview, cli, withSubject, writeWork, isNo, ledger, writeWorkText, answers, pathOf, config, windowYes, noReplySaid } from './helpers.mjs';
+import { isAgreement } from '../../../../lib/reading.mjs';
+import { INTERPRETED, gateWords, EDIT_WITH_TEXT, editWithText, SKIP_REVIEW, skipReview, cli, withSubject, writeWork, isNo, ledger, writeWorkText, answers, pathOf, config, windowYes, noReplySaid } from './helpers.mjs';
 
 export const DRAFTS_SAVERS = {
   // "skip review <ids|all>" lines send those drafts on unreviewed (their cards say so); the rest go to the gate.
   approve: (v, c) => {
+    // Claude's reading of the user's words, by ID: always shown back for their yes (the gate never saves it at once).
+    if (v && typeof v === 'object' && v[INTERPRETED])
+      return cli('event-outreach', ['gate', '--event', c.slug, '--answers', String(v.answers), '--interpreted', '--said-file', writeWorkText(c, 'interpreted-said.txt', v.said)], c);
+    // The gate alone owns a reading waiting for the user's yes. This saver does the lines that aren't the gate's (an
+    // edit with its text, "skip review …") and hands the gate the rest with --consumed, so the gate knows the answer
+    // was more than what it reads: a bare "ok" left over is read back by ID, never saved at once.
     const t = gateWords(v, 'approval');
     if (EDIT_WITH_TEXT.test(t)) return editWithText(c, t);
     const lines = t
@@ -20,16 +28,18 @@ export const DRAFTS_SAVERS = {
       .map((x) => x.trim())
       .filter(Boolean);
     const skips = lines.filter((x) => SKIP_REVIEW.test(x));
+    if (!skips.length) return cli('event-outreach', ['gate', '--event', c.slug, '--answers', t], c);
     const rest = lines.filter((x) => !SKIP_REVIEW.test(x));
-    const skipped = skips.length ? skipReview(c, skips.join('; ')) : null;
-    if (!rest.length) return skipped;
-    const r = cli('event-outreach', ['gate', '--event', c.slug, '--answers', skips.length ? rest.join('\n') : t], c);
-    return skipped ? { ...r, skipped_review: skipped.skipped_review } : r;
+    const skipped = skipReview(c, skips.join('; '));
+    const r = cli('event-outreach', ['gate', '--event', c.slug, ...(rest.length ? ['--answers', rest.join('\n')] : []), '--consumed', 'skip-review'], c);
+    return { ...r, skipped_review: skipped?.skipped_review };
   },
   // A held or left-out draft after the approve step: by name only, one line per action ("approve c004",
   // "drop c007:2", "edit c009"). "all", "except" or a bare yes approves nothing here.
   approve_held: (v, c) => {
     const t = gateWords(v, 'approval');
+    // A yes to a reading the gate showed at this ask goes to the gate as it is; with none waiting, a yes approves nothing.
+    if (isAgreement(t)) return cli('event-outreach', ['gate', '--event', c.slug, '--answers', t, '--agree-only', 'held'], c);
     if (EDIT_WITH_TEXT.test(t)) return editWithText(c, t);
     const lines = t
       .split(/[;\n]/)
@@ -51,6 +61,7 @@ export const DRAFTS_SAVERS = {
   // Drafts stuck after three rewrites: "drop <ids>" or "edit <id>: …" go to the gate; "leave them for now" waits a day.
   stuck_drafts: (v, c) => {
     const t = gateWords(v, 'stuck-drafts').trim();
+    if (isAgreement(t)) return cli('event-outreach', ['gate', '--event', c.slug, '--answers', t, '--agree-only', 'stuck'], c);
     if (EDIT_WITH_TEXT.test(t)) return editWithText(c, t);
     if (/^leave/i.test(t)) return { left: true };
     // Drop or edit by id only: a bare "ok" here would approve everything the gate can.

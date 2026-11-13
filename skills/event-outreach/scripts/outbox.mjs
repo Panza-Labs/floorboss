@@ -26,29 +26,35 @@ function field(label, id, value) {
 function card(c, hosts = [], app = null) {
   const raw = safeUrl(c.profile_url);
   const url = raw && profileLinkAllowed(raw, hosts) ? raw : null;
+  // Where the message was approved to go (c.where) names the platform: a LinkedIn step whose link isn't shown is still
+  // for LinkedIn, never "paste it in" the app.
+  const onLinkedIn = c.kind !== 'coordinate' && c.channel !== 'email' && c.where === 'LinkedIn';
+  const inApp = c.routed === 'app';
   // A coordinate note goes to the colleague, not to the person: there is nothing to paste in an app.
   const addr =
     c.kind === 'coordinate'
       ? `send it to ${e(c.holder || 'the colleague')} yourself (chat or email)`
       : c.channel === 'email'
         ? e(c.address || '')
-        : c.routed === 'app' && app
+        : onLinkedIn && !(url && isLinkedInProfile(url))
+          ? 'no link floorboss can show: find them on LinkedIn'
+        : inApp && app
           ? `paste it in ${e(app)}`
           : url
           ? `<a href="${e(url)}" rel="noopener noreferrer">${e(url)}</a>`
           : app
             ? `no address: paste it in ${e(app)}`
             : 'no address: paste it wherever you reach them';
-  const li = c.kind !== 'coordinate' && c.channel !== 'email' && c.routed !== 'app' && url && isLinkedInProfile(url);
+  const li = c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
   const channel =
     c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
       : c.channel === 'email'
         ? 'Email'
-        : li
+        : li || onLinkedIn
           ? 'Paste message (LinkedIn)'
           : app
-          ? c.routed === 'app'
+          ? inApp
             ? `Paste message (${e(app)})`
             : `Paste message (${e(app)} or a DM)`
           : 'Paste message (a DM)';

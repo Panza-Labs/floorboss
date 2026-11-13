@@ -5,7 +5,7 @@
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { home, sensitiveKind } from '../../lib/paths.mjs';
-import { isBrowserCall, isKnownBrowser, looksLikeUrl, URL_CAP, sameServer } from '../../lib/security.mjs';
+import { isBrowserCall, isKnownBrowser, looksLikeUrl, URL_CAP, sameServer, trustedBrowsers } from '../../lib/security.mjs';
 import { screenTool, toolWords, TASKS } from '../../skills/connectors/scripts/tasks.mjs';
 import { readJsonStrict, leaves } from './shared.mjs';
 
@@ -196,7 +196,12 @@ export const isBrowser = (server, tool) => isBrowserCall(server, tool);
 // What the first setup scan found each connector to be (setup_found). A later scan rebuilds "found" from a session
 // file the model writes, so it can only ever be shown, never trusted. An inventory from before setup_found counts
 // what it had found.
-export const setupKinds = (inv) => (inv?.setup_found && typeof inv.setup_found === 'object' ? inv.setup_found : inv?.found || {});
+// A browser in it counts only by its exact known name or as one the first scan found by its tools (trustedBrowsers), so
+// an inventory written before that rule can't make "file-browser" a browser.
+export const setupKinds = (inv) => {
+  const k = inv?.setup_found && typeof inv.setup_found === 'object' ? inv.setup_found : inv?.found || {};
+  return { ...k, browser: trustedBrowsers(k.browser, Array.isArray(inv?.setup_browser_tools) ? inv.setup_browser_tools : null, inv?.items) };
+};
 
 // A browser_* tool on a server nothing else says is a browser could be any server's: a browser's reads aren't held
 // to a server's limits, so it counts only on a browser server known by its exact name, one of those reached through

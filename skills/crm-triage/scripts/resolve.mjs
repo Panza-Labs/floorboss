@@ -519,7 +519,11 @@ export function resolve(contact, evidence, ctx) {
   // The user's "reach", "warm" or "colleague" wins over the holds they could see when they said it (it records
   // them). A do-not-contact entry, an opt-out or stop, or an off-limits account that appeared since holds again.
   // The holds as they read now, before any "(new since …)" is added: what a decision made now has seen.
-  const holds_seen = rungs.filter((r) => (HARD_HOLDS.includes(r.rung) && r.group === 'skip') || isOwnerHold(r)).map((r) => r.says);
+  // An uncertain match in view counts as seen too ("uncertain: …"): a reach covers only the ones it was given over.
+  const holds_seen = [
+    ...rungs.filter((r) => (HARD_HOLDS.includes(r.rung) && r.group === 'skip') || isOwnerHold(r)).map((r) => r.says),
+    ...live.map((e) => `uncertain: ${e.says}`)
+  ];
   // The same holds with their rung, as the ledger keeps them (hold_seen): what sticks, and what a send prompt
   // says was cleared. A hold that is only sticking from before isn't seen again.
   // A coworker's contact the user chose to write to anyway (warn, mine) is no hold.
@@ -542,6 +546,19 @@ export function resolve(contact, evidence, ctx) {
       const k = rungs.findIndex((r) => r.rung === 'user');
       if (k >= 0) rungs.splice(k, 1);
       fresh[0].says = `${fresh[0].says} (new since you said ${decision.group}${decision.because ? `: "${decision.because}"` : ''})`;
+    }
+  }
+  // An uncertain match that turned up after the user's reach or warm (a CRM record imported since, close to this
+  // person, that may say they opted out) is asked again: the reach never covered it.
+  let uncertainSince = null;
+  if (decision && ['reach', 'warm'].includes(decision.group) && rungs.some((r) => r.rung === 'user')) {
+    const seen = new Set(decision.seen_holds || []);
+    if (live.some((e) => !seen.has(`uncertain: ${e.says}`))) {
+      rungs.splice(
+        rungs.findIndex((r) => r.rung === 'user'),
+        1
+      );
+      uncertainSince = decision;
     }
   }
   // Fit first, the relationship second: a CRM record, a customer status or an old thread never puts someone
@@ -612,7 +629,7 @@ export function resolve(contact, evidence, ctx) {
     return {
       group: 'check',
       rung: 'fuzzy',
-      says: live.map((e) => e.says).join('; '),
+      says: `${live.map((e) => e.says).join('; ')}${uncertainSince ? ` (new since you said ${uncertainSince.group})` : ''}`,
       evidence: evidence,
       alternatives: [...alts, ...decided.slice(0, 3).map(({ rung, group, says, holder }) => ({ rung, would_be: group, says, holder }))],
       holder: first?.holder || null,

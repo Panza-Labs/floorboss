@@ -190,12 +190,16 @@ test('review regressions: confirm keeps CRM facts, rescue refuses holds, FAIL ne
   assert.match(v2.verdicts[0].next, /marked failed/);
   writeFileSync(replyPath, 'ERROR: no drafts provided');
   assert.match(cli('event-outreach', ['verdicts', '--event', SLUG, '--ids', `${a.id}:1`, '--text-file', replyPath], { expectFail: true }).error, /given no drafts/);
-  const g = cli('event-outreach', ['gate', '--event', SLUG, '--answers', `approve all except ${c3.id}; drop ${c3.id}`]);
+  // Run 6, round 3: "approve all" with another line is read back first, and saved on yes.
+  assert.equal(cli('event-outreach', ['gate', '--event', SLUG, '--answers', `approve all except ${c3.id}; drop ${c3.id}`]).pending, true);
+  const g = cli('event-outreach', ['gate', '--event', SLUG, '--answers', 'yes']);
   assert.ok(g.not_ready.some((x) => x.id === a.id && /failed the critic/.test(x.reason)), 'FAIL not approved by approve all');
   assert.ok(!readFileSync(g.outbox, 'utf8').includes(`data-id="${a.id}"`));
   const again = JSON.parse(readFileSync(cli('event-outreach', ['todo', '--event', SLUG]).todo_file, 'utf8')).jobs;
   assert.ok(!again.some((j) => j.id === c3.id), 'dropped contact is not drafted again');
-  const named = cli('event-outreach', ['gate', '--event', SLUG, '--answers', `approve ${a.id}`]);
+  // Run 6, round 5: read back first, saying the draft didn't pass, and saved on the user's yes.
+  assert.match(cli('event-outreach', ['gate', '--event', SLUG, '--answers', `approve ${a.id}`]).say_to_user || '', /whose draft did not pass the checks/);
+  const named = cli('event-outreach', ['gate', '--event', SLUG, '--answers', 'yes']);
   assert.equal(named.approved, 1, 'naming a failed draft approves it');
 });
 

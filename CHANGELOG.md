@@ -100,6 +100,66 @@ The first public version.
 ### Connections and safety
 - A subagent can hand its result back during a run on current Claude Code, which delivers results through a tool of its
   own that the guard refused as unknown: critics, researchers and writers did the work and couldn't report it.
+- From a sixth full audit (11 Nov, 13 confirmed findings, all low; ten fixed here, each with a regression test, and
+  three planned for a later release: numbers 4, 7 and 10 of its report, list files read from a shared temp folder, a
+  CRM record matched by name to a row with another address, and thread ids taken from a receipt Claude writes), and
+  independent reviews of those fixes:
+  - At the shortlist and approval gates, an answer made only of the gate's own words, IDs and whole names that can
+    mean one person ("approve all", "approve all except c004", "approve John Lind") is saved at once. Anything else
+    that reads one way ("approve Ana" with one Ana, "drop Cy please", "looks good", a remark beside "approve all", a
+    name another row shares a first name with, a name holding a command word) is read back by ID and name ("This
+    answer reads as: drop c003 "Cy Ek". Reply yes to save, or answer again.") and saved only on the user's own yes
+    (while it waits, "ok", "sure" and "yes please" agree to exactly that reading, never to "approve all"); the
+    reading waits 30 minutes, a change to the list or to anyone's state drops it, any other answer replaces it, and
+    nothing can be sent from it. A word that could be two people is asked about ("Which "ana": c001 "Ana Costa" or c002 "Ana
+    Berg"? …"). Every saved answer says what it saved, by ID and name, and names in read-backs are cleaned of
+    everything but letters, digits, spaces, hyphens and apostrophes inside a word, and of anything shaped like an ID. Names are compared with invisible characters and accents removed and
+    look-alike letters read as Latin; a row written with those goes by ID only. An answer the code can't read is read
+    by Claude from the list, by ID only, and always shown back quoting the user's words for their yes
+    (`flow answer --interpreted`): every refusal at either gate says it can be read that way and lists the people by
+    ID, so an ordinary answer that the code can't read is read back rather than refused. A yes or an "ok" is
+    recognised however it is punctuated ("ok;", "ok\n;"), the same way the gate reads it. Only the gate reads or
+    changes a waiting reading; the flow hands it the whole answer. At the approval gate an answer that reads as
+    nothing but "ok" ("ok", "defaults", "looks good", "ok gracias", however it is written) is never saved at once: it
+    agrees to a valid reading the user was shown, or else it is read back listing by ID who would be approved and who
+    would not. Approving everyone at once takes the words "approve all". At the shortlist gate "ok" keeps the
+    shortlist as shown only when no earlier reading is on disk in any state; otherwise it saves nothing, says the
+    earlier reading can't be used, and the next "ok" works. A gate's answer is saved whole or not at all: a failure
+    part-way writes nothing and keeps the reading waiting, and a failure only in rebuilding the outbox page afterwards
+    says the answer was saved. A reading shown before the critic failed a draft, or before a
+    shortlist answer changed who can be written to, is never applied after it, and a
+    read-back of "approve all" names the drafts it would not approve as not ready. A message number ("c001:1") is
+    refused at the shortlist.
+  - A do-not-contact entry, an opt-out, a coworker's record or an uncertain match is checked again when a reach comes
+    after the user's own skip or hold-until for that person: "skip Bo" and then "reach Bo" asks for the same words a
+    reach on a held person always needs. A coworker's hold behind another open question (their lost deal) counts too; one behind a "doesn't fit" verdict is still only shown on the card, not asked for. A
+    reach covers only the holds that were there when it was given: an uncertain match that turns up later puts the
+    person back on check-these. What the user lifted in its own form ("reach Cy anyway", their own words through
+    decide, "separate" on an uncertain match) stays lifted. Saving "leave <name> with <coworker>" works again (it
+    stopped with an error).
+  - In the sentences floorboss says (hold messages, refusals, the card's left-out lines), names, companies, titles,
+    owners, CRM notes and do-not-contact lines keep only letters, digits, spaces and : ( ) , . / - and never a quote
+    mark, a ; or anything shaped like an ID. The card's own fields (a person's name, company, title, what the CRM
+    says) carry the list's text as it is, as data.
+  - A LinkedIn or app message counts as that inbox unless its label is nothing but email; send-outcome no longer records
+    a note typed in the browser as an email; a "nothing changed" word or an outbox paste no longer clears the LinkedIn
+    or app inbox; the send prompt says how old the oldest reply check it needs is.
+  - A server is a browser only by its exact known name, the browser package it starts, or the tools the first setup
+    scan saw; an inventory saved before this keeps the browsers its own record shows came from tools. The package a
+    runner starts is never read from the value of -p, --package, -c, --call, --from or --with; a cmd, env or shell
+    wrapper that chains another command (&, |, ;, a backtick, $( or a new line) is never a browser, and neither is
+    an aliased or linked package (@npm:, a URL, git+, file:), a runner given --registry or --node-options, or an env
+    wrapper setting NODE_OPTIONS or npm_config_*.
+  - The app limit keeps the place of anyone whose note was ever let through, whatever was said or done about it since,
+    and counts later-step app notes at todo and in the CRM tasks.
+  - A follow-up saved before the message ahead of it had any text is written again, and the gate says why.
+  - A company named like an ordinary word ("Step", "Later") no longer narrows "skip this step" or "skip, later", and
+    a listed name in the words after another ("skip Acme as well as Globex") or "the rest" beside one is asked again;
+    "please skip Acme", "skip only Acme" and "skip both Acme and Globex" skip just those.
+  - Creating an event never replaces an existing event's file, and the mock events stay mock by their names; a
+    LinkedIn step whose link the outbox can't show is still labelled LinkedIn.
+  - A draft greeting a name in Devanagari, Thai, Bengali, Tamil, Arabic or Hebrew no longer fails its checks, and the
+    agenda no longer offers a 07:00 scheduled task it couldn't run.
 - From a fifth full audit (9 Nov, 14 confirmed findings, all low, each fixed here with a regression test; its one open
   lead and three bugs it set aside are fixed too): a browser note is checked again when it is typed (one the window
   wasn't opened for, sent already, let through already, or to someone who said stop is refused, a repeat stays refused

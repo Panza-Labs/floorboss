@@ -475,7 +475,7 @@ export function resolveAll(c, contacts, inputs) {
           .map((k) => [k.ref, { group: k.group, ref: k.ref, because: `${k.because || k.group} (your answer at ${k.event})`, at: k.at }])
       ).values()
     ];
-    resolved[ct.id] = resolve(ct, gatherEvidence(ct, inputs), {
+    const ctx = {
       settings: c.settings,
       today: c.today,
       fit: c.state.fits[ct.id] || null,
@@ -487,7 +487,13 @@ export function resolveAll(c, contacts, inputs) {
       bounced: !!p.bounced,
       pastHolds: pastHolds(c.entries, ct.id),
       reachable: (x) => reachable(x, { ...c.settings, no_app: c.event.no_app }, x.channel)
-    });
+    };
+    resolved[ct.id] = resolve(ct, gatherEvidence(ct, inputs), ctx);
+    // The holds are the person's data, not the current decision: what they read as with the user's own skip,
+    // hold-until or leave set aside, keeping only the latest reach or warm they said (what it lifted stays
+    // lifted). A later "reach" is checked against this, so a skip never stands in for seeing a hold.
+    if (p.decision && p.decision !== p.lift)
+      Object.defineProperty(resolved[ct.id], 'base', { value: resolve(ct, gatherEvidence(ct, inputs), { ...ctx, decision: p.lift || null }), enumerable: false });
   }
   return resolved;
 }

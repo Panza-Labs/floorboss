@@ -217,11 +217,15 @@ test('6: only floorboss\'s attendee-researcher is the researcher, not another pl
 test('7: "approve all except c019, c019 too" is refused; "c016 too" does not override the critic, "c016 as is" and "c016 anyway" do', () => {
   const knownIds = new Set(['c016', 'c019', 'c020']);
   const parse = (t) => parseGate(t, { kind: 'draft', knownIds, partial: true });
-  for (const t of ['approve all except c019, c019 too', 'approve all except c019, and c019 too', 'approve all, c016 as well, except c016', 'approve all except c016, c016 as is']) {
+  // Run 6 review: after "except" every ID in the line is held back, so these hold the ID back rather than contradict.
+  for (const t of ['approve all except c019, c019 too', 'approve all except c019, and c019 too', 'approve all except c016, c016 as is']) {
     const g = parse(t);
-    assert.equal(g.actions.length, 0, t);
-    assert.match(g.refused[0]?.why || '', /both left out \("except"\) and approved by name/, t);
+    assert.deepEqual(g.actions.map((a) => a.verb), ['approve-all'], t);
+    assert.ok(g.actions[0].except.length === 1, t);
   }
+  const g = parse('approve all, c016 as well, except c016');
+  assert.equal(g.actions.length, 0);
+  assert.match(g.refused[0]?.why || '', /both left out \("except"\) and approved by name/);
   assert.deepEqual(parse('approve all, c016 too').actions.map((a) => ({ ...a })), [{ verb: 'approve-all', except: [] }, { verb: 'approve', ids: ['c016'], pass_only: true }]);
   for (const t of ['approve all, c016 as is', 'approve all, and c016 too as it is', 'approve all, c016 anyway']) assert.deepEqual(parse(t).actions.map((a) => ({ ...a })), [{ verb: 'approve-all', except: [] }, { verb: 'approve', ids: ['c016'] }], t);
 });
@@ -241,13 +245,20 @@ const failedDraft = ({ verdicts = true } = {}) => {
 };
 test('7: at the draft gate, "approve all, <failed> too" leaves the failed draft held; "approve all, <failed> anyway" sends it', () => {
   const { H, bo, n } = failedDraft();
-  const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve all, ${bo} too`]);
+  // Run 6, round 3: each answer here is read back first and saved on the user's yes.
+  const yes = (a) => {
+    const r = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', a]);
+    assert.ok(r.pending, `${a}: ${JSON.stringify(r).slice(0, 200)}`);
+    return cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']);
+  };
+  const g = yes(`approve all, ${bo} too`);
   assert.ok(!g.ERROR, g.ERROR);
   assert.equal(g.approved, n - 1, JSON.stringify(g).slice(0, 300));
   assert.ok(g.not_ready.some((x) => x.id === bo && /failed the critic/.test(x.reason)));
-  const both = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve all except ${bo}, ${bo} too`]);
-  assert.match(both.ERROR || '', /both left out/);
-  const ok = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve all, ${bo} anyway`]);
+  // Run 6 review: after "except" every ID in the line is held back.
+  const both = yes(`approve all except ${bo}, ${bo} too`);
+  assert.ok(!both.ERROR && !both.approved_people.some((x) => x.startsWith(`${bo} `)), JSON.stringify(both).slice(0, 300));
+  const ok = yes(`approve all, ${bo} anyway`);
   assert.ok(!ok.ERROR, ok.ERROR);
   assert.equal(ok.approved, n);
 });

@@ -110,7 +110,7 @@ test('C3: a browser_ tool on a server not known to be a browser is held as that 
     assert.match(browserCall('mcp__notes__browser_find', { query: 'short' }) || '', /wasn't given and didn't find/);
     assert.equal(browserCall('mcp__playwright__browser_snapshot', {}), null, 'a browser-named server still reads');
     assert.equal(browserCall('mcp__remote-devices__Claude_Browser__browser_snapshot', {}), null, 'and one reached through another server');
-    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ setup_servers: ['pw'], setup_found: { browser: ['mcp:pw'] }, found: {} }));
+    writeFileSync(join(H.HOME, 'inventory.json'), JSON.stringify({ setup_servers: ['pw'], setup_found: { browser: ['mcp:pw'] }, setup_browser_tools: ['mcp:pw'], found: {} }));
     assert.equal(browserCall('mcp__pw__browser_snapshot', {}), null, 'as does one the first scan found to be a browser');
   });
 });
@@ -189,8 +189,18 @@ test('C5: naming someone beside "approve all" still holds the approval', () => {
     const H = setup({ attendees: `${TWO}Drop Tables,CIO,Initech,drop@initech.test\n` });
     triage(H);
     const { gate } = draftApprove(H, NOW, answers);
-    assert.ok(gate.ERROR, answers);
+    // Run 6, round 3: asked again, or read back for the user's yes; never saved at once.
+    assert.ok(gate.ERROR || gate.pending, answers);
     assert.doesNotMatch(readFileSync(join(H.dir, 'ledger.jsonl'), 'utf8'), /"type":"approved"/, answers);
+    // Run 6, round 6: the read-back goes on to the user's yes, and that yes never approves Bo Li.
+    if (gate.pending) {
+      const y = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'yes']);
+      assert.ok(!y.ERROR, y.ERROR);
+      const led = readFileSync(join(H.dir, 'ledger.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+      const bo = led.find((e) => e.type === 'person' && e.name === 'Bo Li')?.id;
+      assert.ok(led.some((e) => e.type === 'approved'), `${answers}: the yes saved the reading`);
+      assert.ok(!led.some((e) => e.type === 'approved' && e.id === bo), `${answers}: Bo Li is never approved`);
+    }
   }
 });
 

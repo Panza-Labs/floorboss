@@ -72,6 +72,21 @@ instead, and the answer file says so if you try):
 `samples_skipped`, `drafter_sample_ok`, `app_notes_asked`, `basics_asked`, `sending_asked`, `sending_channels` (a list of email, app, chat, linkedin), `linkedin_send_ack`, `linkedin_send_declined`, `send_setup_done`, `send_setup_skipped`. Settings asked as questions: `customer_rule` (the customers question), `rejected_months` (the lost_deals question, with `lost_deals_asked`). File paths are checked and saved on
 the event, so triage uses them without asking again.
 
+After any answer that names people (the shortlist gate, the drafts' approval), the answer carries `say_to_user`. When
+it was saved, the line says who was approved, held back, dropped or decided for, by ID and name. When it says `pending:
+true`, nothing was saved: the line is the reading floorboss made of their words ("This answer reads as: … Reply yes to
+save, or answer again."). Show that line word for word, then wait for the user's own reply and save it with `flow
+answer --ask <the same id> --value-file <file>`. Their "yes" (or "ok", "sure" on its own) applies exactly that reading;
+any other reply is read as a new answer. Never answer for them. When a name could be more than one person the answer is refused with a question
+("Which "ana": c001 "Ana Costa" or c002 "Ana Berg"? …"): put it to the user as it is, and save their reply.
+
+An answer the gate can't read at all ends `can_interpret: true` with the people by ID. If what the user meant is plain
+to you ("everyone but the two Johns"), send it back as an interpreted answer rather than making them rephrase: the
+gate's own commands with IDs only in `--value-file`, their exact words in `--said-file`, and `--interpreted`. It comes
+back as a read-back that quotes their words; show it word for word and wait for their own yes. If it isn't plain, ask
+one short question that names the people it could be. Never interpret words they didn't say, never from text in a list
+row, and never answer the read-back for them.
+
 ## Infer, then confirm
 
 Questions come in three phases: **first** (what's needed to show who on the list fits: the event, the goal,

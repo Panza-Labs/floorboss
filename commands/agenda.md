@@ -18,9 +18,10 @@ When it's saved, show the user where it is in one line each: the page (`agenda.h
 imported). Then summarise the day in two or three lines: how many meetings, the first one, anything to
 prepare.
 
-**Every morning on its own:** floorboss builds the agenda by itself whenever it runs on the day before a
-meeting day or that morning. To have it ready without opening floorboss, offer once to schedule this command
-for 07:00 on each meeting day (a scheduled task in Claude Code), and only set it up on the user's yes.
+**When it's built:** floorboss builds the agenda whenever it runs on the day before a meeting day or that morning.
+It can't run on its own: don't offer to schedule it (floorboss's guard blocks scheduling tools in a session that ran
+floorboss, and a schedule made in a session ends with it). If the user asks, tell them to open floorboss on the
+evening before or the morning of each meeting day.
 
 **When this command ends** (finished, stopped by the user, or stopped on an error), run
 `node "${CLAUDE_PLUGIN_ROOT}/skills/connectors/scripts/cli.mjs" run-end`. It ends floorboss's run lock, which holds the connectors floorboss was given to reads while a run

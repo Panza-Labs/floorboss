@@ -43,6 +43,8 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       address: ct.email,
       profile_url: ct.profile_url,
       routed: pickAt(c, j.id, j.touch) || undefined,
+      // Where a paste message goes: where it was approved to go, else where the route sends it now.
+      where: j.kind !== 'coordinate' && j.channel === 'paste' ? c.state[j.id]?.touches?.[j.touch]?.approved?.where || whereAt(c, j.id, j.touch) : undefined,
       // Research couldn't confirm they're at this company: check their profile before sending.
       identity_unconfirmed: profileMeta(c.paths.dir, j.id)?.identity_confirmed === false || undefined,
       // Their list entry reads like an instruction to an AI (a planted note): flagged on the card too, not only at load.

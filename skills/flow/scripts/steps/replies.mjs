@@ -29,7 +29,7 @@ export function replySteps(x) {
     });
   // The CRM too: it logs the user's emails (its mailbox sync), calls and meetings, and many people connect it
   // without connecting their mailbox here. A failed CRM is asked about only when no working mailbox reads replies
-  // instead, and never in an agenda run (it may be the 07:00 one, with nobody there to answer).
+  // instead, and never in an agenda run (the user asked for the agenda, not for replies).
   // "ask me" answers for the reader it was asked about (older answers, with no task, were about the mailbox).
   const gaveUp = (task) => {
     const f = e.state.tool_failed[task],

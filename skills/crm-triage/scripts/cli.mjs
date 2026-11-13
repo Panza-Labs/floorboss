@@ -16,11 +16,12 @@ import { allowedPath, notSensitive, configPath, expandHome, readChecked } from '
 import { dirname } from 'node:path';
 import { readCsv, toCsv } from '../../../lib/csv.mjs';
 import { readJson, writeJson, writeText } from '../../../lib/jsonio.mjs';
-import { fold } from '../../../lib/ledger.mjs';
+import { fold, inOneGo } from '../../../lib/ledger.mjs';
 import { contextFor, saveEvent, loadEvent } from '../../../lib/event.mjs';
 import { saveConfig } from '../../../lib/config.mjs';
 import { routeLength } from '../../../lib/route.mjs';
-import { parseGate, TRIAGE_ANSWERS } from '../../../lib/gate.mjs';
+import { parseGate, TRIAGE_ANSWERS, friendlyAnswer } from '../../../lib/gate.mjs';
+import { directReading, interpretedReading, interpretHint, signature, sameReading, isYes, isAgreement, bareOk, rowsHash, savePending, dropPending, clearPending, peekPending, person, shown, plainText } from '../../../lib/reading.mjs';
 import { validateMapping, writeSource, sourcePath, optOutSays, defaultStatusMeaning } from './sources.mjs';
 import { readMappingWords } from './mapping-words.mjs';
 import { mustMeetHits } from './shortlist.mjs';
@@ -486,30 +487,42 @@ const seenHolds = (r) =>
 // off-limits account takes the user's own words for that person (decide); someone a coworker holds (their record,
 // or their account) is written to only with "anyway". The gate and check-these refuse the same way, with the
 // same choices (check: the check-these wording).
+// The person as their holds read, the user's own skip, hold-until or leave set aside (view.mjs: base).
+const heldAs = (v, id) => v.resolved[id]?.base || v.resolved[id];
+// Row, CRM and list text in a message the user is shown: letters, digits and spaces only, no ID shapes, capped, so a
+// name, a company, an owner or a CRM note can never read as a command or an instruction.
+const safe = (x, n = 120) => plainText(x, n);
+// Every rung of that resolution, not only the one that won: a coworker's record behind a lost deal, or a do-not-contact
+// entry behind "doesn't fit", still holds. When the user's own reach or warm wins, the holds behind it are the ones it
+// was given over (resolve puts any newer one first), so none of them is asked again.
+const rungsOf = (r) =>
+  !r ? [] : r.rung === 'user' ? [r] : [r, ...(r.alternatives || []).map((a) => ({ rung: a.rung, group: a.would_be, says: a.says, holder: a.holder }))];
 function hardHold(v, id) {
-  const r = v.resolved[id];
-  return r?.group === 'skip' && HARD_HOLDS.includes(r.rung)
-    ? `${id} is held because ${r.says}. If you really mean to reach them, say so in your own words: decide --id ${id} --group reach --because <why>.`
+  const h = rungsOf(heldAs(v, id)).find((x) => x.group === 'skip' && HARD_HOLDS.includes(x.rung));
+  return h
+    ? `${id} is held because ${safe(plainWhy(h.says))}. If you really mean to reach them, say so in your own words: decide --id ${id} --group reach --because <why>.`
     : null;
 }
 function coworkerHold(v, id, verb, { check = false } = {}) {
-  const r = v.resolved[id];
-  if (r?.group !== 'colleague' || !r.holder) return null;
-  const name = v.contacts.find((x) => x.id === id)?.name || id;
-  const where = /\baccount\b/.test(r.says || '') ? `at ${r.holder}'s account (${r.says})` : `held by ${r.holder} (${r.says})`;
+  const r = rungsOf(heldAs(v, id)).find((x) => x.group === 'colleague' && x.holder);
+  if (!r) return null;
+  const name = safe(v.contacts.find((x) => x.id === id)?.name || id, 60);
+  const holder = safe(r.holder, 60);
+  const where = /\baccount\b/.test(r.says || '') ? `at ${holder}'s account (${safe(plainWhy(r.says))})` : `held by ${holder} (${safe(plainWhy(r.says))})`;
   const w = verb === 'rescue' ? 'reach' : verb;
   return check
-    ? `${name} (${id}) is ${where}. Say "${id} ${w} anyway because <why>" (you write to them too, and any note to ${r.holder} says so), or leave them with ${r.holder} (nothing to say).`
-    : `${name} is ${where}. Say "${w} ${name} anyway" (you write to them too, and any note to ${r.holder} says so), or "${name} is mine", or "leave ${name} with ${r.holder}".`;
+    ? `${name} (${id}) is ${where}. Say "${id} ${w} anyway because <why>" (you write to them too, and any note to ${holder} says so), or leave them with ${holder} (nothing to say).`
+    : `${name} is ${where}. Say "${w} ${name} anyway" (you write to them too, and any note to ${holder} says so), or "${name} is mine", or "leave ${name} with ${holder}".`;
 }
 
 // An uncertain match is settled first (same person or not): a "reach" or "warm" on it could write to someone that
 // record says opted out. The gate, decide and decide-batch refuse it with the same one line.
 function fuzzyHold(v, id, group, because) {
-  const r = v.resolved[id];
-  if (r?.rung !== 'fuzzy') return null;
+  const r = heldAs(v, id);
+  // An uncertain match behind another rung ("doesn't fit", no address) is still unsettled.
+  if (r?.rung !== 'fuzzy' && !(r?.rung !== 'user' && (r?.alternatives || []).some((a) => a.would_be === 'depends'))) return null;
   const ref = (r.alternatives || []).find((a) => a.ref)?.ref || 'crm:<row>';
-  return `${id} is an uncertain match (${String(r.says || '').slice(0, 120)}): settle it in the same line, "${id} same-person ${ref} ${group}${because ? ` because ${String(because).slice(0, 60)}` : ' because <why>'}" or "${id} different-person ${group} because <why>"${/gave no answer/.test(r.says || '') ? `, or "${id} not-in-crm ${group} because <why>" where the CRM lookup gave no answer` : ''} (or skip).`;
+  return `${id} is an uncertain match (${safe(plainWhy(r.says))}): settle it in the same line, "${id} same-person ${ref} ${group}${because ? ` because ${safe(because, 60)}` : ' because <why>'}" or "${id} different-person ${group} because <why>"${/gave no answer/.test(r.says || '') ? `, or "${id} not-in-crm ${group} because <why>" where the CRM lookup gave no answer` : ''} (or skip).`;
 }
 
 function decide(opts) {
@@ -596,7 +609,7 @@ function decideBatch(opts) {
     new Set(list.map((d) => d.id))
   ).map((g) => {
     const blocked = (id) => {
-      const r = v.resolved[id];
+      const r = heldAs(v, id);
       return (
         ['reach', 'warm'].includes(g.group) &&
         (r.rung === 'fuzzy' ||
@@ -626,8 +639,10 @@ function decideBatch(opts) {
     .filter((d) => !refused.some((x) => x.line === d.line.slice(0, 200)))
     .sort((a, b) => Number(!MATCH.includes(a.group)) - Number(!MATCH.includes(b.group)));
   if (refused.length && !take.length && !groups.some((g) => g.ids.length)) throw new Error(`${refused.map((x) => x.why).join(' ')} Nothing was saved.`);
+  // Written as one append at the end: a failure part-way writes none of it.
+  inOneGo(c.paths.ledger, () => {
   for (const d of take) {
-    const r0 = v.resolved[d.id];
+    const r0 = heldAs(v, d.id);
     const because = (
       d.anyway && r0?.holder
         ? `${d.group} anyway, though ${r0.holder} holds them${d.because ? `: ${d.because}` : ''}`
@@ -664,10 +679,11 @@ function decideBatch(opts) {
         by_group: true,
         ...(g.group !== 'skip' ? { seen_holds: [] } : {})
       });
+  });
   const byId = Object.fromEntries(v.contacts.map((x) => [x.id, x]));
   const after = view({ ...opts, what: 'shortlist' });
   const still = [...take.map((d) => d.id), ...groups.flatMap((g) => [...g.ids, ...g.held_back])].filter((id) => after.check_these.some((x) => x.id === id));
-  const asked = notAsked.map((id) => `${byId[id]?.name || id} (${id})`);
+  const asked = notAsked.map((id) => `${safe(byId[id]?.name || id, 60)} (${id})`);
   const told = [
     asked.length ? `Not in this check: applied anyway: ${asked.join(', ')}.` : null,
     refused.length ? `Not saved: ${refused.map((x) => `"${x.line.slice(0, 80)}": ${x.why}`).join(' ')}` : null
@@ -824,10 +840,10 @@ function view(opts) {
     const why = held
       ? held.why
       : r.group === 'skip'
-        ? `left alone: ${plainWhy(r.says.replace(/\([^()]*\)/g, ''))}`
+        ? `left alone: ${safe(plainWhy(r.says.replace(/\([^()]*\)/g, '')))}`
         : r.group === 'colleague'
           ? v.coordinate.includes(x.id)
-            ? `a colleague holds them (${r.holder || 'owner unknown'}): ${c.settings.colleague_notes || c.state.people[x.id]?.colleague_note ? 'a note goes to the colleague' : `left to them, and no note is drafted (colleague notes are off: say "note <name>" for a note to ${r.holder || 'the colleague'} about one of them, or "notes on" for everyone a colleague holds)`}`
+            ? `a colleague holds them (${r.holder ? safe(r.holder, 60) : 'owner unknown'}): ${c.settings.colleague_notes || c.state.people[x.id]?.colleague_note ? 'a note goes to the colleague' : `left to them, and no note is drafted (colleague notes are off: say "note <name>" for a note to ${r.holder ? safe(r.holder, 60) : 'the colleague'} about one of them, or "notes on" for everyone a colleague holds)`}`
             : fitOf
               ? 'a colleague holds them; fit unsure, so no note'
               : 'not judged yet'
@@ -942,7 +958,7 @@ function view(opts) {
           .slice(0, 4)
           .map(
             (id) =>
-              `${id} ${byId[id].name} (${byId[id].title || 'no title'}, ${byId[id].company})${v.resolved[id].account_note ? `: ${v.resolved[id].account_note}` : ''}`
+              `${id} ${safe(byId[id].name, 60)} (${safe(byId[id].title || 'no title', 60)}, ${safe(byId[id].company, 60)})${v.resolved[id].account_note ? `: ${safe(v.resolved[id].account_note)}` : ''}`
           )
       })),
     unjudged: unjudged.length
@@ -966,7 +982,10 @@ function view(opts) {
       const by = {};
       for (const x of v.contacts) {
         const r = v.resolved[x.id];
-        if (r.group === 'colleague' && c.state.fits[x.id]?.segment) by[r.holder || 'owner unknown'] = (by[r.holder || 'owner unknown'] || 0) + 1;
+        if (r.group === 'colleague' && c.state.fits[x.id]?.segment) {
+          const k = r.holder ? safe(r.holder, 60) : 'owner unknown';
+          by[k] = (by[k] || 0) + 1;
+        }
       }
       return Object.keys(by).length ? by : undefined;
     })(),
@@ -976,7 +995,7 @@ function view(opts) {
         ? {
             count: ids.length,
             line: `${ids.length} of YOUR OWN CRM contacts are held, because a coworker has a deal at their company. Say "reach <name>" for any that are yours to write to.`,
-            people: ids.slice(0, 20).map((id) => `${id} ${byId[id].name} (${byId[id].company}): ${v.resolved[id].says}`)
+            people: ids.slice(0, 20).map((id) => `${id} ${safe(byId[id].name, 60)} (${safe(byId[id].company, 60)}): ${safe(v.resolved[id].says)}`)
           }
         : undefined;
     })(),
@@ -1009,9 +1028,102 @@ function view(opts) {
   return out;
 }
 
+// Why a gate action can't be saved as it stands, or null. Every verb that could bring a held person nearer to being
+// written to goes through the holds: reach, rescue, warm and "is mine" (do-not-contact, opt-out, an uncertain match),
+// reach, rescue and warm without "anyway" (a coworker's hold), "confirm" (only a CRM record waiting to be confirmed
+// is confirmed; with none, it would be a plain reach), and "separate" (it would lift a hold that rests on the record).
+// "leave" and "note" are for someone a coworker holds.
+// Who holds this person, if a coworker does: their record's owner or one a near match names.
+function holderOfId(v, id) {
+  const r = heldAs(v, id);
+  return r?.holder || (r?.alternatives || []).find((x) => x.holder)?.holder || null;
+}
+function holdOn(v, a) {
+  const name = (id) => safe(v.contacts.find((x) => x.id === id)?.name || id, 60);
+  const holderOf = (id) => holderOfId(v, id);
+  if (a.verb === 'leave') {
+    const id = a.ids.find((x) => !holderOf(x));
+    if (id) return `${name(id)} isn't held by a coworker, so there is no one to leave them with. Say "skip ${name(id)}" to leave them alone.`;
+  }
+  if (a.verb === 'note') {
+    const id = a.ids.find((x) => !v.coordinate.includes(x));
+    if (id) return `${id} isn't held by a coworker, so there is no one to write a note to. "note" is for the people the card lists as held by a colleague.`;
+  }
+  if (['rescue', 'reach', 'warm', 'mine'].includes(a.verb))
+    for (const id of a.ids) {
+      const why = hardHold(v, id) || fuzzyHold(v, id, ['warm', 'mine'].includes(a.verb) ? 'warm' : 'reach', a.because);
+      if (why) return why;
+    }
+  if (['rescue', 'reach', 'warm'].includes(a.verb) && !a.anyway)
+    for (const id of a.ids) {
+      const why = coworkerHold(v, id, a.verb);
+      if (why) return why;
+    }
+  if (a.verb === 'confirm')
+    for (const id of a.ids)
+      if (!(v.resolved[id]?.alternatives || []).some((x) => x.ref))
+        return `${id} has no CRM record waiting to be confirmed as the same person, so there is nothing to confirm. To write to them, say "reach ${id}".`;
+  if (a.verb === 'separate')
+    for (const id of a.ids) {
+      const r = heldAs(v, id);
+      const cw = rungsOf(r).find((x) => x.group === 'colleague' && x.holder);
+      const held = hardHold(v, id) || (cw ? `${name(id)} is held by ${safe(cw.holder, 60)} (${safe(plainWhy(cw.says))})` : null);
+      if (held) return `${id} is held, and "separate" would lift that: ${held.replace(/ If you really mean to reach them.*$/, '')}. If they really are someone else, settle it in your own words at the check, or with decide.`;
+    }
+  return null;
+}
+
+// What a shortlist reading does, ID first and each name in quotes.
+function describeTriage(g, who) {
+  const list = (ids) => [...new Set(ids)].map(who).join(', ');
+  const parts = [];
+  if (g.defaults) parts.push('the shortlist as shown (ok)');
+  for (const a of g.actions) {
+    const note = (x) => (x ? ` (${shown(x, 80, { keepIds: true })} is kept as a note, and acts on nobody else)` : '');
+    if (a.verb === 'remove') parts.push(`skip ${list(a.ids)}${note(a.because)}`);
+    else if (a.verb === 'reach' || a.verb === 'rescue') parts.push(`reach ${list(a.ids)}${a.anyway ? ', anyway' : ''}${note(a.because)}`);
+    else if (a.verb === 'warm') parts.push(`warm ${list(a.ids)}${a.anyway ? ', anyway' : ''}${note(a.because)}`);
+    else if (a.verb === 'mine') parts.push(`${list(a.ids)} as your own contact${a.ids.length > 1 ? 's' : ''}`);
+    else if (a.verb === 'hold') parts.push(`hold ${list(a.ids)} until ${shown(a.until, 80, { keepIds: true })} says yes (those words act on nobody else)`);
+    else if (a.verb === 'leave') parts.push(`leave ${list(a.ids)} with the coworker who holds them${a.with ? ` (${shown(a.with, 60, { keepIds: true })}: those words act on nobody else)` : ''}`);
+    else if (a.verb === 'confirm') parts.push(`${list(a.ids)} as the same person as their CRM record`);
+    else if (a.verb === 'separate') parts.push(`${list(a.ids)} as a different person from the CRM record`);
+    else if (a.verb === 'note') parts.push(`a note to the coworker about ${list(a.ids)}`);
+    else if (a.verb === 'notes') parts.push(`notes to coworkers ${a.on ? 'on' : 'off'}`);
+    else if (a.verb === 'keep') parts.push(a.top != null ? `keep the top ${a.top}` : `keep segment ${a.segments.join(', ')}`);
+    else if (a.verb === 'cap') parts.push(a.company === '*' ? `at most ${a.value === 'all' ? 'any number' : a.value} per company` : `at most ${a.value === 'all' ? 'any number' : a.value} from ${shown(a.company, 60)}`);
+  }
+  return parts.join('; ');
+}
+const keepReading = (g) => ({ defaults: !!g.defaults, refused: g.refused || [], read_as: g.read_as || [], actions: g.actions.map((a) => ({ ...a, line: a.line })) });
+const restoreReading = (r) => ({
+  defaults: !!r.defaults,
+  refused: r.refused || [],
+  read_as: r.read_as || [],
+  actions: (r.actions || []).map(({ line, ...a }) => Object.defineProperty(a, 'line', { value: line, enumerable: false }))
+});
+
 // The user's gate answer in one line ("remove c003, rescue c010, keep 40, confirm c066"), turned into
 // decisions. Each word maps to a ledger entry; the view follows.
+// A refusal ends with a hint for Claude (can_interpret, and the people by ID): it may work out what the user meant and
+// send that back as an interpreted answer, which is always shown to the user for a yes.
 function gate(opts) {
+  try {
+    return gateAnswer(opts);
+  } catch (e) {
+    if (!opts.interpreted && typeof opts.answers === 'string' && opts.answers.trim()) {
+      try {
+        const v = viewOf(ctxOf(opts.event, opts));
+        e.message = `${e.message.replace(/\s+$/, '')}${interpretHint(v.contacts.map((x) => ({ id: x.id, name: x.name })), opts.event)}`;
+      } catch {
+        /* the refusal still goes */
+      }
+    }
+    throw e;
+  }
+}
+
+function gateAnswer(opts) {
   need(opts, 'event');
   const c = ctxOf(opts.event, opts);
   const v = viewOf(c);
@@ -1021,8 +1133,113 @@ function gate(opts) {
     throw new Error('The gate needs the user\'s answer: --answers "<their words>" (ok, or the changes they asked for). Nothing was saved.');
   // A line that can't be read is refused on its own, like a line that needs the user's own words: the other
   // lines are saved, and the answer says which were.
-  const g = parseGate(opts.answers, { kind: 'triage', knownIds: new Set(people.map((p) => p.id)), people, partial: true });
-  const said = String(opts.answers).slice(0, 200);
+  // DIRECT or CONFIRM (lib/reading.mjs): an answer that isn't plainly what the user typed is shown back and waits on
+  // disk for their yes; "yes" applies exactly that reading (holds are checked again), any other answer drops it.
+  const who = (id) => person(id, v.contacts.find((x) => x.id === id)?.name);
+  // The hash covers who is on the list, who is shortlisted, and each person's group and holder, so a decision, a keep or
+  // a cap since the reading was shown makes it stale.
+  const shortIds = new Set(v.shortlist?.ranked || []);
+  const hash = rowsHash(people.map((p) => ({ id: p.id, name: p.name, touch: JSON.stringify([shortIds.has(p.id), v.resolved[p.id]?.group ?? null, v.resolved[p.id]?.holder ?? null]) })));
+  const knownIds = new Set(people.map((p) => p.id));
+  const at = { event: c.event.slug, hash, nowMs: c.now.getTime() };
+  const hint = () => interpretHint(people, c.event.slug);
+  // flow next asks whether a reading waits, judged as a yes would judge it.
+  if (opts['pending-check']) {
+    const w = peekPending(c.paths.derived, 'shortlist', at);
+    return w.pending ? { pending: true, text: w.pending.text } : { pending: false, ...(w.stale ? { stale: w.stale } : {}) };
+  }
+  // A reading's text: what it will save, and up front what a hold will refuse even on yes. An answer whose every action
+  // a hold refuses, or that leaves someone with a coworker nobody is, has nothing to read back: it is asked again.
+  const readBack = (r, lead) => {
+    const blocked = r.actions.map((a) => [a, holdOn(v, a)]).filter(([, why]) => why);
+    const leaveNobody = blocked.find(([a]) => a.verb === 'leave');
+    if (leaveNobody || (blocked.length && blocked.length === r.actions.length && !r.defaults)) throw new Error(`${blocked.map(([, why]) => why).join(' ')} Nothing was saved.`);
+    const ok = { ...r, actions: r.actions.filter((a) => !blocked.some(([b]) => b === a)) };
+    const text = `${lead}${describeTriage(ok, who) || 'nothing to do'}.${blocked.length ? ` Not saved even on yes: ${blocked.map(([a, why]) => `${shown(a.line || '', 80, { keepIds: true })}, ${why}`).join(' ')}` : ''}`;
+    return { ok, text };
+  };
+  // Claude's reading of words the code couldn't read: IDs and the gate's own commands only, always shown back first.
+  if (opts.interpreted) {
+    const words = typeof opts.said === 'string' ? opts.said.trim() : '';
+    if (!words) throw new Error("An interpreted answer needs the user's exact words (--said-file). Nothing was saved.");
+    if (!interpretedReading(opts.answers, { kind: 'triage', ids: knownIds })) {
+      const had = dropPending(c.paths.derived, 'shortlist');
+      throw new Error(`${had ? 'The reading shown before was dropped. ' : ''}An interpreted answer is the gate's own commands with list IDs only, for example "skip c002" or "keep 3": no names or other words. Nothing was saved.`);
+    }
+    const r = parseGate(opts.answers, { kind: 'triage', knownIds, partial: false });
+    const rb = readBack(r, `You said: ${shown(words, 200, { keepIds: true })}. That reads as: `);
+    const text = `${rb.text} Reply yes to save, or answer again.`;
+    savePending(c.paths.derived, 'shortlist', { event: c.event.slug, rows_hash: hash, created_at: c.now.toISOString(), text, answer: `${words.slice(0, 200)} (read as: ${String(opts.answers).slice(0, 100)})`, reading: keepReading(rb.ok) });
+    return { saved: false, pending: true, interpreted: true, confirm: text, say_to_user: text, next: 'Show say_to_user to the user word for word and wait for their own reply. Never answer it for them.' };
+  }
+  const waiting = peekPending(c.paths.derived, 'shortlist', at);
+  // Any pending file at all, in any state (waiting, dropped, too old, read against other rows, unreadable).
+  const exists = !waiting.none;
+  const okOnly = (() => {
+    if (bareOk(opts.answers) && !isYes(opts.answers)) return true;
+    try {
+      const p = parseGate(friendlyAnswer(opts.answers), { kind: 'triage', knownIds, people, partial: true });
+      return !!p.defaults && !p.actions.length && !p.refused.length;
+    } catch {
+      return false;
+    }
+  })();
+  let g,
+    answers = opts.answers,
+    droppedReading = false,
+    taken = null;
+  // A trace of a reading the user may still think they are agreeing to: said, and cleared, so the next answer is read
+  // as typed.
+  const cantUse = () => {
+    clearPending(c.paths.derived, 'shortlist');
+    return {
+      saved: false,
+      say_to_user: `${waiting.stale ? `The reading shown before can't be used: ${waiting.stale}.` : 'The reading shown before was dropped.'} Nothing was saved. Say the whole answer again, for example "ok" to keep the shortlist as shown, or "skip c002".`
+    };
+  };
+  if (waiting.pending && isAgreement(opts.answers)) {
+    // While a reading waits, any word of agreement ("yes", "ok", "sure") takes exactly it.
+    taken = waiting.pending;
+    g = restoreReading(taken.reading);
+    answers = `${taken.answer} (then ${String(opts.answers).trim().slice(0, 20)})`;
+  } else if (exists && isYes(opts.answers)) {
+    clearPending(c.paths.derived, 'shortlist');
+    throw new Error(`The reading shown before can't be used: ${waiting.stale}. Nothing was saved: answer again, for example "ok" or "skip c001".`);
+  } else if (exists && (okOnly || isAgreement(opts.answers))) {
+    // "ok", "defaults", "looks good" or a yes, with no valid reading to agree to: the shortlist as shown is never
+    // saved over a reading the user saw.
+    return cantUse();
+  } else if (isYes(opts.answers)) {
+    return { saved: false, can_interpret: true, say_to_user: `Nothing is waiting for a yes here, so nothing was saved. Say "ok", or the change you want, for example "skip c001".${hint()}` };
+  } else {
+    droppedReading = exists;
+    try {
+      g = parseGate(friendlyAnswer(opts.answers), { kind: 'triage', knownIds, people, partial: true });
+    } catch (e) {
+      if (dropPending(c.paths.derived, 'shortlist')) e.message = `The reading shown before was dropped, since this is a new answer. ${e.message} To save that reading, say it again, then "yes".`;
+      throw e;
+    }
+    const direct = directReading(opts.answers, { kind: 'triage', rows: people, ids: knownIds });
+    if ((g.actions.length || g.defaults) && !sameReading(direct, g.comments?.length || g.refused.length ? null : signature(g))) {
+      let rb;
+      try {
+        rb = readBack(g, `${exists ? 'The earlier reading was dropped. ' : ''}This answer reads as: `);
+      } catch (e) {
+        dropPending(c.paths.derived, 'shortlist');
+        throw e;
+      }
+      const text = `${rb.text}${g.read_as?.length ? ` Names read: ${g.read_as.map((x) => `${shown(x.said)} as ${x.ids.map(who).join(' and ')}`).join('; ')}.` : ''}${g.refused.length ? ` Not read, and not done: ${g.refused.map((x) => shown(x.line, 120, { keepIds: true })).join(', ')}.` : ''} Reply yes to save, or answer again.`;
+      savePending(c.paths.derived, 'shortlist', { event: c.event.slug, rows_hash: hash, created_at: c.now.toISOString(), text, answer: String(opts.answers).slice(0, 300), reading: keepReading({ ...g, actions: rb.ok.actions }) });
+      return {
+        saved: false,
+        pending: true,
+        confirm: text,
+        say_to_user: text,
+        next: 'Show say_to_user to the user word for word and wait for their own reply. Their yes goes through flow answer --ask gate like any answer; never answer it for them.'
+      };
+    }
+  }
+  const said = String(answers).slice(0, 200);
   // Reaching someone held by a do-not-contact entry, an opt-out or an off-limits account takes the user's own
   // words for that person (decide), never a word in a gate line. "note <name>" is for someone a coworker holds.
   // Someone a coworker holds (their record, or their account) isn't written to on a plain "reach": the user
@@ -1031,79 +1248,51 @@ function gate(opts) {
   // the answer says which were.
   const refused = [...g.refused];
   const refuse = (a, why) => {
-    refused.push({ line: String(a.line || opts.answers).slice(0, 200), why });
-  };
-  const holderOf = (id) => {
-    const r = v.resolved[id];
-    return r?.holder || (r?.alternatives || []).find((x) => x.holder)?.holder || null;
+    refused.push({ line: String(a.line || answers).slice(0, 200), why });
   };
   const okActions = g.actions.filter((a) => {
-    // "leave <name> with <coworker>" is for someone a coworker holds: anyone else is left alone with "skip".
-    if (a.verb === 'leave') {
-      const id = a.ids.find((x) => !holderOf(x));
-      if (id) {
-        refuse(
-          a,
-          `${v.contacts.find((x) => x.id === id)?.name || id} isn't held by a coworker, so there is no one to leave them with. Say "skip ${v.contacts.find((x) => x.id === id)?.name || id}" to leave them alone.`
-        );
-        return false;
-      }
-    }
-    if (a.verb === 'note') {
-      const id = a.ids.find((x) => !v.coordinate.includes(x));
-      if (id) {
-        refuse(a, `${id} isn't held by a coworker, so there is no one to write a note to. "note" is for the people the card lists as held by a colleague.`);
-        return false;
-      }
-    }
-    if (['rescue', 'reach', 'warm', 'mine'].includes(a.verb))
-      for (const id of a.ids) {
-        const why = hardHold(v, id) || fuzzyHold(v, id, ['warm', 'mine'].includes(a.verb) ? 'warm' : 'reach', a.because);
-        if (why) {
-          refuse(a, why);
-          return false;
-        }
-      }
-    if (['rescue', 'reach', 'warm'].includes(a.verb) && !a.anyway)
-      for (const id of a.ids) {
-        const why = coworkerHold(v, id, a.verb);
-        if (why) {
-          refuse(a, why);
-          return false;
-        }
-      }
-    return true;
+    const why = holdOn(v, a);
+    if (why) refuse(a, why);
+    return !why;
   });
   // Every line refused: nothing to save.
-  if (refused.length && !okActions.length) throw new Error(`${refused.map((x) => x.why).join(' ')} Nothing was saved.`);
+  if (refused.length && !okActions.length) {
+    if (!taken) dropPending(c.paths.derived, 'shortlist');
+    throw new Error(`${droppedReading ? 'The reading shown before was dropped, since this is a new answer. ' : ''}${refused.map((x) => x.why).join(' ')} Nothing was saved.`);
+  }
+  // Saved whole or not at all: every entry goes in as one append at the end, and a setup choice is written only
+  // after them. A failure part-way writes nothing, and a reading taken from pending is put back.
+  const after = [];
+  try {
+    inOneGo(c.paths.ledger, () => {
   for (const a of okActions) {
     // The line about this person ("reach Paul Fenwick"), not the whole answer with its other lines.
-    const said = String(a.line || opts.answers).slice(0, 200);
+    const said = String(a.line || answers).slice(0, 200);
     if (a.verb === 'remove')
       for (const id of a.ids) log(c, { type: 'decide', who: 'user', id, group: 'skip', because: (a.because || said).slice(0, 300), said });
     else if (a.verb === 'hold')
       for (const id of a.ids) log(c, { type: 'decide', who: 'user', id, group: 'skip', because: `on hold until ${a.until} says yes`.slice(0, 300), said });
     // Left with the coworker who holds them: nothing changes for them, and the user's words are kept.
     else if (a.verb === 'leave')
-      for (const id of a.ids) log(c, { type: 'decide', who: 'user', id, group: 'colleague', because: `left with ${holderOf(id)}`.slice(0, 300), said });
+      for (const id of a.ids) log(c, { type: 'decide', who: 'user', id, group: 'colleague', because: `left with ${holderOfId(v, id)}`.slice(0, 300), said });
     else if (a.verb === 'rescue')
       for (const id of a.ids) {
-        const r = v.resolved[id];
+        const r = heldAs(v, id);
         const group = ['in_touch', 'warm'].includes(r?.group) ? 'warm' : 'reach';
         log(c, { type: 'decide', who: 'user', id, group, because: (a.because || said).slice(0, 300), said, seen_holds: seenHolds(r) });
         if (a.because) userNote(c, id, a.because, group, said);
       }
     else if (a.verb === 'reach' || a.verb === 'warm')
       for (const id of a.ids) {
-        const r = v.resolved[id];
+        const r = heldAs(v, id);
         log(c, {
           type: 'decide',
           who: 'user',
           id,
           group: a.verb,
           because:
-            a.anyway && r?.group === 'colleague' && r.holder
-              ? `${a.verb} anyway, though ${r.holder} holds them: "${said}"`.slice(0, 300)
+            a.anyway && rungsOf(r).find((x) => x.group === 'colleague' && x.holder)
+              ? `${a.verb} anyway, though ${rungsOf(r).find((x) => x.group === 'colleague' && x.holder).holder} holds them: "${said}"`.slice(0, 300)
               : (a.because || said).slice(0, 300),
           said,
           seen_holds: seenHolds(r)
@@ -1136,19 +1325,35 @@ function gate(opts) {
     else if (a.verb === 'cap') log(c, { type: 'cap', who: 'user', company: a.company, value: a.value, said });
     else if (a.verb === 'note') for (const id of a.ids) log(c, { type: 'colleague_note', who: 'user', id, said });
     // A setup choice (the onboarding question's answer); the mock event keeps it in its own settings.
-    else if (a.verb === 'notes') {
-      if (c.event.mock) {
-        const e = loadEvent(c.slug);
-        saveEvent(c.slug, { ...e.event, settings: { ...(e.event.settings || {}), colleague_notes: a.on } });
-      } else saveConfig({ colleague_notes: a.on });
-      c.settings.colleague_notes = a.on;
-    }
+    else if (a.verb === 'notes')
+      after.push(() => {
+        if (c.event.mock) {
+          const e = loadEvent(c.slug);
+          saveEvent(c.slug, { ...e.event, settings: { ...(e.event.settings || {}), colleague_notes: a.on } });
+        } else saveConfig({ colleague_notes: a.on });
+        c.settings.colleague_notes = a.on;
+      });
   }
   if ((g.defaults || !g.actions.length) && !refused.length) log(c, { type: 'answered', who: 'user', ask: 'gate', value: 'ok' });
+    });
+  } catch (e) {
+    // Nothing was written; a reading agreed to still waits, and any other answer leaves the trace of the one it replaced.
+    if (!taken) dropPending(c.paths.derived, 'shortlist');
+    e.message = `${e.message} Nothing was saved${taken ? '; the reading shown before still waits for your yes' : ''}.`;
+    throw e;
+  }
+  clearPending(c.paths.derived, 'shortlist');
+  for (const f of after) f();
   const out = view(opts);
+  // What was saved, by ID and name: said back to the user every time.
+  const readAs = (g.read_as || []).map((r) => `${shown(r.said)} read as ${r.ids.map(who).join(' and ')}`);
+  const done = describeTriage({ ...g, actions: okActions }, who);
+  const sayToUser = `${droppedReading ? 'The earlier reading was dropped. ' : ''}${done ? `Saved: ${done}.` : 'Nothing was saved.'}${readAs.length ? ` Names read: ${readAs.join('; ')}.` : ''}${refused.length ? ` Not saved: ${refused.map((x) => `${shown(x.line, 120, { keepIds: true })} (${x.why})`).join(' ')}` : ''}`;
   return {
     ...out,
     shortlisted: out.shortlist_size,
+    ...(readAs.length ? { read_as: readAs } : {}),
+    say_to_user: sayToUser,
     ...(refused.length
       ? {
           saved_lines: okActions.map((a) => String(a.line || '').slice(0, 200)).filter(Boolean),
@@ -1509,7 +1714,16 @@ function enrichImport(opts) {
 }
 
 export { mustMeetHits };
+// people --event <slug>: everyone on the list by ID and name, names shown as every read-back shows them: the full list
+// a refusal's can_interpret hint points to when it cuts its own.
+function peopleList(opts) {
+  need(opts, 'event');
+  const v = viewOf(ctxOf(opts.event, opts));
+  return { people: v.contacts.map((x) => `${x.id} ${shown(x.name, 60)}`) };
+}
+
 run({
+  people: peopleList,
   inputs,
   'propose-mapping': proposeMapping,
   'confirm-mapping': confirmMapping,

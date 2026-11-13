@@ -378,6 +378,10 @@ export function sendOutcome(opts) {
   const fromMailbox = !!(opts['message-id'] || f.message_id) || opts.from === 'mailbox' || f.source === 'mailbox';
   if (!fromMailbox && said.length < 2) throw new Error('Say what the user found, in their words (--said "it\'s in my Sent folder").');
   if (/^(yes|true|it went|went|sent)$/.test(went)) {
+    // A note typed in LinkedIn or the event app went there: app-result records where, and here it would be recorded
+    // as an email, so the inbox it went to would never be checked for their reply.
+    if (x.released_via === 'browser')
+      throw new Error(`${id} message ${touch} was typed in the browser: record that it went with app-result --result sent and the user's words, not send-outcome.`);
     led(c, {
       type: 'sent',
       who: fromMailbox ? 'mailbox' : 'user',

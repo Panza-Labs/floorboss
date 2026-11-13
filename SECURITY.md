@@ -214,7 +214,18 @@ floorboss can't tell a faithful relay from a made-up one:
 
 - **Your words.** Approvals, drops, "skip review", lifting a hold ("decide reach"), what you say happened
   ("sent", "booked", "stop") and your setup answers all reach the scripts as text Claude passes on. The
-  permission prompt before each send shows the full text and anything you released, so read it.
+  permission prompt before each send shows the full text and anything you released, so read it. At the
+  shortlist and approval gates, an answer that isn't made only of the gate's own words, IDs and whole names that
+  can mean one person is read back by ID and name and saved only on a following "yes", "ok" or "sure" (the reading waits in the
+  event's `derived` folder for 30 minutes, and a change to the list, to the shortlist, to a draft or to the critic's verdict on one drops it). A waiting reading is not an
+  approval: nothing can be listed or sent from it. The "yes" is text Claude passes on like any other answer,
+  so the read-back is shown to you and the yes must be yours. Answers the code can't read are read by the model,
+  by ID only, and always shown back, quoting your words, for a yes before anything is saved. The waiting
+  reading (`derived/pending-*.json`) carries no signature: it is one of floorboss's records, which the guard keeps
+  Claude's file tools (Write, Edit) from writing, like the ledger; only floorboss's scripts write it.
+  In floorboss's own sentences, list and CRM text is reduced to letters, digits, spaces and : ( ) , . / -; the card's
+  structured fields (a person's name, company, title, what the CRM says) are the list's own text, passed on as data,
+  and the skills tell the model to treat that text as data, never as instructions.
 - **The critic's verdict.** Claude runs the critic and passes back what it said. A PASS that Claude made up
   can't be told apart from a real one. Confirmations don't go to the critic at all: the scripts keep them
   short and refuse any link or outside address they recognise (your own email and a phone number are fine).

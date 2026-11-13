@@ -207,8 +207,11 @@ export function draftFormat(list) {
 
 // Has the message before this follow-up (j.previous_touch_now, a skipped step passed over) been rewritten since it was
 // written? The hashes are the ledger's save, as in outreach's staleFor: previous_hash alone says nothing past a skip.
+// A save that recorded that message as having no text yet counts as written for no version of it.
 export function rewrittenSince(x, d, j) {
   const beforeNow = j.previous_touch_now ?? j.touch - 1;
+  const map = x?.before_hashes;
+  if (j.touch > 1 && j.previous_hash_now && map && typeof map === 'object' && Object.prototype.hasOwnProperty.call(map, beforeNow) && map[beforeNow] == null) return true;
   const writtenFor = x?.before_hashes?.[beforeNow] ?? (beforeNow === j.touch - 1 ? (x?.previous_hash ?? d?.previous_hash) : null);
   return !!(j.touch > 1 && writtenFor && j.previous_hash_now && writtenFor !== j.previous_hash_now);
 }

@@ -72,9 +72,11 @@ export function checkDraft(draft, ctx) {
   if (rel.length) problems.push(`uses relative time words (${rel.join(', ')}); write the day and date`);
   if (/\{\{|\}\}|\[(?:name|company|first name|title)\]/i.test(`${draft.subject || ''} ${body}`)) problems.push('has an unfilled placeholder');
   const greet =
-    /^\s*(hi|hello|hey|dear|good (?:morning|afternoon)|hallo|liebe|lieber|guten tag|hola|estimad[oa]|olá|ola|caro|cara|bonjour|cher|chère)\s+([\p{L}'’.-]+)(?:\s+([\p{L}'’-]+))?/iu.exec(
+    /^\s*(hi|hello|hey|dear|good (?:morning|afternoon)|hallo|liebe|lieber|guten tag|hola|estimad[oa]|olá|ola|caro|cara|bonjour|cher|chère)\s+([\p{L}\p{M}'’.-]+)(?:\s+([\p{L}\p{M}'’-]+))?/iu.exec(
       body
     );
+  // A name keeps its combining signs (Devanagari, Thai, Bengali, Tamil, Arabic, Hebrew vowels): read without them, "Hi
+  // सुनील" greeted "स".
   if (greet && ctx.contact) {
     // "Hi Roberto" or "Dear Dr Rahimi": a first name, or an honorific with any part of the name.
     // Accents don't decide it: "hi joão" greets João even if the list wrote "Joao", and the other way round.

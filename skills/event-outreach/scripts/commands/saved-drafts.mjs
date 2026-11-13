@@ -223,13 +223,19 @@ export const draftFiles = (c) => {
 // What that message was at the time is the ledger's save (before_hashes), never the working copy, which Claude may
 // write. Older drafts kept only the message numbered just before this one (previous_hash), and with a skip in between
 // that is the skipped step's text, not what this follow-up follows, so it says nothing.
+// A save that recorded that message as having no text yet (saved before it) was written for no version of it: once it
+// has text, the follow-up is stale too.
 export function staleFor(c, id, t, d) {
   const b = touchBefore(c.state[id], t),
     L = ledgerTouch(c, id, t),
     now = c.state[id]?.touches?.[b]?.hash;
+  if (t > 1 && now && savedBeforeIt(L, b, t)) return true;
   const then = L.before_hashes?.[b] ?? (b === t - 1 ? (L.previous_hash ?? d?.previous_hash) : null);
   return !!(t > 1 && then && now && then !== now);
 }
+// Did the ledger's save of this follow-up record message b as unsaved (null), rather than say nothing about it?
+export const savedBeforeIt = (L, b, t) =>
+  L?.before_hashes && typeof L.before_hashes === 'object' ? Object.prototype.hasOwnProperty.call(L.before_hashes, b) && L.before_hashes[b] == null : b === t - 1 && L?.previous_hash === null;
 // The subject to reply under: the last email of this sequence before this message.
 export function lastEmailSubject(c, id, touch) {
   for (let t = touch - 1; t >= 1; t--) {

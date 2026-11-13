@@ -36,7 +36,7 @@ export function taskItems({ cards, review = [], stops = [], created, event, byId
     if ((card.kind === 'message' || card.kind === 'confirmation') && card.channel === 'paste' && !selfSends(card)) {
       const key = `${card.id}:${card.touch}`;
       if (created.has(key)) continue;
-      const where = whereTo(card, event);
+      const where = card.where || whereTo(card, event);
       items.push({
         key,
         id: card.id,

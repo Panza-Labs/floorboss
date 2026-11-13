@@ -26,7 +26,9 @@ test('edit <id>, then the critic fails the user\'s text: not redrafted, said to 
   const todo = JSON.parse(readFileSync(join(HOME, 'events', MOCK, 'derived', 'todo.json'), 'utf8'));
   const job = todo.jobs.find((j) => j.kind === 'message' && j.touch === 1 && j.channel === 'email');
   target = job.id;
-  const g = answer(HOME, 'approve', `approve all except ${target}\nedit ${target}`);
+  // Run 6, round 3: two clauses beside "approve all" are read back first, and saved on the user's yes.
+  assert.equal(answer(HOME, 'approve', `approve all except ${target}\nedit ${target}`).result?.pending, true);
+  const g = answer(HOME, 'approve', 'yes');
   assert.ok(!g.ERROR, g.ERROR);
   const ed = (g.result.to_edit || []).find((x) => x.id === target);
   assert.ok(ed, JSON.stringify(g.result).slice(0, 400));
