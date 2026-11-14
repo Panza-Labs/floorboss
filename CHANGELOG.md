@@ -123,8 +123,34 @@ The first public version.
 ### Meeting day
 - `/floorboss:agenda`: a brief for each booked meeting (who they are, how you know them, what's new, what to
   talk about), as a page, a short version and an `.ics` file. It names the companies before any web search.
+- The morning brief, on its own (macOS only for now; Linux and Windows are planned). You install it in your own
+  terminal with `node scripts/unattended.mjs install-brief`. Every day at 07:00 on the Mac's clock, or when it next
+  wakes, a floorboss script checks for a booked meeting that day (in the event's time zone) and, if there is one,
+  builds a brief from floorboss's records and opens it; the last one built is also at `~/.floorboss/today.html`.
+  No Claude session, no network, nothing sent, and it stops itself after 60 seconds. `agenda-facts` is the script
+  command behind it. It writes no talking points. An agenda saved for that same day is kept while every fact on it
+  is unchanged; otherwise the page is rebuilt, keeps the talking points of meetings that did not change, and says
+  the others are missing. `/floorboss:unattended off` stops it, `status` shows it, and `uninstall-brief`
+  (terminal) removes it. Each run is logged in `unattended/log.jsonl`.
+- Agenda pages: a news link is a link only when it is a plain web address; control characters and characters a
+  reader can't see (bidi overrides, zero-width spaces) are taken out of every name, note and news line, except the
+  joiners that are part of how Persian and Indic names and joined emoji are written; long lines in `agenda.ics` are
+  folded at 75 bytes, as the calendar format asks. For ordinary input the page and the short version are byte for
+  byte what they were; the calendar file differs only by that folding.
 
 ### Connections and safety
+- What floorboss runs on its own is installed, removed and switched back on only by the user, in their own
+  terminal: the install script refuses without a real terminal (with `--yes` too) and from Claude Code's shell.
+  In every session the guard refuses `unattended.mjs` with anything but `off` or `status`, the job's name or
+  launchd file, `launchctl` with a word after it that loads or starts a job, and floorboss's `unattended` folder,
+  in Bash, PowerShell and Monitor commands and in the input of connected (MCP) tools that aren't plainly reads;
+  those tools and Claude's file tools can't write the launchd file, that folder, `today.html` or floorboss's other
+  records. The rules read text, not the shell: SECURITY.md lists what they miss and what they refuse that is
+  harmless, and nothing that sends relies on them. A connected tool's input is read in one pass; over 2 MB of values or 512 levels of nesting, a tool
+  that isn't plainly a read is refused. `npm run self-check` holds the launcher to one process, the opener at
+  `/usr/bin/open`, and the install script to one, `/bin/launchctl`.
+- The guard's 20-second deadline now holds for a check that kept the process busy: its answer after the deadline
+  is a refusal. Resolving a very long path no longer takes time in proportion to the square of its length.
 - A subagent can hand its result back during a run on current Claude Code, which delivers results through a tool of its
   own that the guard refused as unknown: critics, researchers and writers did the work and couldn't report it.
 - From a sixth full audit (11 Nov, 13 confirmed findings, all low; ten fixed here, each with a regression test, and

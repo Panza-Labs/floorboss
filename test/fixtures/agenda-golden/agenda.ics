@@ -1,0 +1,21 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//floorboss//agenda//EN
+BEGIN:VEVENT
+UID:floorboss-c001-20261110T090000Z
+DTSTAMP:x
+DTSTART:20261110T090000Z
+DTEND:20261110T093000Z
+SUMMARY:Ana Berg (Acme & Sons)
+LOCATION:Stand <4>\; hall a\, b\\c
+DESCRIPTION:COO at Acme & Sons\nCRM: Lead (Sam Rivera)\, last contact 2026-09-30\nAcme & Sons is an open deal\nKim Lee also works this company\nyou last wrote on 3 Oct\nyour note: met at Tillcon\n\nTalk about:\n- The Rotterdam hub\, and what it changes for carrier checks at "peak"\n- Where the open deal stands\n- What she said about Tuesday\n\nAsk: What changes first at the new hub?
+END:VEVENT
+BEGIN:VEVENT
+UID:floorboss-c002-20261110T100000Z
+DTSTAMP:x
+DTSTART:20261110T100000Z
+DTEND:20261110T103000Z
+SUMMARY:Bo Li (Globex)
+DESCRIPTION: at Globex\n\nTalk about:\n- Why they came\n- Your goal for the week\n\nAsk: What would make this week worth it?
+END:VEVENT
+END:VCALENDAR

@@ -36,6 +36,11 @@ test('commands: no unscoped Read, Write, Edit, Grep or WebFetch; writes are scop
     const fm = readFileSync(join(ROOT, 'commands', f), 'utf8').split('---')[1];
     const tools = JSON.parse(/allowed-tools: (\[.*\])/.exec(fm)[1]);
     for (const t of ['Read', 'Write', 'Edit', 'Grep', 'WebFetch', 'NotebookEdit']) assert.ok(!tools.includes(t), `${f} pre-approves bare ${t}`);
+    // unattended.md pre-approves two exact script calls (off, status) and nothing else: no write at all. Exempt by name.
+    if (f === 'unattended.md') {
+      assert.deepEqual(tools, ['Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" off)', 'Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" status)']);
+      continue;
+    }
     assert.ok(tools.includes('Write(~/.floorboss/**)') && tools.includes('Edit(~/.floorboss/**)'), `${f}: writes scoped to the data folder`);
     assert.ok(tools.every((t) => !/^(Write|Edit)\(/.test(t) || /^(Write|Edit)\(~\/\.floorboss\/\*\*\)$/.test(t)), `${f}: no other write scope`);
   }

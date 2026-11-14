@@ -39,6 +39,13 @@ test('disclaimer: the config read needs only Node (no jq)', () => {
 test('run lock: every command clears it at the end and names the window the code uses', () => {
   for (const f of readdirSync(join(ROOT, 'commands'))) {
     const s = read(join('commands', f)).replace(/\s+/g, ' ');
+    // unattended.md is the one command that starts no run (it turns the scheduled brief off, or shows its status),
+    // so it has no lock to clear. It is exempt by name, and only while those two calls are all it may make.
+    if (f === 'unattended.md') {
+      assert.deepEqual(JSON.parse(/allowed-tools: (\[.*\])/.exec(read(join('commands', f)))[1]), ['Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" off)', 'Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" status)']);
+      assert.doesNotMatch(s, /skills\/[a-z-]+\/scripts\/cli\.mjs/, 'it runs none of the skills\' scripts');
+      continue;
+    }
     assert.match(s, /scripts\/cli\.mjs" run-end`/, `${f} runs run-end`);
     assert.match(s, new RegExp(`lapses on its own ${RUN_LOCK_MINUTES} minutes`), `${f} names ${RUN_LOCK_MINUTES} minutes`);
     assert.match(s, /stays held to reads.*until it ends.*`\/clear` or a new session lifts them/, `${f} says the session stays held`);

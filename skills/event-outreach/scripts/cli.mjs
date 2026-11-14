@@ -12,7 +12,7 @@ import { appResult, sendFailed, sendOutcome, toolFailed, toolBack, sendList, sen
 import { record, sync, syncList, status, summary } from './commands/outcomes.mjs';
 import { logList, crmLogged, openLogWindow, crmLogResults, contactList, crmRecords, exportContacted } from './commands/crm-log.mjs';
 import { taskList, tasksCreated, taskStatus } from './commands/tasks.mjs';
-import { agendaDataCmd, agendaNews, agendaSave, calendarBookings } from './commands/calendar.mjs';
+import { agendaDataCmd, agendaNews, agendaSave, agendaFacts, calendarBookings } from './commands/calendar.mjs';
 import { rateSet, rate, voiceSave } from './commands/ratings.mjs';
 export { blockReason, sendingOn } from './commands/context.mjs';
 
@@ -20,6 +20,7 @@ run({
   'agenda-data': agendaDataCmd,
   'agenda-news': agendaNews,
   'agenda-save': agendaSave,
+  'agenda-facts': agendaFacts,
   'log-list': logList,
   'crm-logged': crmLogged,
   'open-log-window': openLogWindow,

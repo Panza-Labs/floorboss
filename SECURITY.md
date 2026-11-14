@@ -51,8 +51,8 @@ The guard is split by topic, so a reviewer can take one file at a time:
 | `hooks/guard/sends.mjs` | Sends and staged drafts: each is checked against the text and recipient you approved. |
 | `hooks/guard/browser.mjs` | Where the browser may go during a run, and what may be clicked or typed in a send window or a CRM log window. |
 | `hooks/guard/prompts.mjs` | The permission prompts: the text you read before you say yes. |
-| `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records. |
-| `hooks/guard/shell.mjs` | Bash: calls to floorboss's own scripts, and saving or forgetting a connection during a run. |
+| `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records or to the launchd file of its scheduled job. |
+| `hooks/guard/shell.mjs` | Bash: calls to floorboss's own scripts, saving or forgetting a connection during a run, and no installing, loading or switching on of what floorboss runs on its own. |
 | `hooks/guard/web.mjs` | WebFetch and WebSearch during a run. |
 | `hooks/guard/run.mjs` | The run lock and the session: which tools are checked, subagents, forked sessions. |
 | `hooks/guard/after-call.mjs` | What is recorded after a call has run. |
@@ -83,6 +83,80 @@ while a run is under way:
 - **Claude Code tools floorboss has no rule for** (publishing a page, scheduled or remote agents, messages to
   other sessions) wait until the session that ran floorboss ends. A session you resume later gets the
   same limits back.
+
+### What runs on its own
+
+One thing, and only if you install it: the morning brief (macOS only for now; the README says how).
+
+- **You install it, in your own terminal.** `node scripts/unattended.mjs install-brief` prints what will
+  happen, asks you to type "yes", writes one file, `~/Library/LaunchAgents/com.floorboss.brief.plist`, and loads
+  it with `/bin/launchctl`. `install-brief`, `uninstall-brief` and `on` run only with a real terminal on both
+  ends (keyboard and screen) and never from a shell Claude Code started; `--yes` skips the question, not the
+  terminal. That file holds the full path of Node.js (the one your shell runs, when that is the same program),
+  the full path of `scripts/scheduled.mjs`, the word `brief`, the time (07:00 on the machine's clock, every
+  day, not at login) and `FLOORBOSS_HOME` if you set one, which must be an absolute path. It holds no token or
+  password and starts no shell. The paths are checked and escaped before they are written; a path with a line
+  break is refused.
+- **What it reads and writes.** The job reads floorboss's data folder and its own plugin files (plus a list
+  file an older event points at by path, as any floorboss script does). It writes the brief (`agenda.html`,
+  `agenda.md`, `agenda.ics`, `today.html`), the views floorboss rebuilds on every read, and its own log and
+  state in `unattended/`. It writes nothing to the ledger, never writes through a link, and reads `today.html`
+  and its own files only when they are plain files.
+- **What it never does.** It starts no model and no Claude session, uses no network, calls no connected tool
+  and sends nothing. The one process it starts is your system's opener, by its full path (`/usr/bin/open`),
+  on the brief's page. A second thread stops it after 60 seconds, and does nothing else first. The page it
+  opens is one it rendered in that same run, from the facts and from floorboss's record of saved talking
+  points: no file on disk is ever the source of it. Whatever is at `agenda.html` or `today.html` is replaced
+  where it differs, so the page opened loads nothing and runs no script.
+  Every piece of list, CRM, mail and news text on it is escaped, has invisible and control characters taken
+  out, and a news link is a link only when it is a plain web address.
+- **A saved agenda.** The page is rendered again on every run. When an agenda with talking points was saved
+  for that same day and every fact on it (the news shown included) is unchanged, that rendering is byte for
+  byte the saved page and nothing is written. Otherwise the page comes out as the facts are now. Talking points are carried over, from
+  floorboss's own record of them, only for meetings whose facts did not change; when some are missing the page
+  says so in one line. A record of them that can't be read carries nothing over.
+- **Claude can't install it, remove it or switch it back on.** The install script runs only in a terminal.
+  And in every session the guard refuses these names:
+  - `unattended.mjs` with anything but `off` or `status`;
+  - the job (`com.floorboss.…`) or its launchd file;
+  - the word `launchctl` with, anywhere after it in the same text, a word that loads or starts a job or runs
+    a command through it: `bootstrap`, `load`, `enable`, `kickstart`, `start`, `submit`, `asuser`, `bsexec`;
+  - floorboss's `unattended` folder, and a write, move or removal of `today.html`.
+
+  Where it reads them: in Bash, PowerShell and Monitor commands, as written and again with quotes, `$'…'`,
+  backslashes and backticks removed, and with the braces and commas of `{a,b}` removed (not expanded: see the
+  limits below); and in the input of a connected (MCP) tool that isn't plainly a read, all of its values
+  joined into one text (so a program in one field and its arguments in the next read as one command).
+
+  What can't be written: the launchd file; any file in a folder launchd loads from whose text names the job,
+  names a `scheduled.mjs` or an `unattended.mjs` (whatever path leads to it: `~`, `$HOME`, a `cd` first, a
+  working folder), or names anything in this plugin's folder; anything in `unattended/`; `today.html`; and
+  floorboss's other records. That holds for Claude's own file tools and for a connected tool that isn't
+  plainly a read, where up to 50 short paths in the input are followed through links, for at most a second.
+  It also refuses another project's own `scheduled.mjs` in a launchd file: write that one yourself. A
+  different file whose name merely ends in those words (`rescheduled.mjs`, `my-scheduled.mjs`) is not refused.
+  The launchd file's text is not parsed: it is decoded as Apple's reader decodes a string and read both with
+  `<!-- … -->` taken out and with it left in, so the job's name inside a real comment is refused too.
+
+  What is too large to read is refused for those connected tools with a plain message, not passed unread:
+  more than 2 MB of values (each string, number or true/false counted by its own length), more than 512
+  levels of nesting, more than 50 strings with a slash in them that name one of these places, or one such
+  string over 1,024 characters that has no space in it (a longer one with spaces is read as text, not followed
+  as a path).
+
+  A tool is "plainly a read" by its name alone: every word of the name is looked at, one must be a read word
+  (`get`, `list`, `search`, `read`, `fetch`…) and none a word that writes, runs, sends or joins two actions
+  (`check_and_fix`, `fetch_to_path`). Such tools are not looked at by this rule. floorboss can't see what a
+  tool does: one named like a read that writes or runs a command is not caught.
+
+  A few exact read-only commands on floorboss's own job are let through (`launchctl print` on it, `cat`,
+  `ls -l` or `plutil -lint` on its launchd file, `ls` and `cat` in `unattended/`). Turning it off is always
+  allowed: `/floorboss:unattended off`. Tests: `test/security-unattended.test.mjs`,
+  `test/security-schedule-differential.test.mjs` (1,563 cases from four reviews, and 200 recorded launchd files),
+  `test/security-guard-speed.test.mjs`, `test/unattended-install.test.mjs`, `test/brief.test.mjs`.
+- **Removing it.** From your terminal, `node scripts/unattended.mjs uninstall-brief` unloads the job and
+  deletes the file. Disabling or uninstalling the plugin leaves the launchd file behind, pointing at a script
+  that may be gone; remove it with that command first, or delete the file and log out and in.
 
 ### What floorboss can't control
 
@@ -117,6 +191,7 @@ Anything else is refused.
 | A new CRM contact, in your browser | your CRM's web app | name, company, title, email and LinkedIn address, as listed; only someone the CRM search didn't find, so a message to them can be logged | once per batch, naming each person, if you chose "ask" in setup (the recommended answer); only at setup if you chose "yes"; never if you chose "no" (the default) | the CRM log window: every value typed must be a listed one. The guard can't tell a search box from a new-contact form, so it can't stop those listed values going into one. A result reporting a contact floorboss didn't list is recorded as failed. Tested in simulated runs, not yet against a real CRM. `test/browser-new-contact.test.mjs` |
 | A people-data lookup | your people-data tool (Apollo, Clay and the like) | the person's name and company, to find an email | the count first, then the calls | the lookup window, and only as many as you agreed |
 | Files | `~/.floorboss/` (or `FLOORBOSS_HOME`), and the temp folder | your event records, drafts, the outbox page | no | guard: Claude's file tools write nowhere else during a run; `test/security-supplychain.test.mjs` |
+| The morning brief's launchd file (macOS, only if you install it) | `~/Library/LaunchAgents/com.floorboss.brief.plist` | the paths of Node.js and floorboss's launcher, the time, `FLOORBOSS_HOME` if set | by the install itself, in your terminal, before it writes | written only by `scripts/unattended.mjs`, which you run; the guard refuses it from a session; `test/unattended-install.test.mjs`, `test/security-unattended.test.mjs` |
 
 Through a connected tool, floorboss never deletes or merges a record, never changes a field that has a value, never
 changes who owns one, and never adds anyone to a list, sequence or campaign. The one update is the logged message's:
@@ -139,7 +214,11 @@ It changes nothing, installs nothing and makes no network call. It checks, and p
 - every import is a Node.js built-in or one of floorboss's own files;
 - no script, and no test it runs, uses a network module, `fetch` or a remote import (a pattern search, not proof);
 - the only processes floorboss starts are Node.js running its own scripts, and your system's opener for the
-  outbox page (it prints each place);
+  outbox page and the morning brief's page (it prints each place);
+- `launchctl` is started by one script only, `scripts/unattended.mjs`, the install you run in a terminal, by
+  its full path (the guard also names it, to refuse it); the scheduled launcher starts one process, the
+  opener, by its full path; the stand-ins the tests use for both are read only under the tests, and nothing
+  in floorboss's code sets that switch;
 - the hooks run only `hooks/guard.mjs` and `hooks/remind.mjs`;
 - floorboss's code creates its data folder private (0700 folders, 0600 files); this reads the code, not the
   folder on your machine;
@@ -182,6 +261,47 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
   guard refuses a floorboss script call with anything before `node`). Whoever controls the environment Claude
   Code starts in (a shell profile, a settings `env` block) could change them; so could a shell command run
   in a session that never ran floorboss, if your settings let it run without a prompt.
+- **The scheduled job's name rules.** The rules under "What runs on its own" match names in a text. They have
+  no model of the shell. What they do not catch:
+  - a name built when the command runs: a variable (`V=load; launchctl $V`), a wildcard (`launchctl loa*`), an
+    escape the shell decodes (`$'\x6c…'`), base64, percent-encoding, or a name split across two fields of a
+    connected tool's input;
+  - a brace list with a real alternative (`launchctl lo{a,b}d x`): braces and commas are taken out, not
+    expanded, so `lo{a,}d` is read as `load` but `lo{a,b}d` as `loabd`;
+  - the start word written before `launchctl` (`echo load x | xargs launchctl`): the rule looks after the word;
+  - an empty expansion inside a word (`lo$@ad`), and spaces written in code to an inner shell (`sh -c
+    "launchctl$IFS""load"`);
+  - a launchd file in the old (OpenStep) text format with a name written in `\U0062` or octal escapes;
+  - a path in a launchd file that climbs through more than 40 rounds of `x/../` to reach the plugin's folder;
+  - in a connected tool's input, a path beyond the first 50 path-like strings: only those are followed, so a
+    51st that reaches a protected place through a link under another name passes;
+  - two launchers started at the same instant over the lock of a run that died: both can run, and the page
+    may open twice;
+  - a copy or a link of the install script under another name, and a relative file name with no folder;
+  - another scheduler (cron), and a shell command that writes into floorboss's data folder without naming any
+    of this (`rm -rf ~/.floorboss`), in a session that never ran floorboss, where Claude Code's own prompt for
+    the command is the check;
+  - a connected tool named like a read that writes or runs something (`d1_database_query`, `navigate`,
+    `query`): the name is all the guard has.
+
+  The install script's own tests (a terminal, not Claude Code's shell) are not a lock against a program that
+  runs as you: a terminal can be faked. This is accepted for what the job is: a shell that runs without a
+  prompt can already write any launchd job of its own, and floorboss's job only builds and opens a page it
+  rendered itself. Nothing that sends relies on this gate, and nothing that sends will.
+
+  What the rules cost: `launchctl` with one of the start words anywhere after it is refused even when the word
+  isn't launchctl's own (`man launchctl | grep bootstrap`, `launchctl list; npm run start`, a commit message
+  about `launchctl load`), so with floorboss installed Claude can't load or start any launchd job for you; a
+  command that only mentions `unattended.mjs` or `com.floorboss.` is refused; a launchd file that names any
+  `scheduled.mjs` or `unattended.mjs` is refused, another project's own included; and a connected tool that
+  writes is refused when its input names any of these (a Slack, Notion, Jira or GitHub write that quotes a
+  `launchctl load` command), when it mentions floorboss, `today.html` or the `unattended` folder and a word
+  like "remove", "move" or "write" together (a note about cleaning up floorboss's page), or when it is too
+  large for one pass (the caps above). Do those from your terminal, or
+  turn the plugin off for that session.
+- **The guard's deadline.** The guard gives itself 20 seconds. A check that is still waiting then is stopped
+  by a timer; a check that held the process past it is refused when it finishes, whatever it found. A check
+  that never returns at all is left to Claude Code's own hook timeout (blocked on 2.1.295 or later).
 - **Inside the CRM log window.** Once you allow the window, the browser may type a listed person's own details
   (name, email, company) to find their record, and floorboss can't tell a search box from a new-contact form. It
   never types anything else there, and each message's text still asks.

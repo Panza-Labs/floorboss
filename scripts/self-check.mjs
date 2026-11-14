@@ -5,6 +5,13 @@
 // `npm run self-check`: checks, on your own copy, the claims SECURITY.md makes about what floorboss is and what
 // it can reach. It reads the repository and runs the security tests in a throwaway home; it changes nothing,
 // installs nothing and makes no network call. Each line says what was checked and whether it held.
+//
+// What it is: a reading of the code's text. It finds the usual ways a script reaches the network or starts a
+// process, and it holds the few lines that matter most (which program the scheduled launcher and the install
+// script start, on which file, behind which gate) to their exact reviewed wording, so a change there shows up as
+// a failed line that names what changed. What it is not: a proof. Code written to hide what it does can get past
+// a text search, and an ordinary edit to one of the pinned lines fails the check until the pin is updated with
+// it. It tells you the code still says what was reviewed; reading the code is still the review.
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -63,7 +70,8 @@ const testNet = testCode.filter((f) => {
 say(!testNet.length, 'no network modules, fetch or remote imports in the tests', testNet.join('\n'));
 
 // 3. The only processes it starts: Node.js running floorboss's own scripts, and your system's opener for the
-// outbox page.
+// outbox page and for the morning brief's page. One more, in one file only: launchctl, started by the install
+// script you run from your own terminal (scripts/unattended.mjs), to load or unload the morning brief's job.
 const spawns = code.flatMap((f) =>
   read(f)
     .split('\n')
@@ -71,8 +79,146 @@ const spawns = code.flatMap((f) =>
     .filter(([l]) => /(?<![.\w])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(/.test(l) && !/^\s*\/\//.test(l))
     .map(([l, n]) => `${f}:${n}: ${l.trim().slice(0, 140)}`)
 );
-const unexpected = spawns.filter((s) => !/process\.execPath|spawn\(cmd, \[paths\.outbox\]/.test(s));
-say(!unexpected.length, 'processes started are Node.js (floorboss scripts) or the outbox opener', (unexpected.length ? unexpected : spawns).join('\n'));
+const unexpected = spawns.filter(
+  (s) =>
+    !/process\.execPath|spawn\(cmd, \[paths\.outbox\]/.test(s) &&
+    !/^scripts\/scheduled\.mjs:\d+: const child = spawn\(cmd, \[page\], /.test(s) &&
+    !/^scripts\/unattended\.mjs:\d+: return spawnSync\(LAUNCHCTL, args, /.test(s)
+);
+say(
+  !unexpected.length,
+  'processes started are Node.js (floorboss scripts), the opener (outbox page, morning brief), and launchctl in scripts/unattended.mjs only',
+  (unexpected.length ? unexpected : spawns).join('\n')
+);
+// The search above reads names; these hold the names to what they are.
+// Every mention of Node's process module is a plain import of spawn or spawnSync by name (no alias, no namespace,
+// no import() or require), so a call written as x.spawn(…) has nothing to stand on.
+const noComments = (t) => t.replace(/^\s*\/\/.*$/gm, '');
+const count = (t, re) => (t.match(re) || []).length;
+const cpLines = code.flatMap((f) =>
+  noComments(read(f))
+    .split('\n')
+    .filter((l) => /child_process/.test(l))
+    .map((l) => [f, l])
+);
+const cpOdd = cpLines.filter(([, l]) => !/^import \{ (spawn|spawnSync) \} from 'node:child_process';$/.test(l)).map(([f, l]) => `${f}: ${l.trim().slice(0, 120)}`);
+say(!cpOdd.length, "Node's process module is imported only as spawn or spawnSync, by name", cpOdd.join('\n'));
+const cpHere = [...new Set(cpLines.map(([f]) => f))].filter((f) => /^(scripts|lib)\//.test(f)).sort();
+const cpHereOk = cpHere.join() === 'scripts/scheduled.mjs,scripts/unattended.mjs';
+say(cpHereOk, 'under scripts/ and lib/, only the scheduled launcher and the install script can start a process (besides this check)', cpHereOk ? '' : cpHere.join('\n'));
+// Nothing sets the switch that turns the tests' stand-ins on.
+const setsTest = code.filter((f) => /\.FLOORBOSS_TEST\s*=(?!=)|\[\s*['"`]FLOORBOSS_TEST['"`]\s*\]\s*=(?!=)|FLOORBOSS_TEST['"`]?\s*:|Object\.assign\(\s*process\.env/.test(noComments(read(f))));
+say(!setsTest.length, 'no script sets FLOORBOSS_TEST (the stand-ins for the opener and launchctl exist only under the tests)', setsTest.join('\n'));
+// The three choices (which opener, which launchctl, which platform) and the terminal test, word for word.
+const lib = read('lib/unattended.mjs');
+const PINNED = [
+  `export function openerFor(env = process.env, platform = process.platform) {
+  if (env.FLOORBOSS_TEST === '1') return env.FLOORBOSS_OPENER || null;
+  return platform === 'darwin' ? '/usr/bin/open' : platform === 'win32' ? join(env.SystemRoot || 'C:\\\\Windows', 'explorer.exe') : '/usr/bin/xdg-open';
+}`,
+  `export function launchctlFor(env = process.env) {
+  if (env.FLOORBOSS_TEST === '1') return env.FLOORBOSS_LAUNCHCTL || null;
+  return '/bin/launchctl';
+}`,
+  `export function platformFor(env = process.env, platform = process.platform) {
+  if (env.FLOORBOSS_TEST === '1' && env.FLOORBOSS_PLATFORM) return env.FLOORBOSS_PLATFORM;
+  return platform;
+}`,
+  `export function terminalPresent(env = process.env, stdin = process.stdin, stdout = process.stdout) {
+  if (env.FLOORBOSS_TEST === '1' && env.FLOORBOSS_TTY === '1') return true;
+  return !!stdin.isTTY && !!stdout.isTTY;
+}`
+];
+const CHOICES = ['openerFor', 'launchctlFor', 'platformFor', 'terminalPresent'];
+say(
+  PINNED.every((t) => lib.includes(t)) && CHOICES.every((n) => count(lib, new RegExp(`\\b${n}\\b`, 'g')) === 1),
+  'outside the tests the opener is /usr/bin/open (macOS), launchctl is /bin/launchctl, the platform is the real one and a terminal is a real one'
+);
+// A check made of several conditions: when it fails, the ones that failed are named.
+const sayAll = (what, conds) => {
+  const failedOnes = Object.entries(conds)
+    .filter(([, ok]) => !ok)
+    .map(([name]) => `not so: ${name}`);
+  say(!failedOnes.length, what, failedOnes.join('\n'));
+};
+// The launcher: one process start, the opener, by the name the choice above gave it, on the page it wrote.
+const launcher = noComments(read('scripts/scheduled.mjs'));
+const STARTS = /(?<![.\w])(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(/g;
+sayAll("the scheduled launcher starts one process, the system's opener, on today.html: no Claude session and no launchctl", {
+  'exactly one call that starts a process': count(launcher, STARTS) === 1,
+  'that call is spawn(cmd, [page], …), detached': launcher.includes("    const child = spawn(cmd, [page], { stdio: 'ignore', detached: true });"),
+  'cmd is openerFor() and nothing else (declared once, used twice)': launcher.includes('  const cmd = openerFor();') && count(launcher, /\bcmd\b/g) === 3,
+  'spawn is named twice (its import and that call)': count(launcher, /(?<!['.\w])spawn\b/g) === 2,
+  'openerFor is named twice (its import and that call)': count(launcher, /\bopenerFor\b/g) === 2,
+  'the page opened is the one runBrief returned, which is todayPage()':
+    count(launcher, /\bopenPage\(/g) === 2 && launcher.includes('      const opened = await openPage(out.page);') && launcher.includes('  return { built: fresh.map((r) => r.slug), page: todayPage(), results };'),
+  'one worker thread, the watchdog, started whenever there is a data folder':
+    count(launcher, /new Worker\(/g) === 1 &&
+    count(launcher, /\bWorker\b/g) === 2 &&
+    launcher.includes("\n    if (existsSync(home())) new Worker(new URL('../lib/watchdog.mjs', import.meta.url), { workerData: { ms } }).unref();\n"),
+  'its time limit is 60 seconds, shorter only under the tests':
+    launcher.includes('export const TIME_LIMIT_MS = 60000;') &&
+    launcher.includes("  const ms = (process.env.FLOORBOSS_TEST === '1' && Number(process.env.FLOORBOSS_BRIEF_LIMIT_MS)) || TIME_LIMIT_MS;") &&
+    count(launcher, /\bTIME_LIMIT_MS\b/g) === 2 &&
+    count(launcher, /\bms\b/g) === 3,
+  'neither "claude" nor "launchctl" appears in its code': !/claude|launchctl/i.test(launcher)
+});
+const watchdog = noComments(read('lib/watchdog.mjs'));
+sayAll("the launcher's watchdog ends the process at the limit and does nothing else", {
+  'its one statement is the timer that kills the process': watchdog.includes("if (!isMainThread && Number.isFinite(workerData?.ms)) setTimeout(() => process.kill(process.pid, 'SIGKILL'), workerData.ms);"),
+  'it imports only worker_threads': count(watchdog, /^import /gm) === 1 && watchdog.includes("import { workerData, isMainThread } from 'node:worker_threads';")
+});
+// The install script: one process start, launchctl, by the name the choice above gave it, on the file it wrote,
+// and only after the gate (a terminal, and not Claude Code's shell).
+const inst = noComments(read('scripts/unattended.mjs'));
+const GATE = `function notYours(what) {
+  const claude = 'CLAUDECODE' in process.env;
+  if (!claude && terminalPresent()) return false;
+  refused(what, claude);
+  return true;
+}`;
+sayAll('the install script starts one process, /bin/launchctl, on its own launchd file, and installs, removes or switches on only in a terminal', {
+  'exactly one call that starts a process': count(inst, STARTS) === 1,
+  'that call is spawnSync(LAUNCHCTL, args, …)': inst.includes("  return spawnSync(LAUNCHCTL, args, { encoding: 'utf8' });"),
+  'LAUNCHCTL is launchctlFor() and nothing else (declared once, used twice)': inst.includes('const LAUNCHCTL = launchctlFor();') && count(inst, /\bLAUNCHCTL\b/g) === 3,
+  'spawnSync and launchctlFor are each named twice (import and use)': count(inst, /\bspawnSync\b/g) === 2 && count(inst, /\blaunchctlFor\b/g) === 2,
+  'PLATFORM is platformFor() and nothing else': inst.includes('const PLATFORM = platformFor();') && count(inst, /\bplatformFor\b/g) === 2 && count(inst, /\bPLATFORM\b/g) === 4,
+  'the gate (notYours) reads word for word as reviewed': inst.includes(GATE) && count(inst, /function notYours\b/g) === 1 && count(inst, /\bnotYours\b/g) === 4,
+  'the gate is the first thing install-brief, uninstall-brief and on do after the platform test':
+    inst.includes("  if (notYours('installing the scheduled brief')) return;") && inst.includes("  if (notYours('removing the scheduled brief')) return;") && inst.includes("  if (notYours('turning unattended runs back on')) return;"),
+  'terminalPresent is named twice (its import and the gate)': count(inst, /\bterminalPresent\b/g) === 2,
+  'launchctl is called three ways only: bootout of its own job (twice) and bootstrap of its own file':
+    count(inst, /\blaunchctl\(\[/g) === 3 &&
+    count(inst, /launchctl\(\['bootout', `\$\{domain\(\)\}\/\$\{BRIEF_LABEL\}`\]\)/g) === 2 &&
+    inst.includes("  const r = launchctl(['bootstrap', domain(), plist]);") &&
+    inst.includes('const domain = () => `gui/${process.getuid()}`;'),
+  'the file it loads is briefPlistPath(), holding briefPlist(…) of checked paths':
+    inst.includes('  const plist = briefPlistPath();') && inst.includes('  const text = briefPlist({ node, launcher, floorbossHome });') && inst.includes("  writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });") && inst.includes('  renameSync(tmp, plist);')
+});
+sayAll('the launchd file runs Node on the launcher with the word "brief", at 07:00, never at load, with no shell', {
+  'RunAtLoad is false': lib.includes("    '  <key>RunAtLoad</key><false/>',") && count(lib, /RunAtLoad/g) === 1,
+  'the program is Node, the launcher and "brief"': lib.includes("    `  <array>${s(n)}${s(l)}${s('brief')}</array>`,") && count(lib, /ProgramArguments/g) === 1,
+  'the label is the brief job': lib.includes('    `  <key>Label</key>${s(BRIEF_LABEL)}`,') && lib.includes('export const BRIEF_LABEL = `${LABEL_PREFIX}brief`;') && lib.includes("export const LABEL_PREFIX = 'com.floorboss.';"),
+  'no KeepAlive, WatchPaths, StartInterval or shell': !/KeepAlive|WatchPaths|StartInterval|QueueDirectories|\/bin\/(ba|z)?sh/.test(noComments(lib)),
+  'every value goes through the XML escape': lib.includes('  const s = (v) => `<string>${xmlText(v)}</string>`;')
+});
+// A module can't be reached by a name put together at run time: no import() of anything but a quoted name, and
+// none of the calls that load a module by a computed name.
+const computed = code.filter((f) => {
+  const t = noComments(read(f));
+  // Every import(…) is import('one quoted name') and nothing more inside the brackets.
+  const anyImport = count(t, /\bimport\s*\(/g);
+  const quoted = count(t, /\bimport\s*\(\s*(?:'[^'"`+$]+'|"[^'"`+$]+")\s*\)/g);
+  return anyImport !== quoted || /createRequire|getBuiltinModule|(?<![.\w])require\s*\(|process\.binding|\bnew Function\b|(?<![.\w])eval\s*\(/.test(t);
+});
+say(!computed.length, 'no module is loaded by a name built at run time (import() of a quoted name only; no createRequire, getBuiltinModule, require, eval)', computed.join('\n'));
+// No other file's code names launchctl, apart from the guard's rule that refuses it and the choice above.
+const namesLaunchctl = code.filter((f) => /launchctl/i.test(noComments(read(f)))).filter((f) => !['scripts/unattended.mjs', 'hooks/guard/shell.mjs', 'lib/unattended.mjs'].includes(f));
+say(!namesLaunchctl.length, 'launchctl is started by scripts/unattended.mjs only (the guard names it to refuse it)', namesLaunchctl.join('\n'));
+// A second thread is started in one place, for the launcher's time limit.
+const workers = code.filter((f) => /worker_threads/.test(noComments(read(f)))).sort();
+const workersOk = workers.join() === 'lib/watchdog.mjs,scripts/scheduled.mjs';
+say(workersOk, "a worker thread is used only for the scheduled launcher's time limit", workersOk ? '' : workers.join('\n'));
 
 // 4. What runs on its own: the hooks.
 const hooks = JSON.parse(read('hooks/hooks.json'));
@@ -107,25 +253,28 @@ const perms = read('lib/paths.mjs');
 say(/0o700/.test(perms) && /0o600/.test(perms), "floorboss's code creates the data folder private (0700 folders, 0600 files); this reads the code, not your folder");
 
 // 7. The security tests, in a throwaway home.
-const tests = readdirSync(join(ROOT, 'test'))
-  .filter((f) => /^(security-|workflows|fail-closed|prompt|injection)/.test(f) && f.endsWith('.test.mjs'))
-  .map((f) => `test/${f}`);
-const r = spawnSync(process.execPath, ['--test', '--import', './test/fixtures/isolated-home.mjs', ...tests], {
-  cwd: ROOT,
-  encoding: 'utf8',
-  env: { ...process.env, FLOORBOSS_TEST: '1' }
-});
-const count = (k) => Number((new RegExp(`ℹ ${k} (\\d+)`).exec(r.stdout) || [])[1] || 0);
-say(
-  r.status === 0 && count('fail') === 0,
-  `security tests: ${count('pass')} passed, ${count('fail')} failed (${tests.length} files)`,
-  r.status === 0
-    ? ''
-    : r.stdout
-        .split('\n')
-        .filter((l) => /^✖/.test(l))
-        .join('\n')
-);
+// (--static leaves them out: floorboss's own tests use it to try this check on changed copies of the code.)
+if (!process.argv.includes('--static')) {
+  const tests = readdirSync(join(ROOT, 'test'))
+    .filter((f) => /^(security-|workflows|fail-closed|prompt|injection)/.test(f) && f.endsWith('.test.mjs'))
+    .map((f) => `test/${f}`);
+  const r = spawnSync(process.execPath, ['--test', '--import', './test/fixtures/isolated-home.mjs', ...tests], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, FLOORBOSS_TEST: '1' }
+  });
+  const count = (k) => Number((new RegExp(`ℹ ${k} (\\d+)`).exec(r.stdout) || [])[1] || 0);
+  say(
+    r.status === 0 && count('fail') === 0,
+    `security tests: ${count('pass')} passed, ${count('fail')} failed (${tests.length} files)`,
+    r.status === 0
+      ? ''
+      : r.stdout
+          .split('\n')
+          .filter((l) => /^✖/.test(l))
+          .join('\n')
+  );
+}
 
 console.log(failed ? `\n${failed} check(s) failed.` : '\nEvery check held.');
 process.exit(failed ? 1 : 0);

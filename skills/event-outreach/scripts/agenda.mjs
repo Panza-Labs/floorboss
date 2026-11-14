@@ -8,7 +8,7 @@ import { readJson } from '../../../lib/jsonio.mjs';
 import { readDraft } from '../../../lib/drafts.mjs';
 import { noteText } from '../../../lib/normalize.mjs';
 import { join } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { todayKeyIn } from '../../../lib/tz.mjs';
 import { readCompanyBrief } from '../../attendee-research/scripts/companies.mjs';
 import { readProfile } from '../../attendee-research/scripts/profiles.mjs';
@@ -27,6 +27,23 @@ const slugOf = (x) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 export const newsPath = (dir, company, day) => join(dir, 'companies', `${slugOf(company)}-news-${day}.json`);
+// The newest news saved for a company on `day` or in the six days before it (the brief that builds itself looks
+// nothing up, so it shows what an earlier run saved). null when there is none.
+function savedNewsPath(dir, company, day) {
+  const re = new RegExp(`^${slugOf(company)}-news-(\\d{4}-\\d{2}-\\d{2})\\.json$`);
+  const from = new Date(Date.parse(`${day}T00:00:00Z`) - 6 * 864e5).toISOString().slice(0, 10);
+  let names = [];
+  try {
+    names = readdirSync(join(dir, 'companies'));
+  } catch {
+    return null;
+  }
+  const days = names
+    .map((n) => (re.exec(n) || [])[1])
+    .filter((d) => d && d <= day && d >= from)
+    .sort();
+  return days.length ? newsPath(dir, company, days[days.length - 1]) : null;
+}
 
 // What went, from its fingerprinted record (drafts/<hash>.json), never the working copy Claude may write.
 const sentText = (dir, hash) => {
@@ -38,7 +55,8 @@ const sentText = (dir, hash) => {
 };
 
 // Every booked meeting (on `day` when given), in time order, with the facts the agenda may use.
-export function agendaData(c, { day = null } = {}) {
+// savedNews: the newest news saved in the last week, not only today's (agenda-facts).
+export function agendaData(c, { day = null, savedNews = false } = {}) {
   const zone = c.event.time_zone;
   const resolved = readJson(join(c.paths.derived, 'resolved.json'), {});
   const slotById = Object.fromEntries((c.slots || []).map((s) => [s.id, s]));
@@ -56,7 +74,9 @@ export function agendaData(c, { day = null } = {}) {
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([t, x]) => ({ touch: Number(t), date: x.sent.date || null, text: clip(x.sent.text || sentText(c.paths.dir, x.sent.hash) || '', 600) }));
     const brief = ct.company ? readCompanyBrief(c.paths.dir, ct.company) : null;
-    const news = ct.company ? readJson(newsPath(c.paths.dir, ct.company, todayKeyIn(zone, c.now)), null) : null;
+    const newsDay = todayKeyIn(zone, c.now);
+    const newsFile = ct.company ? (savedNews ? savedNewsPath(c.paths.dir, ct.company, newsDay) : newsPath(c.paths.dir, ct.company, newsDay)) : null;
+    const news = newsFile ? readJson(newsFile, null) : null;
     meetings.push({
       id,
       start,
@@ -128,6 +148,77 @@ export function validatePoints(data, raw) {
 }
 
 const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+// Every string from a list, the CRM, the mailbox or the news, as it goes onto a page: characters a reader can't see
+// are taken out (a bidi override reorders what is shown; a zero-width character hides in a name), a line break or
+// other control character becomes a space, and it is cut at a length no real value reaches. Plain text is unchanged.
+// Three of those characters are part of how some text is written, and stay where they do that work: the zero-width
+// non-joiner and joiner between two letters or marks (Persian, the Indic scripts), the joiner between two emoji
+// (a family, a flag), and the variation selector that follows an emoji.
+const UNSEEN = /[\p{Cf}\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}\u034F\u115F\u1160\u3164\uFFA0]/gu;
+const LETTER = /[\p{L}\p{M}]/u;
+const EMOJI = /\p{Extended_Pictographic}/u;
+const before = (s, i) => (i > 0 ? String.fromCodePoint(s.codePointAt(i - (i > 1 && s.charCodeAt(i - 1) >= 0xdc00 && s.charCodeAt(i - 1) <= 0xdfff ? 2 : 1))) : '');
+const after = (s, i) => (i < s.length ? String.fromCodePoint(s.codePointAt(i)) : '');
+const keepsItsPlace = (ch, s, i) => {
+  const a = before(s, i),
+    b = after(s, i + ch.length);
+  if (ch === '\u200c' || ch === '\u200d') {
+    if (LETTER.test(a) && LETTER.test(b)) return true;
+    return ch === '\u200d' && (EMOJI.test(a) || a === '\ufe0f') && EMOJI.test(b);
+  }
+  return ch === '\ufe0f' && EMOJI.test(a);
+};
+export const pageLine = (t, n = 1000) => {
+  if (t == null) return t;
+  const s = String(t)
+    .replace(UNSEEN, (ch, i, whole) => (keepsItsPlace(ch, whole, i) ? ch : ''))
+    .replace(/[\p{Cc}\u2028\u2029]+/gu, ' ');
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+};
+const WEB = /^https?:\/\/[^\s"'<>]+$/i;
+// The facts and the talking points as the three renderers use them: every string cleaned as above, and a news
+// link kept only when it is a plain web address.
+function forPage(data, points) {
+  const d = {
+    ...data,
+    event: { ...data.event, name: pageLine(data.event?.name, 300) },
+    day: pageLine(data.day, 20),
+    goal: pageLine(data.goal),
+    meetings: (data.meetings || []).map((m) => ({
+      ...m,
+      time: pageLine(m.time, 80),
+      place: pageLine(m.place, 300),
+      person: { ...m.person, name: pageLine(m.person?.name, 300), title: pageLine(m.person?.title, 300), company: pageLine(m.person?.company, 300) },
+      relation: {
+        ...m.relation,
+        crm: m.relation?.crm
+          ? { status: pageLine(m.relation.crm.status, 300), owner: pageLine(m.relation.crm.owner, 300), last_contact: pageLine(m.relation.crm.last_contact, 300) }
+          : m.relation?.crm,
+        account_note: pageLine(m.relation?.account_note),
+        coworker_also: pageLine(m.relation?.coworker_also, 300),
+        mailbox: pageLine(m.relation?.mailbox),
+        user_note: pageLine(m.relation?.user_note)
+      },
+      news: (Array.isArray(m.news) ? m.news : []).map((n) => {
+        const url = pageLine(n?.url, 2000);
+        return { ...n, text: pageLine(n?.text, 600), url: WEB.test(String(url ?? '')) ? url : null };
+      }),
+      thread: { ...m.thread, received: (m.thread?.received || []).map((x) => ({ ...x, text: pageLine(x?.text, 2000) })) }
+    }))
+  };
+  const p = new Map(
+    [...(points || new Map())].map(([id, x]) => [
+      id,
+      {
+        ...x,
+        points: (Array.isArray(x?.points) ? x.points : []).map((q) => ({ ...q, text: pageLine(q?.text), from: pageLine(q?.from, 20) })),
+        ask: pageLine(x?.ask),
+        avoid: pageLine(x?.avoid)
+      }
+    ])
+  );
+  return [d, p];
+}
 const knowLine = (m) =>
   [
     m.relation.crm?.status
@@ -162,21 +253,22 @@ const companyLine = (brief) => {
   return [s ? `Sells: ${clip(s, 200)}` : null, rel.length ? `To you: ${clip(rel.join('; '), 300)}` : null].filter(Boolean);
 };
 
-export function renderMarkdown(data, points) {
-  const L = [`# ${data.event.name}: your meetings${data.day ? ` on ${data.day}` : ''}`, '', data.goal ? `Goal: ${data.goal}` : '', ''];
+// note: one line under the title (the facts-only brief says so when saved talking points no longer fit).
+export function renderMarkdown(rawData, rawPoints, { note = null } = {}) {
+  const [data, points] = forPage(rawData, rawPoints);
+  const L = [`# ${data.event.name}: your meetings${data.day ? ` on ${data.day}` : ''}`, '', data.goal ? `Goal: ${data.goal}` : '', '', ...(note ? [pageLine(note), ''] : [])];
   for (const m of data.meetings) {
     const x = points.get(m.id) || {};
     L.push(`## ${m.time} · ${m.person.name}, ${m.person.title || ''} at ${m.person.company || ''}`, m.place ? `Where: ${m.place}` : '', '');
     for (const k of knowLine(m)) L.push(`- ${k}`);
     for (const k of companyLine(m.company_brief)) L.push(`- ${k}`);
-    for (const n of m.news.slice(0, 3)) L.push(`- New: ${n.text} (${n.url})`);
+    for (const n of m.news.slice(0, 3)) L.push(n.url ? `- New: ${n.text} (${n.url})` : `- New: ${n.text}`);
     if (m.thread.received.length) L.push(`- They wrote: "${clip(m.thread.received[m.thread.received.length - 1].text, 200)}"`);
+    // No talking points (the facts-only brief): the headings for them are left out, not shown empty.
     L.push(
       '',
-      '**Talk about**',
-      ...(x.points || []).map((p) => `- ${p.text} _(from ${p.from})_`),
-      '',
-      `**Ask:** ${x.ask || ''}`,
+      ...((x.points || []).length ? ['**Talk about**', ...x.points.map((p) => `- ${p.text} _(from ${p.from})_`), ''] : []),
+      ...(x.ask ? [`**Ask:** ${x.ask}`] : []),
       ...(x.avoid ? [`**Leave out:** ${x.avoid}`] : []),
       ''
     );
@@ -184,7 +276,8 @@ export function renderMarkdown(data, points) {
   return L.filter((l, i, a) => !(l === '' && a[i - 1] === '')).join('\n');
 }
 
-export function renderHtml(data, points) {
+export function renderHtml(rawData, rawPoints, { note = null } = {}) {
+  const [data, points] = forPage(rawData, rawPoints);
   const cards = data.meetings
     .map((m) => {
       const x = points.get(m.id) || {};
@@ -195,13 +288,13 @@ ${
   m.news.length
     ? `<h3>New since you wrote</h3><ul>${m.news
         .slice(0, 3)
-        .map((n) => `<li>${esc(n.text)} <a href="${esc(n.url)}">source</a></li>`)
+        .map((n) => `<li>${esc(n.text)}${n.url ? ` <a href="${esc(n.url)}">source</a>` : ''}</li>`)
         .join('')}</ul>`
     : ''
 }
 ${m.thread.received.length ? `<h3>They wrote</h3><blockquote>${esc(clip(m.thread.received[m.thread.received.length - 1].text, 300))}</blockquote>` : ''}
-<h3>Talk about</h3><ul>${(x.points || []).map((p) => `<li>${esc(p.text)} <span class="src">${esc(p.from)}</span></li>`).join('')}</ul>
-<p class="ask"><b>Ask:</b> ${esc(x.ask || '')}</p>${x.avoid ? `<p class="avoid"><b>Leave out:</b> ${esc(x.avoid)}</p>` : ''}</section>`;
+${(x.points || []).length ? `<h3>Talk about</h3><ul>${x.points.map((p) => `<li>${esc(p.text)} <span class="src">${esc(p.from)}</span></li>`).join('')}</ul>` : ''}
+${x.ask ? `<p class="ask"><b>Ask:</b> ${esc(x.ask)}</p>` : ''}${x.avoid ? `<p class="avoid"><b>Leave out:</b> ${esc(x.avoid)}</p>` : ''}</section>`;
     })
     .join('\n');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${AGENDA_CSP}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(data.event.name)} agenda</title><style>
@@ -214,12 +307,33 @@ h2{font-size:1.2rem;margin:2px 0}.who{color:var(--muted);margin:0 0 8px}h3{font-
 ul{margin:0;padding-left:20px}.src{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:4px}
 blockquote{margin:0;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}.ask{margin:12px 0 0}.avoid{color:var(--muted);margin:4px 0 0}
 a{color:var(--accent)}@media print{body{padding:0}}</style></head><body>
-<h1>${esc(data.event.name)}: your meetings${data.day ? ` · ${esc(data.day)}` : ''}</h1><p class="goal">${esc(data.goal || '')}</p>
+<h1>${esc(data.event.name)}: your meetings${data.day ? ` · ${esc(data.day)}` : ''}</h1><p class="goal">${esc(data.goal || '')}</p>${note ? `<p class="goal">${esc(pageLine(note))}</p>` : ''}
 ${cards || '<p>No meetings booked.</p>'}</body></html>`;
 }
 
+// A calendar line is at most 75 bytes; a longer one goes on as lines that start with a space (RFC 5545, 3.1). A
+// character of several bytes is never split.
+function fold75(line) {
+  const out = [];
+  let cur = '',
+    bytes = 0;
+  for (const ch of line) {
+    const b = Buffer.byteLength(ch);
+    if (bytes + b > 75) {
+      out.push(cur);
+      cur = ` ${ch}`;
+      bytes = 1 + b;
+    } else {
+      cur += ch;
+      bytes += b;
+    }
+  }
+  out.push(cur);
+  return out.join('\r\n');
+}
 // One calendar event per meeting, the brief in its notes, so the agenda is where the meeting already is.
-export function renderIcs(data, points, { minutes = 30 } = {}) {
+export function renderIcs(rawData, rawPoints, { minutes = 30 } = {}) {
+  const [data, points] = forPage(rawData, rawPoints);
   const fmt = (d) =>
     new Date(d)
       .toISOString()
@@ -227,7 +341,7 @@ export function renderIcs(data, points, { minutes = 30 } = {}) {
       .replace(/\.\d{3}/, '');
   // A line break of any kind (CRLF, a bare CR, a Unicode separator) is one escaped \n, and other control characters go,
   // so text can never start a new calendar line.
-  const fold = (s) =>
+  const text = (s) =>
     String(s)
       .replace(/\r\n|[\r\n\u0085\u2028\u2029]/g, '\n')
       .replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ')
@@ -240,11 +354,8 @@ export function renderIcs(data, points, { minutes = 30 } = {}) {
     const desc = [
       `${m.person.title || ''} at ${m.person.company || ''}`,
       ...knowLine(m),
-      '',
-      'Talk about:',
-      ...(x.points || []).map((p) => `- ${p.text}`),
-      '',
-      `Ask: ${x.ask || ''}`
+      ...((x.points || []).length ? ['', 'Talk about:', ...x.points.map((p) => `- ${p.text}`)] : []),
+      ...(x.ask ? ['', `Ask: ${x.ask}`] : [])
     ].join('\n');
     return [
       'BEGIN:VEVENT',
@@ -252,11 +363,13 @@ export function renderIcs(data, points, { minutes = 30 } = {}) {
       `DTSTAMP:${fmt(Date.now())}`,
       `DTSTART:${fmt(m.start)}`,
       `DTEND:${fmt(Date.parse(m.start) + minutes * 60e3)}`,
-      `SUMMARY:${fold(`${m.person.name} (${m.person.company || ''})`)}`,
-      ...(m.place ? [`LOCATION:${fold(m.place)}`] : []),
-      `DESCRIPTION:${fold(desc)}`,
+      `SUMMARY:${text(`${m.person.name} (${m.person.company || ''})`)}`,
+      ...(m.place ? [`LOCATION:${text(m.place)}`] : []),
+      `DESCRIPTION:${text(desc)}`,
       'END:VEVENT'
-    ].join('\r\n');
+    ]
+      .map(fold75)
+      .join('\r\n');
   });
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//floorboss//agenda//EN', ...ev, 'END:VCALENDAR', ''].join('\r\n');
 }

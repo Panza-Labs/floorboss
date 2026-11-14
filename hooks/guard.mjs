@@ -23,7 +23,7 @@
 // This file is the entry point: it reads the hook's input and decides, and holds the rules for Bash and agents
 // during a run and the ask-once logic. The other rules are in guard/, one topic per file (SECURITY.md lists them
 // under "Reading the guard").
-import { existsSync, unlinkSync, openSync, closeSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, unlinkSync, openSync, closeSync, mkdirSync, writeFileSync, readFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { home, recordFile } from '../lib/paths.mjs';
 import { readRun, readRunAnySession, stampRun, lockPath, endSession, touchSession, ranBefore } from '../lib/runlock.mjs';
@@ -43,9 +43,9 @@ import { testOnItsServer, testContactItem, testPasses, markOnce, nameOfStaged } 
 import { callNote, enrichNotes, windowUsed, windowAllowed, lookupsGone, enrichPendingDir } from './guard/lookups.mjs';
 import { listed, listedSends, refusedSends, fullText, stageBatch, recipientShown } from './guard/sends.mjs';
 import { openWindow, openLogWindow, callId, windowKey, browserItems, logItems, KEY_OK, logTyping, noteWhy } from './guard/browser.mjs';
-import { READ_TOOLS, WRITE_TOOLS, fileRefusal } from './guard/files.mjs';
+import { READ_TOOLS, WRITE_TOOLS, fileRefusal, schedulePathRefusal } from './guard/files.mjs';
 import { recordSearchHosts, WEB_TOOLS, webRefusal, knownEventSites, isResearcher, seenHosts, companyHosts } from './guard/web.mjs';
-import { bashRefusal, floorbossScriptCall, connectorChange } from './guard/shell.mjs';
+import { bashRefusal, floorbossScriptCall, connectorChange, scheduleRefusal, mcpScheduleRefusal, unattendedCall } from './guard/shell.mjs';
 import { check } from './guard/check.mjs';
 import { afterCall } from './guard/after-call.mjs';
 export { leaves, recent } from './guard/shared.mjs';
@@ -59,15 +59,17 @@ export { listedSends, listed, stageRefusal, approvedText, fullText, recipientSho
 export { globForms, globSeeksSecrets, fileRefusal } from './guard/files.mjs';
 export { WEB_TOOLS, WEB_CAP, isResearcher, webRefusal, seenHosts, recordSearchHosts, companyHosts, knownEventSites } from './guard/web.mjs';
 export { CHECKED_TOOLS, QUIET_TOOLS, transcriptRanFloorboss, inheritedRun, isSubagent } from './guard/run.mjs';
-export { floorbossScriptCall, bashRefusal } from './guard/shell.mjs';
+export { floorbossScriptCall, bashRefusal, scheduleRefusal, mcpScheduleRefusal, plainlyReads, unattendedCall } from './guard/shell.mjs';
 export { afterCall } from './guard/after-call.mjs';
 
 // recordFile (the records only floorboss's scripts write) lives in lib/paths.mjs: script --out paths use it too.
 export { recordFile };
 
-// Well inside the hook timeout in hooks.json (30 seconds), so a slow async check ends blocked rather than timed out.
-// Synchronous work that hangs can't reach this timer; that case relies on onFailure: "block" in hooks.json
-// (Claude Code 2.1.295 or later; older versions let a timed-out call through).
+// Well inside the hook timeout in hooks.json (30 seconds), so a slow check ends blocked rather than timed out.
+// Two things hold it: a timer, for a check that is waiting; and, because a timer can't fire while a check holds
+// the thread, the clock is read again at the moment the guard answers, and an answer that comes after the
+// deadline is a refusal whatever it would have been. A check that never returns at all relies on onFailure:
+// "block" in hooks.json (Claude Code 2.1.295 or later; older versions let a timed-out call through).
 export const GUARD_DEADLINE_MS = 20000;
 
 if (isMain(import.meta.url)) {
@@ -78,6 +80,21 @@ if (isMain(import.meta.url)) {
     );
     process.exit(2);
   }, GUARD_DEADLINE_MS).unref();
+  // (The deadline is shorter only under floorboss's own tests.)
+  const startedAt = Date.now();
+  const testDeadline = process.env.FLOORBOSS_TEST === '1' ? Number(process.env.FLOORBOSS_GUARD_DEADLINE_MS) : NaN;
+  const deadline = Number.isFinite(testDeadline) ? testDeadline : GUARD_DEADLINE_MS;
+  // Only a call that is being judged can be blocked: not what is recorded after a call ran, nor a session's start or end.
+  let judging = process.argv[2] !== 'post' && process.argv[2] !== 'start' && process.argv[2] !== 'end';
+  process.on('exit', (code) => {
+    if (code !== 0 || !judging || Date.now() - startedAt <= deadline) return;
+    try {
+      writeSync(2, 'floorboss blocked this call: its guard took too long to check it. Try again; if it keeps happening, this is for you, the user, to look at.\n');
+    } catch {
+      /* the exit code says it */
+    }
+    process.exitCode = 2;
+  });
   let raw = '';
   process.stdin.on('data', (d) => {
     raw += d;
@@ -92,6 +109,7 @@ if (isMain(import.meta.url)) {
       process.stderr.write("floorboss blocked this call: its guard couldn't read it. This is for you, the user, to look at.\n");
       process.exit(2);
     }
+    if (['PostToolUse', 'SessionStart', 'SessionEnd'].includes(String(input?.hook_event_name || ''))) judging = false;
     const toolName = String(input?.tool_name || '');
     const session = typeof input?.session_id === 'string' ? input.session_id : null;
     // Inside a subagent (agent_id set), held to any live run lock: the docs don't say its session_id is the parent's.
@@ -215,6 +233,19 @@ if (isMain(import.meta.url)) {
     // script, so in the session that ran floorboss (or a subagent while a run is live) they're refused like any
     // other shell command; elsewhere they're left to Claude Code's own prompt.
     if (toolName === 'PowerShell' || toolName === 'Monitor') {
+      // What floorboss runs on its own is set up from the user's terminal only (scheduleRefusal), in any session.
+      {
+        let sched = null;
+        try {
+          sched = scheduleRefusal(input.tool_input?.command);
+        } catch (e) {
+          sched = `its guard couldn't check this command (${String(e.message).slice(0, 80)}).`;
+        }
+        if (sched) {
+          process.stderr.write(`floorboss blocked this call: ${sched}\n`);
+          process.exit(2);
+        }
+      }
       const shellRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
       if (shellRun.active && (shellRun.session || subagent)) {
         process.stderr.write(
@@ -231,7 +262,8 @@ if (isMain(import.meta.url)) {
     if (toolName === 'Bash') {
       let why = null;
       try {
-        why = bashRefusal(input.tool_input?.command);
+        // Then, in any session: nothing that installs, loads, changes or switches on what floorboss runs on its own.
+        why = bashRefusal(input.tool_input?.command) || scheduleRefusal(input.tool_input?.command);
       } catch (e) {
         why = `its guard couldn't check this command (${String(e.message).slice(0, 80)}).`;
       }
@@ -248,7 +280,8 @@ if (isMain(import.meta.url)) {
       // The session that ran floorboss (and any subagent while a run is live) has read text from lists, CRM
       // notes, pages and replies: there, a shell command other than floorboss's own scripts could send that text
       // anywhere, or rewrite floorboss's records. Refused until the session ends (/clear or a new session).
-      if (!call) {
+      // (Turning unattended runs off, or asking their status, is allowed there too: it only reduces what can happen.)
+      if (!call && !unattendedCall(input.tool_input?.command)) {
         const bashRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
         if (bashRun.active && (bashRun.session || subagent)) {
           process.stderr.write(
@@ -310,6 +343,16 @@ if (isMain(import.meta.url)) {
         process.exit(0);
       }
       if (!/^mcp__/.test(toolName)) process.exit(0);
+      // A connected tool that runs commands or writes files (a terminal, a file-system server, a tool that types):
+      // what floorboss runs on its own is still installed and switched on from the user's terminal only. One cheap
+      // pass over the input (mcpScheduleRefusal); what it can't check, for a tool that isn't plainly a read, is refused.
+      {
+        const sched = mcpScheduleRefusal(String(toolName).replace(/^mcp__.+?__/, ''), input.tool_input, schedulePathRefusal);
+        if (sched) {
+          process.stderr.write(`floorboss blocked this call: ${sched}\n`);
+          process.exit(2);
+        }
+      }
       const nowMs = clockNow();
       const run = subagent ? { ...readRunAnySession(Date.now()), subagent: true } : readRun(Date.now(), session);
       const config = readJsonStrict(join(home(), 'config.json'), {});

@@ -31,6 +31,7 @@ test('agenda: a booked meeting gets its facts, the company news, checked talking
   const html = readFileSync(s.page, 'utf8');
   assert.match(html, /Ana Berg/);
   assert.match(html, /Rotterdam hub/);
-  assert.match(readFileSync(s.calendar, 'utf8'), /BEGIN:VEVENT[\s\S]*DTSTART:20261110T090000Z[\s\S]*Ask: What changes first/);
+  // (A calendar line over 75 bytes goes on as a line starting with a space: read here with those joined again.)
+  assert.match(readFileSync(s.calendar, 'utf8').replace(/\r\n /g, ''), /BEGIN:VEVENT[\s\S]*DTSTART:20261110T090000Z[\s\S]*Ask: What changes first/);
   assert.ok(existsSync(s.short));
 });

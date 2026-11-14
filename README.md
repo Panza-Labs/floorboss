@@ -117,6 +117,10 @@ own is in `hooks/hooks.json`:
   replied"), reminds Claude to record it. It never blocks a message.
 - floorboss's scripts start only Node.js with floorboss's own scripts, and the outbox command opens the
   page with your system's `open` (`xdg-open` on Linux, `explorer` on Windows).
+- One thing can run outside Claude Code, and only if you install it yourself from your own terminal: the
+  [morning brief](#the-morning-brief-on-its-own). macOS starts `scripts/scheduled.mjs` once a day; it starts
+  no Claude session, uses no network and sends nothing. The install script, `scripts/unattended.mjs`, is the
+  one file that starts `launchctl`, to load or unload that job.
 
 The guard is the part to read first. `hooks/guard.mjs` is what the hooks run. It holds the rules for Bash
 and agents during a run and the ask-once logic for sends, staged drafts, CRM tasks, lookups and browser
@@ -132,8 +136,8 @@ windows. The other rules are in `hooks/guard/`, one topic per file, so each can 
 | `hooks/guard/sends.mjs` | Sends and staged drafts: each is checked against the text and recipient you approved. |
 | `hooks/guard/browser.mjs` | Where the browser may go during a run, and what may be clicked or typed in a send window or a CRM log window. |
 | `hooks/guard/prompts.mjs` | The permission prompts: the text you read before you say yes. |
-| `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records. |
-| `hooks/guard/shell.mjs` | Bash: calls to floorboss's own scripts, and saving or forgetting a connection during a run. |
+| `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records or to the launchd file of its scheduled job. |
+| `hooks/guard/shell.mjs` | Bash: calls to floorboss's own scripts, saving or forgetting a connection during a run, and no installing, loading or switching on of what floorboss runs on its own. |
 | `hooks/guard/web.mjs` | WebFetch and WebSearch during a run. |
 | `hooks/guard/run.mjs` | The run lock and the session: which tools are checked, subagents, forked sessions. |
 | `hooks/guard/after-call.mjs` | What is recorded after a call has run. |
@@ -244,6 +248,83 @@ things to talk about with one question to ask. Each talking point names the fact
 as a page, a short version, and an `.ics` file that puts each brief into the meeting's notes in your
 calendar.
 
+### The morning brief, on its own
+
+On macOS you can have a brief waiting each meeting day without opening floorboss. You install it yourself, in
+your own terminal window:
+
+```
+node "<the plugin folder>/scripts/unattended.mjs" install-brief
+```
+
+It says what will happen and asks you to type "yes" before it installs anything. `--yes` skips that question,
+but the command still has to be run in a terminal: from a pipe, a script or a Claude Code session it refuses and
+changes nothing. After that:
+
+- Every day at 07:00 on your Mac's clock, macOS starts a small floorboss script. If the Mac is asleep then,
+  it runs when the Mac wakes. A Mac that is switched off at that time is expected to skip the day.
+- On a day with a booked meeting, it builds the brief from what floorboss already recorded (time and place,
+  who they are, how you know them, what came back, the company brief and news saved earlier, the CRM
+  facts) and opens the page in your browser. The last brief it built is also at `~/.floorboss/today.html`, so
+  you can bookmark it; on a day with no meeting that file still shows the earlier one. "Today" is the day in
+  the event's time zone. In the evening there, or once the day's meetings are over, it builds the next day's.
+- It looks nothing up and writes no talking points. Those come from `/floorboss:agenda`. An agenda you saved
+  for that same day is kept as it is while every fact on it is still what it was. If something changed since
+  (a meeting moved, cancelled or added, a new reply, another place), the page is built again from the facts
+  as they are: the talking points of meetings that did not change are kept, the others are left out, and the
+  page says to run `/floorboss:agenda` again.
+- On other days, and after the event, it does nothing. Run twice, it builds one brief unless the records
+  changed. If the page couldn't be opened, it is tried once more, but only if the job happens to run again that
+  same day (a catch-up after sleep, or you starting it by hand); the log says `brief_open_failed` either way.
+- It opens only a page it has just rendered itself. Whatever sits at `agenda.html` or `today.html` is compared
+  with that and replaced where it differs, never opened as found.
+- Nothing is sent. Nothing leaves your machine. No Claude session starts and no network is used. A second
+  thread stops it after 60 seconds. Each run writes to `~/.floorboss/unattended/log.jsonl`: one line when
+  there was nothing to do, or one line for each event it built a brief for.
+
+To stop it: `/floorboss:unattended off` in Claude Code, or `node "<the plugin folder>/scripts/unattended.mjs" off`.
+To turn it back on (terminal only): the same script with `on`. To remove it (terminal only): the same script
+with `uninstall-brief`, which unloads the job and deletes its one file,
+`~/Library/LaunchAgents/com.floorboss.brief.plist`. `status` shows what is installed and the last runs. The
+job points at the plugin's folder and at Node.js by their paths, so after a floorboss or Node.js update run
+`install-brief` again; `status` says so when either path is gone.
+
+Claude can't install it, remove it or switch it back on. The install script refuses outside a terminal, and
+the guard refuses these names in any session: `unattended.mjs` with anything but `off` or `status`, the job
+`com.floorboss.…` and its launchd file, the word `launchctl` with a word after it that loads or starts a job
+(`bootstrap`, `load`, `enable`, `kickstart`, `start`, `submit`, `asuser`, `bsexec`), and floorboss's
+`unattended` folder. It reads them in Bash, PowerShell and Monitor commands, and in what is handed to a
+connected (MCP) tool that isn't plainly a read. Claude's file tools, and such connected tools, can't write
+the launchd file, the `unattended` folder, `today.html` or floorboss's other records.
+
+What that costs you, with the plugin on:
+
+- The guard reads the text of a command, not the shell. `man launchctl | grep bootstrap`,
+  `launchctl list; npm run start` and `echo "use launchctl to load the agent"` are refused, because
+  `launchctl` and one of those words are both in them. Claude can't load or start any launchd job for you.
+- A command that only mentions `unattended.mjs` or `com.floorboss.` is refused: a `git add` of that file, a
+  commit message or a note that names it.
+- A connected tool that writes is refused when its input quotes any of these: a Slack message, a Notion page,
+  a Jira ticket or a GitHub issue with a `launchctl load`, `bootstrap`, `kickstart` or `start` command in it,
+  or one that names `unattended.mjs` or the job.
+- A connected tool that writes is also refused when its input is too large for the guard to read in one pass:
+  more than 2 MB of values, more than 512 levels of nesting, or more than 50 paths that name these places
+  ("this call is too large for floorboss to check"). Send it in smaller parts, or turn the plugin off for
+  that session.
+- Claude can't write a launchd file that names any `scheduled.mjs` or `unattended.mjs`, another project's own
+  script of that name included. (A different file whose name merely ends in those words, like
+  `rescheduled.mjs`, is not refused.)
+- A connected tool's note that mentions floorboss, `today.html` and a word like "remove" together is refused.
+- Tools that plainly read (a search, a fetch, reading a file) are not looked at.
+
+What it doesn't catch: a name a command builds as it runs (a variable, a wildcard, a brace list with real
+alternatives, an encoded string), a copy or link of the script under another name, and a connected tool that
+is named like a read but writes.
+[SECURITY.md](SECURITY.md#what-runs-on-its-own) says what that leaves.
+
+Running on its own is macOS only for now. Linux (systemd timers) and Windows (Task Scheduler) are planned;
+everything else in floorboss works on all three.
+
 ## What it does
 
 1. **The lists.** It pulls the attendee list from the event's app, in your own browser and only on your yes, or
@@ -323,7 +404,8 @@ calendar.
    out of office (not a reply: the follow-ups keep their days), a cancelled meeting (its time is free again; a cancellation from anyone else is put to you), a time (you're asked to book it), or "talk to my
    colleague" (you're asked to add them).
    An accepted calendar invite counts as booked.
-   Nothing runs in the background: follow-ups go when you run floorboss on their day.
+   Nothing that sends runs in the background: follow-ups go when you run floorboss on their day. (The one
+   thing that can run by itself is the [morning brief](#the-morning-brief-on-its-own), which sends nothing.)
 
 **Event apps.** When most attendees have no email (common with event-app exports), notes go in the event's
 app (Grip, Brella, Swapcard and the like) through your own browser, in a 20-minute window you open, and
@@ -414,7 +496,9 @@ notes" below say how long it holds); a few
 short-lived window files (`browser-send.json`, `crm-log-window.json`, `enrich-window.json`) that hold what
 you agreed to for the next minutes; and `.private`, an empty marker saying floorboss has already made the
 folder readable only by you. The mock event keeps its own profile, settings and answers in its own folder,
-and never reads or changes yours.
+and never reads or changes yours. If you installed the [morning brief](#the-morning-brief-on-its-own), there
+is also `today.html` (the day's brief, under a name that doesn't change) and `unattended/`: its log
+(`log.jsonl`), what it last built, and `off` when you switched it off. Only floorboss's scripts write those.
 
 Each event is a folder in `events/`:
 
@@ -506,6 +590,12 @@ private claude.ai page. Floorboss says which before each of these.
   never from what a tool returned.
 - The collection prompt is generic, read-only, stays on the event's site, never visits LinkedIn, and
   stops at the first rate limit or captcha.
+
+## Planned
+
+- Running on its own on Linux (systemd timers) and Windows (Task Scheduler). Today the
+  [morning brief](#the-morning-brief-on-its-own) installs on macOS only; everything else in floorboss works on
+  all three.
 
 ## Development
 

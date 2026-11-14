@@ -19,9 +19,27 @@ imported). Then summarise the day in two or three lines: how many meetings, the 
 prepare.
 
 **When it's built:** floorboss builds the agenda whenever it runs on the day before a meeting day or that morning.
-It can't run on its own: don't offer to schedule it (floorboss's guard blocks scheduling tools in a session that ran
-floorboss, and a schedule made in a session ends with it). If the user asks, tell them to open floorboss on the
-evening before or the morning of each meeting day.
+Never offer to schedule it from this session, and never try: floorboss's guard blocks scheduling tools in a session
+that ran floorboss, a schedule made in a session ends with it, and the guard refuses any install from Claude.
+
+**A brief that arrives on its own (macOS only for now).** If the user asks for the agenda without opening
+floorboss, tell them it is theirs to install, from their own terminal, and print this line for them to copy:
+
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" install-brief`
+
+Never run that line yourself, in the shell or through any connected tool: it works only in a terminal with the
+user at it, and floorboss's guard refuses it from a session (and `uninstall-brief`, `on`, `launchctl` loading or
+starting a job, and writes to the job's launchd file or floorboss's `unattended` folder).
+
+Say what it does in two or three lines. Early each morning (or when the Mac next wakes), on a day with a booked
+meeting, a small floorboss script builds a brief from what floorboss already recorded and opens it in the
+browser; the last one built is also at `today.html` in floorboss's folder. It looks up no news and writes no
+talking points: those still come from `/floorboss:agenda`. An agenda saved for that day is kept while its facts
+are unchanged; if they changed, the page is rebuilt from the facts, keeps the talking points of meetings that did
+not change, and says in one line that some were built before the facts changed.
+No Claude session starts, no network is used and nothing is sent. To stop it: `/floorboss:unattended off`. To
+remove it, from their terminal: the same script with `uninstall-brief`. On Linux and Windows this isn't available
+yet; tell them to open floorboss on the evening before or the morning of each meeting day.
 
 **When this command ends** (finished, stopped by the user, or stopped on an error), run
 `node "${CLAUDE_PLUGIN_ROOT}/skills/connectors/scripts/cli.mjs" run-end`. It ends floorboss's run lock, which holds the connectors floorboss was given to reads while a run

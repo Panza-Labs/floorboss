@@ -3,7 +3,9 @@
 // The calendar and the agenda: meetings found in the calendar, and the agenda page for the event days.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { allowedPath } from '../../../../lib/paths.mjs';
+import { createHash } from 'node:crypto';
+import { allowedPath, readChecked } from '../../../../lib/paths.mjs';
+import { parseDateKey } from '../../../../lib/tz.mjs';
 import { bookingsFrom } from '../tracking.mjs';
 import { companyFromSlug } from '../../../../lib/normalize.mjs';
 import { need } from '../../../../lib/args.mjs';
@@ -226,9 +228,11 @@ export function agendaSave(opts) {
   const html = join(c.paths.dir, 'agenda.html'),
     md = join(c.paths.dir, 'agenda.md'),
     ics = join(c.paths.dir, 'agenda.ics');
-  writeText(html, renderHtml(data, v.points));
+  const page = renderHtml(data, v.points);
+  writeText(html, page);
   writeText(md, renderMarkdown(data, v.points));
   writeText(ics, renderIcs(data, v.points, { minutes: Number(c.settings.meeting_minutes) || 30 }));
+  saveFullMarker(c, data, v.points, page);
   led(c, { type: 'answered', who: 'floorboss', ask: 'agenda', value: `${data.day || 'all'}:${data.meetings.length}` });
   return {
     saved: true,
@@ -239,3 +243,129 @@ export function agendaSave(opts) {
     next: `Open ${html}. Import ${ics} into your calendar to have each brief in the meeting's notes.`
   };
 }
+
+// What agenda-save rendered, kept beside the pages: the day, a fingerprint of the page itself, and for each meeting
+// its time, a fingerprint of its facts and the talking points that passed the check. The brief that builds itself
+// (agenda-facts) keeps a saved agenda only while all of this still matches; derived/agenda-data.json can't say
+// that, since every agenda-data call rewrites it.
+const fullMarkerFile = (c) => join(c.paths.derived, 'agenda-full.json');
+const sha = (t) => createHash('sha256').update(t).digest('hex');
+const factsOf = (m) => sha(JSON.stringify(m)).slice(0, 24);
+function saveFullMarker(c, data, points, page) {
+  writeJson(fullMarkerFile(c), {
+    day: data.day || null,
+    at: c.now.toISOString(),
+    page: sha(page),
+    meetings: Object.fromEntries(
+      data.meetings.map((m) => {
+        const x = points.get(m.id) || {};
+        return [m.id, { start: m.start, day: m.day, facts: factsOf(m), points: { points: x.points, ask: x.ask, ...(x.avoid ? { avoid: x.avoid } : {}) } }];
+      })
+    )
+  });
+}
+const FROM = /^(brief|news|thread|crm|profile|goal|list)$/;
+const pointsOk = (x) =>
+  !!x &&
+  Array.isArray(x.points) &&
+  x.points.length >= 2 &&
+  x.points.length <= 4 &&
+  x.points.every((p) => typeof p?.text === 'string' && p.text && FROM.test(String(p.from || ''))) &&
+  typeof x.ask === 'string' &&
+  !!x.ask &&
+  (x.avoid == null || typeof x.avoid === 'string');
+export const STALE_POINTS_NOTE = 'Talking points were built before these facts changed: run /floorboss:agenda to rebuild them.';
+// A plain file's text, or null (missing, a link, a folder, a pipe, too large): never a reason to stop.
+const plain = (p) => {
+  try {
+    return existsSync(p) ? readChecked(p) : null;
+  } catch {
+    return null;
+  }
+};
+const sameIcs = (a, b) => String(a).replace(/DTSTAMP:\d{8}T\d{6}Z/g, '') === String(b).replace(/DTSTAMP:\d{8}T\d{6}Z/g, '');
+
+// The brief that builds itself (scripts/scheduled.mjs runs this with nobody there). The same facts and the same
+// pages as the agenda, from floorboss's records as they are now: nothing is looked up, no model is asked, and
+// nothing is written to the ledger.
+// The page is rendered here, in memory, on every call, and written when it differs from the file: what is on disk
+// is never taken on trust, and never the source of what is opened. A saved agenda (agenda-save) for this same day,
+// with every fact on it (the news shown included) still what it was, renders to the page agenda-save wrote, byte
+// for byte, so nothing is written and it is reported as kept. Otherwise the pages are rebuilt. Talking points saved for a meeting whose facts did
+// not change are carried over from the marker; a meeting whose facts changed, or that is new, has none, and the
+// page says so in one line. A marker that can't be read carries nothing over. A page that isn't the one saved is
+// rendered again from the facts and the marker, so it comes back as it was saved.
+// Returns what the command prints, and the page's own text for the launcher (html).
+export function buildFactsBrief(opts) {
+  need(opts, 'event');
+  const c = ctxOf(opts.event, opts);
+  const day = typeof opts.day === 'string' ? opts.day : c.today;
+  parseDateKey(day);
+  const data = agendaData(c, { day, savedNews: true });
+  if (!data.meetings.length) return { result: { built: false, meetings: 0, day, why: 'no booked meeting that day' }, html: null };
+  const files = { html: join(c.paths.dir, 'agenda.html'), md: join(c.paths.dir, 'agenda.md'), ics: join(c.paths.dir, 'agenda.ics') };
+  const onDisk = plain(files.html);
+  const fm = (() => {
+    try {
+      const x = readJson(fullMarkerFile(c), null);
+      return x && typeof x === 'object' && !Array.isArray(x) && x.meetings && typeof x.meetings === 'object' && typeof x.page === 'string' ? x : null;
+    } catch {
+      return null;
+    }
+  })();
+  // A saved agenda speaks for this day when it was saved for it, or for every day. Its talking points come from
+  // the marker (checked for shape, rendered and escaped here), never from the page on disk; the page on disk is
+  // used as it is only when it is byte for byte the one agenda-save wrote.
+  const pageIsSaved = !!fm && onDisk != null && sha(onDisk) === fm.page;
+  const applies = !!fm && (fm.day === day || fm.day == null);
+  const carried = new Map();
+  if (applies)
+    for (const m of data.meetings) {
+      const was = fm.meetings[m.id];
+      if (was && was.facts === factsOf(m) && pointsOk(was.points)) carried.set(m.id, was.points);
+    }
+  const stale = applies && data.meetings.some((m) => !carried.has(m.id));
+  const note = stale ? STALE_POINTS_NOTE : null;
+  // Always rendered here, from the facts and the marker's talking points: a file on disk is never the source of
+  // what is opened, whatever its fingerprint says (the marker that holds the fingerprint is a file too).
+  const html = renderHtml(data, carried, { note });
+  // "Kept" is only a word for the report: the saved agenda for this day, and the page as rendered now is the page
+  // on disk, byte for byte.
+  const kept = applies && fm.day === day && pageIsSaved && !stale && Object.keys(fm.meetings).length === data.meetings.length && onDisk === html;
+  let wrote = false;
+  {
+    const md = renderMarkdown(data, carried, { note });
+    const ics = renderIcs(data, carried, { minutes: Number(c.settings.meeting_minutes) || 30 });
+    if (onDisk !== html) {
+      writeText(files.html, html);
+      wrote = true;
+    }
+    if (plain(files.md) !== md) {
+      writeText(files.md, md);
+      wrote = true;
+    }
+    const icsNow = plain(files.ics);
+    if (icsNow == null || !sameIcs(icsNow, ics)) {
+      writeText(files.ics, ics);
+      wrote = true;
+    }
+  }
+  return {
+    result: {
+      built: wrote,
+      ...(kept ? { kept: 'the agenda with talking points, saved for this day and these same facts' } : {}),
+      ...(!kept && !wrote ? { unchanged: true } : {}),
+      meetings: data.meetings.length,
+      day,
+      hash: sha(html).slice(0, 24),
+      talking_points: kept ? data.meetings.length : carried.size,
+      ...(note ? { note } : {}),
+      page: files.html,
+      short: files.md,
+      calendar: files.ics
+    },
+    html
+  };
+}
+// agenda-facts --event <slug> [--day YYYY-MM-DD]: the command, which prints where the pages are.
+export const agendaFacts = (opts) => buildFactsBrief(opts).result;

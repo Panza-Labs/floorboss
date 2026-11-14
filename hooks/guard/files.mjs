@@ -9,6 +9,7 @@ import { home, sensitiveKind, secretPlace, realPath, linkRefusal, recordFile, ha
 import { SECRET_NAME, SECRET_SEARCH } from '../../lib/security.mjs';
 import { PLUGIN_ROOT } from '../plugin-root.mjs';
 import { lockNote } from './run.mjs';
+import { LABEL_PREFIX } from '../../lib/unattended.mjs';
 
 // Claude's own file tools (Read, Grep, Glob, Write, Edit, NotebookEdit).
 export const READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
@@ -122,6 +123,145 @@ function grepContentRefusal(input, mine = false) {
       : `a search that lists the files matching it over ${where} would say which files hold keys and credentials, and floorboss never lets Claude look for those: search inside a project folder.`;
   return null;
 }
+// A launchd job's file for floorboss: one named for it, or one whose text names its job, its launcher or its
+// install script, in a folder launchd loads from. Only the user's own terminal writes that (scripts/unattended.mjs).
+const LAUNCHD_DIRS = () => [join(homedir(), 'Library', 'LaunchAgents'), '/Library/LaunchAgents', '/Library/LaunchDaemons'];
+// Text that names floorboss's job, a scheduled.mjs or unattended.mjs by file name, or anything in this plugin's
+// folder. It is not parsed as a property list. The text is decoded the way Apple's reader decodes a string (XML
+// character references with any number of leading zeros, the five named entities, CDATA markers taken out) and
+// read twice, with "<!-- … -->" taken out and with it left in, since whether that is a comment depends on where
+// it stands. The names are looked for in each reading as it is and again with paths made plain ("//", "/./" and
+// up to 40 rounds of "x/../"). Only the first 256 KB are read (a launchd file is far smaller); a longer text is
+// refused unread. The old (OpenStep) format's own escapes are not decoded.
+const CONTENT_CAP = 256 * 1024;
+const ref = (n) => (Number.isFinite(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : '');
+// Decoded as Apple's reader decodes a string: CDATA markers out, character references and the five named entities
+// read, lower case, "\" as "/". With dropComments, comments are taken out first, in one walk (an unclosed one takes
+// the rest with it).
+function decodedXml(t, dropComments) {
+  let s = String(t ?? '').slice(0, CONTENT_CAP);
+  if (dropComments && s.includes('<!--')) {
+    const kept = [];
+    for (let at = 0; ; ) {
+      const a = s.indexOf('<!--', at);
+      if (a < 0) {
+        kept.push(s.slice(at));
+        break;
+      }
+      kept.push(s.slice(at, a));
+      const b = s.indexOf('-->', a + 4);
+      if (b < 0) break;
+      at = b + 3;
+    }
+    s = kept.join('');
+  }
+  return s
+    .replace(/<!\[CDATA\[|\]\]>/g, '')
+    .replace(/&#x0*([0-9a-f]{1,6});/gi, (_, h) => ref(parseInt(h, 16)))
+    .replace(/&#0*([0-9]{1,7});/g, (_, d) => ref(Number(d)))
+    .replace(/&(quot|apos|lt|gt);/g, (_, n) => ({ quot: '"', apos: "'", lt: '<', gt: '>' })[n])
+    .replace(/&amp;/g, '&')
+    .toLowerCase()
+    .replace(/\\/g, '/');
+}
+function plainPaths(d) {
+  let s = d.replace(/\/(\.\/)+/g, '/').replace(/\/{2,}/g, '/');
+  for (let n = 0; n < 40 && s.includes('/../'); n++) {
+    const t = s.replace(/(?<![^/\s<>"'])(?!\.\.?\/)[^/\s<>"']+\/\.\.\//g, '');
+    if (t === s) break;
+    s = t;
+  }
+  return s;
+}
+export function plainXml(t) {
+  return plainPaths(decodedXml(t, true));
+}
+// The job's name, or either script by its file name (not the tail of a longer file name).
+const hit = (s) => s.includes(LABEL_PREFIX) || /(?<![\w.-])(scheduled|unattended)\.mjs/.test(s);
+// The plugin's folder as a whole path: not the tail of a longer path before it, and a "/" or the end of the name
+// after it (a folder beside it whose name only starts the same way is another folder).
+const inPlugin = (text, root) => {
+  for (let at = text.indexOf(root); at >= 0; at = text.indexOf(root, at + 1)) {
+    const before = at > 0 ? text[at - 1] : '';
+    const after = text[at + root.length] ?? '';
+    if (!/[\w.~-]/.test(before) && !/[\w.-]/.test(after)) return true;
+  }
+  return false;
+};
+const names = (t) => {
+  if (String(t ?? '').length > CONTENT_CAP) return true;
+  const roots = [...new Set([PLUGIN_ROOT, realPath(PLUGIN_ROOT)])].map((r) => r.toLowerCase());
+  // Read both ways: with comments taken out, and with them left in (a "<!--" inside CDATA, a processing instruction
+  // or an attribute is text to Apple's reader, not the start of a comment). Names are looked for before paths are
+  // made plain as well as after: taking "x/../" out must never take a name out with it.
+  for (const drop of [false, true]) {
+    const d = decodedXml(t, drop);
+    if (hit(d)) return true;
+    const p = plainPaths(d);
+    if (hit(p) || roots.some((r) => inPlugin(p, r))) return true;
+  }
+  return false;
+};
+const launchdDirs = () =>
+  LAUNCHD_DIRS()
+    .flatMap((d) => [d, realPath(d)])
+    .map((d) => d.toLowerCase());
+const inLaunchdDir = (spots) => {
+  const dirs = launchdDirs();
+  return spots.some((x) => dirs.some((d) => x.startsWith(d + sep)));
+};
+// Everywhere a path may lead: as written, with links followed as far as it exists, and through a link whose
+// target isn't there yet. Lower case: the disk doesn't tell "LaunchAgents" from "launchagents".
+const spotsOf = (p) => {
+  let lands = null;
+  try {
+    lands = followed(p).to;
+  } catch {
+    lands = null;
+  }
+  return [resolve(p), realPath(p), lands].filter(Boolean).map((x) => x.toLowerCase());
+};
+// A path a connected tool (MCP) that isn't plainly a read was given: floorboss's launchd file, or one of
+// floorboss's own records (the unattended folder and today.html among them; recordFile, lib/paths.mjs). Those are
+// written only by floorboss's own scripts. Claude's own file tools are held by fileRefusal. The caller hands over
+// at most 50 short strings (hooks/guard/shell.mjs, gather).
+// text: everything else the call carries (what would be written), read by the same content rule as Write's.
+export function schedulePathRefusal(value, text = '') {
+  const v = String(value ?? '');
+  if (!v || v.length > 1024 || !/^(~|\/|\.{1,2}\/)|\//.test(v) || /[\n\r]/.test(v)) return null;
+  const p = expand(v);
+  let spots;
+  try {
+    spots = spotsOf(p);
+  } catch {
+    return null;
+  }
+  if (inLaunchdDir(spots) && (spots.some((x) => x.split(sep).pop().startsWith(LABEL_PREFIX)) || names(text)))
+    return `${v.slice(0, 200)} is the launchd file for what floorboss runs on its own. It is installed and changed only by you, the user, from your own terminal (scripts/unattended.mjs).`;
+  // The folder launchd loads from, itself (moved away, replaced by a link): floorboss's job lives in it.
+  if (spots.some((x) => launchdDirs().includes(x)))
+    return `${v.slice(0, 200)} is a folder launchd loads jobs from, floorboss's among them: a connected tool doesn't move, replace or remove it.`;
+  const homes = [resolve(home()), realPath(home())].map((h) => h.toLowerCase());
+  const mine = spots.some((x) => homes.some((h) => x === `${h}${sep}unattended` || x.startsWith(`${h}${sep}unattended${sep}`) || x === `${h}${sep}today.html`));
+  if (mine) return `${v.slice(0, 200)} is one of floorboss's own records for what it runs on its own (its off switch, log and page), which only its scripts write.`;
+  // Any other record of floorboss's (a ledger, a saved agenda's page or marker): not a connected tool's to write.
+  let record = false;
+  try {
+    record = recordFile(p);
+  } catch {
+    record = false;
+  }
+  return record ? `${v.slice(0, 200)} is one of floorboss's own records, which only its scripts write (an edited record could make a send look approved).` : null;
+}
+function launchdRefusal(p, input) {
+  const spots = spotsOf(p);
+  if (!inLaunchdDir(spots)) return null;
+  const text = [input?.content, input?.new_string, input?.new_source, ...(Array.isArray(input?.edits) ? input.edits.map((e) => e?.new_string) : [])];
+  const named = spots.some((x) => x.split(sep).pop().startsWith(LABEL_PREFIX)) || text.some(names);
+  return named
+    ? `${p} is the launchd file for what floorboss runs on its own. It is installed and changed only by you, the user, from your own terminal (scripts/unattended.mjs), never by Claude.`
+    : null;
+}
 // Why a file tool call is refused, or null.
 // The limits that hold while a run is under way apply to the session that ran floorboss (run.session); other
 // sessions keep their file tools (the MCP limits still cover them for the lock's 30 minutes).
@@ -136,6 +276,10 @@ export function fileRefusal(tool, input, run = { active: false }) {
     if (inside(realPath(p), realPath(PLUGIN_ROOT))) {
       if (WRITE_TOOLS.has(tool)) return `floorboss's own plugin files aren't written by Claude.`;
       if (!sensitiveKind(p) || sensitiveKind(p) !== 'secret') continue;
+    }
+    if (WRITE_TOOLS.has(tool)) {
+      const why = launchdRefusal(p, input);
+      if (why) return why;
     }
     const kind = sensitiveKind(p);
     // A hard link in the data or temp folder: its other name may be a key or a shell profile (reads and writes).

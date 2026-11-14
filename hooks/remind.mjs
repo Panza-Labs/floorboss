@@ -5,13 +5,16 @@
 // "he moved it to 3:40", "cut the agencies") while floorboss is tracking an event, remind Claude to
 // record it in floorboss's log. Otherwise floorboss goes on believing nothing was sent, and the next run
 // offers first messages to people already written to. It only adds context: it never blocks a prompt, and
-// any failure is silent.
+// any failure is silent. On a day the morning brief built itself (scripts/scheduled.mjs), it also says once
+// where the page is.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { nowMs } from '../lib/clock.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { home } from '../lib/paths.mjs';
 import { isMain } from '../lib/main.mjs';
+import { writeText } from '../lib/jsonio.mjs';
+import { readBriefState, todayPage, unattendedDir } from '../lib/unattended.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 // Words of a report about what already happened (not plans): sends, replies, bookings and their changes.
@@ -82,6 +85,31 @@ export function reminder(prompt, events) {
   return `floorboss is tracking ${names}. If this message reports what happened with outreach for it (sent, replied, booked, moved, cancelled, said no or stop, or people cut or added), record it in floorboss before anything else, even outside a floorboss command and even if you also write it somewhere else: write the report as {"items":[{"who","what",…}]} to a file and run node "${ROOT}/skills/event-outreach/scripts/cli.mjs" record --event <slug> --file <file> (format in ${ROOT}/skills/event-outreach/SKILL.md, "Recording what happened"). Read back what it recorded. If the message isn't about that, ignore this.`;
 }
 
+// The brief that built itself today (scripts/scheduled.mjs): one line saying where it is, once per build. "Today"
+// is the day on this machine's clock, the one the user is living.
+export function briefLine(now = nowMs()) {
+  const built = Object.values(readBriefState())
+    .map((x) => x?.built_at)
+    .filter((at) => Number.isFinite(Date.parse(at)) && new Date(at).toDateString() === new Date(now).toDateString())
+    .sort()
+    .pop();
+  if (!built || !existsSync(todayPage())) return null;
+  const told = join(unattendedDir(), 'brief-told');
+  try {
+    if (readFileSync(told, 'utf8').trim() === built) return null;
+  } catch {
+    /* not said yet */
+  }
+  // Noted first, by floorboss's own writer, which never writes through a link. If it can't be noted, nothing is
+  // said: better silent than the same line on every message.
+  try {
+    writeText(told, `${built}\n`);
+  } catch {
+    return null;
+  }
+  return `floorboss built today's meeting brief on its own (facts only; nothing was sent): ${clean(todayPage(), 300)}. Tell the user where it is, in one line. Nothing else.`;
+}
+
 if (isMain(import.meta.url)) {
   let raw = '';
   process.stdin.on('data', (d) => {
@@ -90,7 +118,13 @@ if (isMain(import.meta.url)) {
   process.stdin.on('end', () => {
     try {
       const input = JSON.parse(raw || '{}');
-      const text = reminder(input.prompt, liveEvents(join(home(), 'events'), nowMs()));
+      let brief = null;
+      try {
+        brief = briefLine();
+      } catch {
+        brief = null;
+      }
+      const text = [reminder(input.prompt, liveEvents(join(home(), 'events'), nowMs())), brief].filter(Boolean).join('\n\n') || null;
       if (text) {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }), () => process.exit(0));
         return;
