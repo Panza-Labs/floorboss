@@ -30,7 +30,8 @@ import { planEnrich, readEnriched, enrichKey } from './enrich.mjs';
 import { emailDomain, isSharedDomain } from '../../../lib/normalize.mjs';
 import { parseSegments } from '../../event-context/scripts/context-check.mjs';
 import { validateCrmRecords, validateMailHistory, validateEnriched } from '../../connectors/scripts/tasks.mjs';
-import { modeFor, daysUntilEvent, nextDue } from '../../event-outreach/scripts/leadtime.mjs';
+import { modeFor, daysUntilEvent } from '../../event-outreach/scripts/leadtime.mjs';
+import { plannedDays, followupDay, spacingWords } from '../../../lib/spacing.mjs';
 import { HARD_HOLDS } from './resolve.mjs';
 import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
 
@@ -1407,7 +1408,16 @@ function plan(opts) {
     colleague_notes: c.settings.colleague_notes ? v.coordinate.length : v.coordinate.filter((id) => c.state.people[id]?.colleague_note).length,
     held,
     first_messages: c.today,
-    follow_up: routeLength(c.settings) > 1 ? nextDue(c.today, c.event, mode) : null,
+    // The first follow-up's day by the one rule: planned off weekends when the sequence is approved up front
+    // (sending on), else its gap after a first message sent today.
+    follow_up:
+      routeLength(c.settings) > 1
+        ? (c.settings.sending?.channels || []).length
+          ? plannedDays(c.settings, c.event, c.today, mode, routeLength(c.settings))[0]?.due || null
+          : followupDay(c.settings, c.event, { prevSent: c.today, touch: 2 }).day
+        : null,
+    // The days between messages: the user's own gap, or what the lead-time table gives today.
+    follow_up_spacing: routeLength(c.settings) > 1 ? spacingWords(c.settings, mode) : undefined,
     mode,
     no_times: v.openAsk.length
       ? v.slots.length

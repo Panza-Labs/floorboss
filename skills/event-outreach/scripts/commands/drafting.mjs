@@ -8,7 +8,9 @@ import { allowedPath, realPath, readChecked } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson, writeText } from '../../../../lib/jsonio.mjs';
 import { insightCap, parseProof } from '../../../event-context/scripts/context-check.mjs';
-import { relativeWordsIn } from '../leadtime.mjs';
+import { relativeWordsIn, modeFor, daysUntilEvent } from '../leadtime.mjs';
+import { gapKey, gapFor, nextDue, offWeekend } from '../../../../lib/spacing.mjs';
+import { planFor } from '../../../../lib/sendcheck.mjs';
 import { checkDraft, timeMentioned, controlProblems, wordCount, confirmationLinks } from '../checks.mjs';
 import { saveDraft as saveDraftFile } from '../../../../lib/drafts.mjs';
 import { buildBrief, instructionsPath } from '../drafter.mjs';
@@ -127,7 +129,7 @@ export function saveDraft(opts, given = null) {
     // Who wrote it is floorboss's to say, from the job's drafter: a claimed "drafted_by" doesn't buy the
     // leniency the user's own skill gets.
     drafted_by: job.drafter?.by === 'user' && input.drafted_by ? String(input.drafted_by).slice(0, 80) : 'floorboss',
-    ...(job.planned_due ? { planned_due: job.planned_due } : {}),
+    ...(job.planned_due ? { planned_due: job.planned_due, planned_gap: job.planned_gap || 'table', ...(job.planned_from ? { planned_from: job.planned_from } : {}) } : {}),
     // A user's edit (a pasted text or a .md file) names no language: it keeps the language of the draft it replaces.
     ...(input.language || prev?.language ? { language: String(input.language || prev.language).slice(0, 40) } : {}),
     ...(job.kind === 'message' ? insightField(input, prev, insights) : { insight: null, insight_text: null }),
@@ -233,6 +235,8 @@ export function saveDraft(opts, given = null) {
     language: draft.language || null,
     slot_ids: draft.slot_ids,
     planned_due: draft.planned_due || null,
+    planned_gap: draft.planned_gap || null,
+    ...(draft.planned_from ? { planned_from: draft.planned_from } : {}),
     checks: problems,
     attempt: draft.attempts,
     booked_slot: draft.booked_slot || null,
@@ -240,6 +244,9 @@ export function saveDraft(opts, given = null) {
     before_hashes: draft.before_hashes || null,
     ...(userEdited ? { user_edited: true, ...(typeof opts.said === 'string' ? { said: opts.said.slice(0, 200) } : {}) } : {})
   });
+  // A follow-up planned again (its message before it was rewritten, or a time it offered was taken): the follow-ups
+  // after it are planned again from its day, so one sequence never holds days from two plans.
+  if (draft.planned_due) replanAfter(c, job.id, touch, draft.planned_due);
   // A text the critic already read (a rewrite that came back word for word as an earlier version): the ledger
   // counts that verdict, so the flow sends it to no critic; the gate reads it from here, or refused it as unread
   // for ever.
@@ -249,6 +256,32 @@ export function saveDraft(opts, given = null) {
   writeJson(job.draft_file, draft);
   c._batches?.clear();
   return { id: job.id, touch, checks: problems.length ? problems : 'pass', attempts: draft.attempts };
+}
+
+// The follow-ups after `touch` in this person's sequence count from its planned day (day). One whose saved plan counts
+// from another day, or was made with other gaps, is planned again from it: a replanned entry with the new day (same
+// text, so its approval stands; the outbox and the send list say the new day). A day past the event's last day plans
+// none (planned_due null): that follow-up then goes only on its gap after a real send, if that still fits.
+function replanAfter(c, id, touch, day) {
+  const mode = modeFor(daysUntilEvent(c.event, c.now));
+  const key = gapKey(c.settings);
+  const st = c.state[id] || {};
+  let prev = day;
+  for (const u of Object.keys(st.touches || {}).map(Number).filter((x) => x > touch).sort((a, b) => a - b)) {
+    if (st.sent?.[u]) break;
+    if (st.touches[u]?.skipped) continue;
+    const p = planFor(c.entries, id, u);
+    if (!p?.has_plan) break;
+    if (p.planned_due && prev && p.planned_from === prev && (p.planned_gap || 'table') === key) {
+      prev = p.planned_due;
+      continue;
+    }
+    const next = prev ? offWeekend(nextDue(prev, c.event, mode, gapFor(c.settings, mode, u))) : null;
+    const due = next && next <= c.event.end_date ? next : null;
+    led(c, { type: 'replanned', id, touch: u, planned_due: due, planned_gap: key, planned_from: prev });
+    prev = due;
+  }
+  c._lt?.m?.clear?.();
 }
 
 // Sameness across the batch: drafts that each pass but read as one mail merge. Checks each touch in the

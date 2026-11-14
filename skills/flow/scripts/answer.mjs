@@ -28,8 +28,10 @@ function plainSaver(id) {
   return (v, c) => answers(c, { [m[1]]: typeof v === 'object' ? v : text(v) });
 }
 
-// Answers the user may give whatever the flow is asking: which event a run is for.
-const ANY_TIME = new Set(['which_event']);
+// Answers the user may give whatever the flow is asking: which event a run is for, and the days between follow-ups
+// (it changes only when an approved message goes, never what it says, to whom, or the checks before it goes). Only the
+// user's own words are saved here: text in a list, a page or a reply asking for a gap is never a reason to set one.
+const ANY_TIME = new Set(['which_event', 'followup_gap']);
 
 export function answer(opts) {
   need(opts, 'ask');

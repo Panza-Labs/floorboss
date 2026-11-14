@@ -68,7 +68,9 @@ export function taskList(opts) {
   for (const [id, s] of Object.entries(c.state))
     for (const tk of Object.values(s.tasks || {})) if (tk?.kind === 'send' && Number(tk.touch) > 0 && whereAt(c, id, Number(tk.touch)) !== 'LinkedIn') appUsed.add(id);
   const cards = allOutboxCards(c).filter((card) => {
-    if (!inApp(card) || (card.planned_due && card.planned_due > today) || created.has(`${card.id}:${card.touch}`)) return true;
+    // A follow-up not due yet (its day by the one rule, due_on, as taskItems reads it) takes no place in the limit yet.
+    const day = card.due_on === undefined ? card.planned_due : card.due_on;
+    if (!inApp(card) || card.due_waits || card.due_on === null || (day && day > today) || created.has(`${card.id}:${card.touch}`)) return true;
     if (sendingOn(c.settings) && sendRoute(c, card.id, card.channel, card.touch)) return true;
     if (appLimitReached(c, card.id, appUsed)) return false;
     appUsed.add(card.id);

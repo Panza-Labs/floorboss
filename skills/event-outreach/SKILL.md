@@ -246,6 +246,12 @@ angle across many drafts:
 | short (2–6 days) | Shorter still. "The week of <event>". An easy yes/no. |
 | last (1 day or less) | One or two lines. Only the times still ahead, and where to find the user. |
 
+Follow-ups are spaced by the same table (7, 4 and 2 days apart; none on the last day) unless the user set
+their own gap (`followup_gap`: whole days, one for every gap or one per follow-up). A job's `planned_due` is
+the day planned for it; it goes then, or later when the message before it went late, and it's dropped when its
+gap after that send lands past the event. The gap can change after approval, so never write the gap into the
+message itself ("as I wrote last week").
+
 ## Emailed before, no reply
 
 A job with `mailbox_note` ("you emailed them before (2027-01-12) and they didn't reply") is someone the

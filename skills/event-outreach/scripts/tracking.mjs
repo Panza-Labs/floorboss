@@ -32,11 +32,19 @@ export function taskItems({ cards, review = [], stops = [], created, event, byId
   // The CRM's own record id, or nothing: an email isn't a record id, and a task on no record still shows.
   const ref = (id) => crmOf(id)?.crm_id || null;
   for (const card of cards) {
-    // A follow-up planned for later gets its task on its day, not now.
-    if (card.planned_due && card.planned_due > today) continue;
+    // The event is over (today in its time is past its last day): no task to send anything for it. Reviews and
+    // opt-outs below still come.
+    if (event?.end_date && today > event.end_date) break;
+    // A follow-up gets its task on its day, not before: due_on is the day send-list and the guard work out (the one
+    // rule, lib/spacing.mjs followupDay). None while that day can't be known yet (due_waits), and none at all when
+    // it has no room left before the event ends (due_on null): a dropped step is never a task for today.
+    const day = card.due_on === undefined ? card.planned_due : card.due_on;
+    if (card.due_waits || card.due_on === null || (day && day > today)) continue;
     if ((card.kind === 'message' || card.kind === 'confirmation') && card.channel === 'paste' && !selfSends(card)) {
       const key = `${card.id}:${card.touch}`;
       if (created.has(key)) continue;
+      // One message a day to one person: one send task for them in a list, the earliest step first.
+      if (items.some((x) => x.kind === 'send' && x.id === card.id)) continue;
       const where = card.where || whereTo(card, event);
       items.push({
         key,

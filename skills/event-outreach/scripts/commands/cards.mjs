@@ -8,12 +8,13 @@ import { slotLabel } from '../../../slot-finder/scripts/slots.mjs';
 import { holdersBySlot } from '../../../slot-finder/scripts/assign.mjs';
 import { profileMeta } from '../../../attendee-research/scripts/profiles.mjs';
 import { MODES } from '../leadtime.mjs';
+import { gapFor, noDayWhy } from '../../../../lib/spacing.mjs';
 import { INSTRUCTION_LIKE } from '../../../crm-triage/scripts/view.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
 import { renderOutbox } from '../outbox.mjs';
 import { hashOf, pickAt, whereAt } from './routes.mjs';
 import { isOut, labelOf, ctxOf, colleagueTold, takenTest } from './context.mjs';
-import { savedDraft, readTodo, draftFiles, ledgerTouch } from './saved-drafts.mjs';
+import { savedDraft, readTodo, draftFiles, ledgerTouch, followupDayOf, laterSent } from './saved-drafts.mjs';
 
 function cardsFrom(c, jobs, { pendingOnly }) {
   const cards = [];
@@ -31,6 +32,7 @@ function cardsFrom(c, jobs, { pendingOnly }) {
     // the gate list it as held for the user).
     if (pendingOnly && j.critic_held && !isOut(st)) continue;
     const ct = c.byId[j.id];
+    const due = dueOf(c, j, d);
     cards.push({
       kind: j.kind,
       id: j.id,
@@ -50,6 +52,11 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       // Their list entry reads like an instruction to an AI (a planted note): flagged on the card too, not only at load.
       instruction_like: INSTRUCTION_LIKE.test(`${ct.notes || ''} ${ct.title || ''} ${ct.company || ''}`) || undefined,
       planned_due: d.planned_due || undefined,
+      // The day this follow-up goes, as send-list and the guard work it out (null: once the message before it goes).
+      due_on: due?.day,
+      due_waits: due?.waits || undefined,
+      // Can't go any more, and why: the event is over (any message), or this follow-up has no day left.
+      not_going: c.today > c.event.end_date ? 'the event is over' : due && !due.day && !due.waits ? noDayWhy(due) : undefined,
       // An event-app note whose times live in the app's request: the card says which time to pick.
       pick_in_app:
         (j.kind === 'message' || j.kind === 'confirmation') &&
@@ -64,7 +71,7 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       subject: d.subject,
       body: d.body,
       earliest: j.earliest || d.earliest,
-      followup_note: j.followup_note || d.followup_note,
+      followup_note: dueNote(j.followup_note || d.followup_note, due, c, j),
       slots: (j.slot_ids || d.slot_ids || []).map((id) => ({ id, label: labelOf(c, id) })),
       pending: !isOut(st),
       staged: c.state[j.id]?.touches?.[j.touch]?.staged ? true : undefined,
@@ -73,6 +80,25 @@ function cardsFrom(c, jobs, { pendingOnly }) {
     });
   }
   return cards;
+}
+
+// A follow-up's day (the one rule, lib/spacing.mjs followupDay), for a message after the first; undefined for anything else.
+function dueOf(c, j, d) {
+  if (j.kind !== 'message' || !(j.touch > 1) || c.state[j.id]?.sent?.[j.touch]) return undefined;
+  return followupDayOf(c, j.id, j.touch, d);
+}
+// The note's "planned for <day>" says the day worked out now: the gap may have changed since it was planned.
+function dueNote(note, due, c, j) {
+  if (!note || !due || !/planned for \d{4}-\d{2}-\d{2}/.test(note)) return note;
+  const prev = touchBefore(c.state[j.id], j.touch);
+  // The user's own gap for this step (any lead time but the last day gives it), else the table's for that day.
+  const g = c.settings.followup_gap?.length ? gapFor(c.settings, 'early', j.touch) : null;
+  const when = due.day
+    ? `planned for ${due.day}`
+    : due.waits
+      ? `planned for ${g ? `${g} ${g === 1 ? 'day' : 'days'}` : 'its usual gap'} after message ${prev} goes`
+      : `not going: ${noDayWhy(due)}`;
+  return note.replace(/planned for \d{4}-\d{2}-\d{2}/, when);
 }
 
 export function renderFile(c, cards) {
@@ -143,6 +169,8 @@ export function allOutboxCards(c) {
     // A follow-up is next only once the message before it (a skipped step passed over) went: a step sent back or
     // dropped holds the ones after it, here as at the send.
     if (j.touch > 1 && !c.state[j.id]?.sent?.[touchBefore(c.state[j.id], j.touch)]) continue;
+    // A later step already went (recorded by hand, or found in the mailbox): this earlier one is passed over.
+    if (laterSent(c.state[j.id], j.touch)) continue;
     if (!latest.has(j.id) || latest.get(j.id).touch > j.touch) latest.set(j.id, j);
   }
   const sentOrDone = (id) => {

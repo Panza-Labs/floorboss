@@ -7,12 +7,12 @@ import { whereTo } from '../tracking.mjs';
 import { companyKey } from '../../../../lib/normalize.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
-import { addDays } from '../../../../lib/tz.mjs';
 import { slotLabel } from '../../../slot-finder/scripts/slots.mjs';
 import { parseSegments, parseInsights, insightCap, insightBudget, parseProof } from '../../../event-context/scripts/context-check.mjs';
 import { readProfile } from '../../../attendee-research/scripts/profiles.mjs';
 import { readCompanyBrief } from '../../../attendee-research/scripts/companies.mjs';
-import { modeFor, MODES, daysUntilEvent, eventOver, touchesThatFit, nextDue, writtenDate } from '../leadtime.mjs';
+import { modeFor, MODES, daysUntilEvent, eventOver, writtenDate } from '../leadtime.mjs';
+import { plannedDays, gapKey } from '../../../../lib/spacing.mjs';
 import { readLedger } from '../../../../lib/ledger.mjs';
 import { drafterFor } from '../drafter.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
@@ -20,7 +20,7 @@ import { assignStructures, factSources, STRUCTURES, openingOf, OPENINGS, warmRea
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { whereAt, writtenInApp, routeOf, whereMoved, messageFields, channelChangeNote } from './routes.mjs';
 import { ctxOf, skillsOf, takenTest, isOut, lastSentTouch, segmentInfo, knownReader, sameSlots, labelOf, sendingOn } from './context.mjs';
-import { readTodo, staleFor, savedDraft, draftFile, ledgerTouch, criticFails, earlierDraft, resolveInsight, touchBatch } from './saved-drafts.mjs';
+import { readTodo, staleFor, savedDraft, draftFile, ledgerTouch, criticFails, earlierDraft, resolveInsight, touchBatch, followupDayOf } from './saved-drafts.mjs';
 
 // What a rewrite answers to, on the job the drafter gets: the user's words (an outreach revise, or the note on a
 // draft they rated 3 or less, which only the ledger holds) and the critic's reasons on the version being
@@ -71,6 +71,8 @@ export function todo(opts) {
   for (const [id, ids] of Object.entries(c.short.assignments || {})) {
     const s = c.state[id];
     // Times already past count too: the send check holds a message offering them, so it is redrafted with new ones.
+    // In practice this hardly fires: the triage view gives the person other free times once one is taken or past, so
+    // `ids` rarely still holds it (a CHANGELOG known limit; `outreach revise` brings such a message back).
     const past = (x) => c.slotById[x] && Date.parse(c.slotById[x].start) <= c.now.getTime();
     if (!s?.sent?.[1] && !s?.booked && ids.some((x) => bookedByOther(x, id) || past(x))) redraft.add(id);
   }
@@ -169,13 +171,12 @@ export function todo(opts) {
     if (!lastSent) {
       if (t1 !== 'outboxed' || redraft.has(id) || whereMoved(c, id, 1)) touch = 1;
     } else {
-      const sentKey = st.sent[lastSent];
-      const sentMode = modeFor(daysUntilEvent(c.event, new Date(`${sentKey}T12:00:00Z`)));
-      const fit = touchesThatFit(sentKey, c.event, sentMode, steps ? steps.length : c.settings.touches);
-      const due = nextDue(sentKey, c.event, sentMode);
       let next = lastSent + 1;
       while (st.touches?.[next]?.skipped) next++;
-      if (next <= fit && due && due <= today && (st.touches[next]?.status !== 'outboxed' || whereMoved(c, id, next) || staleFor(c, id, next, savedDraft(c, id, next) || readJson(draftFile(c.paths, id, next), null)))) {
+      // Its day by the one rule (lib/spacing.mjs followupDay): the user's gap or the table's after the last send, null
+      // once it would land after the event; and only while the sequence has that many steps.
+      const due = next <= (steps ? steps.length : c.settings.touches) ? followupDayOf(c, id, next).day : null;
+      if (due && due <= today && (st.touches[next]?.status !== 'outboxed' || whereMoved(c, id, next) || staleFor(c, id, next, savedDraft(c, id, next) || readJson(draftFile(c.paths, id, next), null)))) {
         touch = next;
         followup = true;
       }
@@ -287,13 +288,9 @@ export function todo(opts) {
   if (sendingOn(c.settings)) {
     for (const j of jobs.filter((x) => x.kind === 'message' && x.touch === 1)) {
       const steps = routeOf(c, j.id);
-      const fit = touchesThatFit(today, c.event, mode, steps ? steps.length : c.settings.touches);
-      let due = today;
-      for (let t = 2; t <= fit; t++) {
-        due = nextDue(due, c.event, mode);
-        // Not on a weekend: moved to the Monday (if the event still runs then).
-        while (due && [0, 6].includes(new Date(`${due}T12:00:00Z`).getUTCDay())) due = addDays(due, 1);
-        if (!due || due > c.event.end_date) break;
+      // Each follow-up's day, the user's gap or the table's apart, off the weekend, until one would land after the
+      // event's last day (that one and the rest are dropped, never moved closer).
+      for (const { touch: t, due, from } of plannedDays(c.settings, c.event, today, mode, steps ? steps.length : c.settings.touches)) {
         // A step the user skipped: the sequence goes on to the next one.
         if (c.state[j.id]?.touches?.[t]?.skipped) continue;
         // A follow-up the user dropped ends the sequence there.
@@ -327,6 +324,10 @@ export function todo(opts) {
           followup: true,
           planned: true,
           planned_due: due,
+          // The gaps it was planned with: planned with others, its day is worked out again from the last send.
+          planned_gap: gapKey(c.settings),
+          // The day it counts from (the planned day of the message before it): the two days are one plan.
+          planned_from: from,
           previous_hash_now: prevT?.hash || null,
           previous_touch_now: beforeT,
           ...(!prevReady && !c.state[j.id]?.touches?.[t]?.hash ? { waits_for_previous: true } : {}),

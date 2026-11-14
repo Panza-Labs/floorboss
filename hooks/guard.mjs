@@ -23,12 +23,12 @@
 // This file is the entry point: it reads the hook's input and decides, and holds the rules for Bash and agents
 // during a run and the ask-once logic. The other rules are in guard/, one topic per file (SECURITY.md lists them
 // under "Reading the guard").
-import { existsSync, unlinkSync, openSync, closeSync, mkdirSync } from 'node:fs';
+import { existsSync, unlinkSync, openSync, closeSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { home, recordFile } from '../lib/paths.mjs';
 import { readRun, readRunAnySession, stampRun, lockPath, endSession, touchSession, ranBefore } from '../lib/runlock.mjs';
 import { bareBrowserTool, readUrl, looksLikeUrl } from '../lib/security.mjs';
-import { eventRecord, oldestReplyCheck } from '../lib/sendcheck.mjs';
+import { eventRecord, oldestReplyCheck, eventDay } from '../lib/sendcheck.mjs';
 import { withLock } from '../lib/lock.mjs';
 import { loadEvent } from '../lib/event.mjs';
 import { randomBytes } from 'node:crypto';
@@ -630,6 +630,30 @@ if (isMain(import.meta.url)) {
             process.exit(2);
           }
           throw e;
+        }
+        // At most one message to a person a day, in the event's time: an exclusive marker per person and day, taken in
+        // the same step, so two calls at the same moment for one person can't both pass. It names the message that took
+        // it; once that message's release is cleared (it never went), the day is free again. A meeting confirmation
+        // (touch 0) answers the person's own booking and takes no day (lib/sendcheck.mjs says why).
+        const day = eventDay(evDir, nowMs) || new Date(nowMs).toISOString().slice(0, 10);
+        const dayMark = join(mdir, `${it.id}-day-${day}`);
+        try {
+          if (it.touch !== 0) writeFileSync(dayMark, `${it.touch}:${resets}`, { flag: 'wx', mode: 0o600 });
+        } catch (e) {
+          if (e.code !== 'EEXIST') throw e;
+          const [t0, r0] = String(readFileSync(dayMark, 'utf8')).split(':').map(Number);
+          const clearedSince =
+            eventRecord(evDir).entries.filter((x) => x.id === it.id && x.touch === t0 && ['release_cleared', 'bounced'].includes(x.type)).length > r0;
+          if (!clearedSince) {
+            try {
+              unlinkSync(join(mdir, `${it.id}-${it.touch}-${resets}`));
+            } catch {
+              /* gone */
+            }
+            process.stderr.write(`floorboss blocked this call: another message to ${promptPerson(it.name, it.id)} already went or is going today. One message a day to one person.\n`);
+            process.exit(2);
+          }
+          writeFileSync(dayMark, `${it.touch}:${resets}`, { mode: 0o600 });
         }
         // appendLine: starts on a fresh line after a torn one and syncs, so a release is never glued onto a broken line.
         // If the release can't be written, the marker goes too: the call is blocked, and nothing is held as sent.

@@ -1,50 +1,8 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
-// Lead time drives tone, follow-up spacing and how many touches fit.
-import { addDays, daysBetween, todayKeyIn, parseDateKey, weekdayOf, MONTHS } from '../../../lib/tz.mjs';
-
-export const MODES = Object.freeze({
-  early: { min: 21, spacing: 7, label: '21+ days: calendars still open, low pressure' },
-  standard: { min: 7, spacing: 4, label: '7–20 days: two specific times' },
-  short: { min: 2, spacing: 2, label: '2–6 days: short, easy yes/no' },
-  last: { min: -Infinity, spacing: null, label: '1 day or less: one line, remaining slots only' }
-});
-
-export function modeFor(daysUntil) {
-  if (daysUntil >= 21) return 'early';
-  if (daysUntil >= 7) return 'standard';
-  if (daysUntil >= 2) return 'short';
-  return 'last';
-}
-
-export function daysUntilEvent(event, now = new Date()) {
-  return daysBetween(todayKeyIn(event.time_zone, now), event.start_date);
-}
-
-export function eventOver(event, now = new Date()) {
-  return todayKeyIn(event.time_zone, now) > event.end_date;
-}
-
-// How many touches fit between the (expected) send date and the event's last day.
-export function touchesThatFit(sentKey, event, mode, wanted) {
-  const spacing = MODES[mode].spacing;
-  if (!spacing) return 1;
-  const room = daysBetween(sentKey, event.end_date);
-  return Math.max(1, Math.min(wanted, 1 + Math.floor(room / spacing)));
-}
-
-// When the next touch is due after a send, or null if it would land after the event ends.
-export function nextDue(sentKey, event, mode) {
-  const spacing = MODES[mode].spacing;
-  if (!spacing) return null;
-  const due = addDays(sentKey, spacing);
-  return due <= event.end_date ? due : null;
-}
-
-export function writtenDate(key) {
-  const { m, d } = parseDateKey(key);
-  return `${weekdayOf(key)} ${d} ${MONTHS[m - 1]}`;
-}
+// Lead time drives tone and how many touches fit; the days between follow-ups (the table, or the user's own gap)
+// and each follow-up's day are worked out in lib/spacing.mjs, re-exported here for the commands that read them.
+export { MODES, modeFor, daysUntilEvent, eventOver, touchesThatFit, nextDue, writtenDate } from '../../../lib/spacing.mjs';
 
 export const RELATIVE_WORDS = [
   'tomorrow',

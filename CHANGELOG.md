@@ -58,6 +58,33 @@ The first public version.
   email. Anyone you can't reach on a step skips it, and you can make the route longer, shorter or a different order.
   Before any message goes, their replies are checked on every channel they were written to, so someone who answered
   in the event app doesn't get the next email; where floorboss can't read a channel, it asks you. A step you won't send can be skipped ("skip LinkedIn for Ana").
+- Follow-ups are spaced by how far off the event is (7, 4 or 2 days apart), or by your own gap: set it in full
+  setup or say it at any step ("3 days between follow-ups", "a week apart", "2 days, then 5", "the default").
+  Whole days from 1 to 14; an answer it can't read is asked again, and so is a range, "twice a week" or "day 3, day
+  7". The gap is your setting for every event. One rule works out each follow-up's day for the drafting list, the
+  outbox, the send list, the CRM task and the guard: never sooner than its gap after the message before it really
+  went, moved off a weekend in a sequence approved up front, and dropped (never moved closer) when that lands after
+  the event's last day; you're told which. Approved follow-ups keep their text when the gap changes, and the answer names each approved follow-up at this event whose day moves or that is dropped (with its old and new day once the message before it has gone, and its gap until then), and gives counts for other events; those counts are a projection that takes a first message still waiting as going today.
+  The guard refuses a follow-up before its day, saying the day in the event's time. When every message goes on its
+  planned day, every follow-up goes on the day planned for it. Once the event is over (today, in its time, past its
+  last day) nothing more is sent, made a send task, staged in the mailbox, shown as due in the summary or offered to
+  copy on the outbox page (cards say "not going: the event is over"): first messages, follow-ups and confirmations
+  alike. Recording what happened, opt-out and review tasks, exports and the agenda still work. At most one message
+  goes to a person a day: the guard enforces it on its own (a send in progress counts, and two calls at once can't
+  both pass; a meeting confirmation, which answers the person's booking, is the one exception), and the send list, task list and stage list list the earliest step and hold the other. A step
+  recorded as sent out of order (by hand, or found in the mailbox) passes over the earlier steps that hadn't gone
+  (their text was written to come before it), and the next step counts its gap from that send. With the default spacing, three timings differ from before: a message sent
+  late (after its planned day) a day or less before the event starts, or during it, no longer gets a follow-up
+  after it; with sending off, a last follow-up that fits before the event's last day is now offered (it used to need
+  room for one more gap after it), as sending on always did; and zones at UTC+12 or further east read the lead time
+  on the event's own date. Answers are read whole ("every other day", "a fortnight", "3 días, luego una semana"); one with a
+  part floorboss can't read, a negation, a comparison, an ordinal or a channel is asked again, never half saved.
+  The lead time is read at the event's own date (it was read at midday UTC, which is the next day at UTC+12 or
+  further east). With sending on and every message on time, the days there are the same as before; they differ with
+  sending off, and after a late send. A follow-up planned again (written again because the message before it changed) plans the
+  follow-ups after it again from its new day, keeping their text and approval, so one sequence never holds days from
+  two plans; and every day any reader works out passes one final check (after the real send, at least its gap after
+  it, a weekday in a plan made off weekends, within the event as it is now).
 - Approval of each person's whole sequence; you can edit or drop any touch, in the file or inline
   ("edit c012: …"). Checks refuse a figure (%, x, money) that none of the draft's sources holds.
 - Optional sending by email, with Claude Code asking before every send. Event-app notes through your browser.
@@ -254,3 +281,8 @@ The first public version.
 - Drafts with invisible or control characters, or a line break in the subject, fail the checks.
 - Your own outbound instructions file must sit in a `.claude/agents` or `.claude/skills` folder.
 - No third-party packages: floorboss runs only Node's built-in modules and its own scripts.
+
+### Known limits
+- An approved first message whose offered time someone else booked, or that has passed, waits in the send list as
+  "redraft it with new times", and nothing hands it out again by itself: `outreach revise` on it brings it back.
+- An approved follow-up whose offered time someone else books leaves the outbox page; the send list gives the reason.

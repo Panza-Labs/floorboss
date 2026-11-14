@@ -13,9 +13,10 @@ function verdictChip(v) {
   return v.verdict === 'PASS' ? '<span class="chip ok">critic: pass</span>' : `<span class="chip bad" title="${e(v.reasons.join('; '))}">critic: failed</span>`;
 }
 
-function field(label, id, value) {
+// copy: false for a message that can no longer go (the text stays readable, with nothing to copy it out).
+function field(label, id, value, copy = true) {
   return (
-    `<div class="field"><div class="k"><span>${e(label)}</span><button type="button" class="copy" data-copy="${e(id)}">Copy</button></div>` +
+    `<div class="field"><div class="k"><span>${e(label)}</span>${copy ? `<button type="button" class="copy" data-copy="${e(id)}">Copy</button>` : ''}</div>` +
     `<pre id="${e(id)}">${e(value)}</pre></div>`
   );
 }
@@ -45,7 +46,8 @@ function card(c, hosts = [], app = null) {
           : app
             ? `no address: paste it in ${e(app)}`
             : 'no address: paste it wherever you reach them';
-  const li = c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
+  // A message that can no longer go (c.not_going: the event is over, or no day is left for it) is never queued to send.
+  const li = !c.not_going && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
   const channel =
     c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
@@ -73,8 +75,9 @@ function card(c, hosts = [], app = null) {
   ${c.followup_note ? `<p class="follow">${e(c.followup_note)}</p>` : ''}
   ${failed}
   ${c.checks_stuck?.length ? `<p class="failnote">Still fails floorboss's checks after three rewrites: ${e(c.checks_stuck.join('; '))}. Edit it or drop it; it isn't offered for approval as it is.</p>` : ''}
-  ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject) : ''}
-  ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body)}
+  ${c.not_going ? `<p class="failnote">Not going: ${e(c.not_going)}. Don't send it.</p>` : ''}
+  ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject, !c.not_going) : ''}
+  ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body, !c.not_going)}
   <p class="stale" hidden>The earliest time offered here has passed. Run /floorboss:event-draft again for new times before sending.</p>
   ${
     c.kind === 'coordinate'

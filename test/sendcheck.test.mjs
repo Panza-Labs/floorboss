@@ -2,7 +2,7 @@
 // a damaged line anywhere, a duplicate, a bounce to a new address, and a confirmation whose booking was taken back.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { saveDraft } from '../lib/drafts.mjs';
@@ -11,6 +11,8 @@ import { verifySend, eventRecord } from '../lib/sendcheck.mjs';
 const settings = { sending: { channels: ['email'] }, connectors: {} };
 function check(extra, touch = 1) {
   const dir = mkdtempSync(join(tmpdir(), 'fb-send-'));
+  // The event's dates: the guard reads them (a follow-up's day, and whether the event is over).
+  writeFileSync(join(dir, 'event.json'), JSON.stringify({ slug: 'ev', name: 'Test Expo', time_zone: 'Europe/Amsterdam', start_date: '2026-10-28', end_date: '2026-10-30' }));
   const hash = saveDraft(dir, { channel: 'email', to: 'ann@acme.test', subject: 'Hi', body: 'Hello Ann' });
   const L = (e) => appendFileSync(join(dir, 'ledger.jsonl'), (typeof e === 'string' ? e : JSON.stringify({ at: '2026-10-27T10:00:00Z', ...e })) + '\n');
   L({ type: 'person', who: 'floorboss', id: 'c001', name: 'Ann', email: 'ann@acme.test' });
@@ -65,6 +67,8 @@ test('an unclear send blocks a resend until someone looked; a failed reply reade
 
 test('the reply reader failed: a follow-up may go on the user\'s word, not before', () => {
   const dir = mkdtempSync(join(tmpdir(), 'fb-send-'));
+  // The event's dates: the guard checks a follow-up's day against them (2 days apart, 5 days out).
+  writeFileSync(join(dir, 'event.json'), JSON.stringify({ slug: 'ev', name: 'Test Expo', time_zone: 'Europe/Amsterdam', start_date: '2026-10-28', end_date: '2026-10-30' }));
   const hash1 = saveDraft(dir, { channel: 'email', to: 'ann@acme.test', subject: 'Hi', body: 'Hello Ann' });
   const hash2 = saveDraft(dir, { channel: 'email', to: 'ann@acme.test', subject: 'Re: Hi', body: 'One more' });
   const L = (e) => appendFileSync(join(dir, 'ledger.jsonl'), JSON.stringify({ at: '2026-10-27T10:00:00Z', ...e }) + '\n');
@@ -87,6 +91,8 @@ test('the reply reader failed: a follow-up may go on the user\'s word, not befor
 
 test('the event app said they can\'t be written to there: the browser note is held', () => {
   const dir = mkdtempSync(join(tmpdir(), 'fb-send-'));
+  // The event's dates: the guard reads them (a follow-up's day, and whether the event is over).
+  writeFileSync(join(dir, 'event.json'), JSON.stringify({ slug: 'ev', name: 'Test Expo', time_zone: 'Europe/Amsterdam', start_date: '2026-10-28', end_date: '2026-10-30' }));
   const to = 'Ana Berg (Acme)';
   const hash = saveDraft(dir, { channel: 'paste', to, subject: '', body: 'Hi Ana, coffee at the show?' });
   const L = (e) => appendFileSync(join(dir, 'ledger.jsonl'), JSON.stringify({ at: '2026-10-27T10:00:00Z', ...e }) + '\n');

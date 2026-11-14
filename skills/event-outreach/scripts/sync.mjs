@@ -32,7 +32,8 @@ export function planSync(people, { state, since, source, now, byId, zone = 'UTC'
     const who = byId[p.id] ? `${byId[p.id].name} (${byId[p.id].company})` : p.id;
     const seen = new Set((st.ext || []).map((x) => x.replace(/#t\d+$/, '')));
     const from = Date.parse(since[p.id] || 0);
-    const day = (iso) => todayKeyIn(zone, new Date(iso));
+    // The day a message went, in the event's time: never ahead of now (a mailbox date in the future counts as today).
+    const day = (iso) => todayKeyIn(zone, new Date(Math.min(Date.parse(iso) || nowMs, nowMs)));
     const sentDays = Object.values(st.sent || {}).map((d) => Date.parse(`${d}T12:00:00Z`));
     // Sends the user reported without a source (told Claude, ticked in the outbox): the mailbox may show the
     // same send, possibly days earlier when the report came late. Each can be matched once.

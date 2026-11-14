@@ -218,7 +218,7 @@ question is how much setup you want. You can change it any time by saying "more 
 |---|---|---|
 | **Quick** | about 8 | Your list, who you want to meet and what you offer, your sign-off and free time. It assumes you work alone, with no CRM and no writing samples (it says so when you pick it). Nothing connected is read and nothing is sent; if a CRM is connected, it says plainly that it won't be checked. It asks before researching the shortlisted companies on the web. |
 | **Standard** | about 18 | Also checks the list against your CRM, mailbox and calendar (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, how long a lost deal keeps someone out, whether emails to people you already know end with the opt-out line, and sets your tone from samples and from emails of yours that got replies, if you have them. You send the messages. |
-| **Full** | about 22 | Everything in standard, plus floorboss sends what you approve, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), and logs messages in your CRM. |
+| **Full** | about 23 | Everything in standard, plus floorboss sends what you approve, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), logs messages in your CRM, and asks how many days to leave between follow-ups. |
 
 The counts are the setup questions after the level and the event, from walking the question tree for a
 seller who works alone and has a CRM, mailbox and calendar connected, and who has written nothing about themselves yet (standard and full ask for a line about you and what you know that buyers may not); a team, a CRM export, an event outside the English-speaking world, a job search or a list that's
@@ -296,7 +296,26 @@ calendar.
    (first message and follow-ups) is approved together, and Claude Code asks you before every send.
    Each message goes on its step of the route: by default email, then the event app, then LinkedIn, then email.
    Anyone you can't reach on a step skips it, and you can set a longer, shorter or different route in full setup
-   (or `config --set` with `route`). An email follows on in the thread of their last email. A message
+   (or `config --set` with `route`). Follow-ups are spaced by how far off the event is: 7 days apart from three
+   weeks out, 4 days from one to three weeks, 2 days in the last week, and none on the last day. To set your own,
+   answer the question in full setup or say it at any step ("3 days between follow-ups", "a week apart", "2 days,
+   then 5", or "the default" to go back): whole days from 1 to 14, one for every gap or one per follow-up in turn.
+   The gap is yours for every event. When each message goes on its planned day, every follow-up goes on the day
+   planned for it. A follow-up is never sent sooner than its gap after the message before it really went, even when
+   that message went late. In a sequence approved up front no follow-up is planned for a weekend (that day moves to
+   the Monday); one that is overdue is listed whenever you run floorboss, weekend included. One that would land after
+   the event's last day is dropped, never moved closer; you're told which. Change the gap after approving and the
+   approved follow-ups keep their text and need no new approval: the answer names each approved follow-up at this event whose day moves or that is dropped (with its old and new day once the message before it has gone, and its gap until then), and gives counts for other events; those counts are a projection that takes a first message still waiting as going today. 
+   At most one message goes to a person on any day, whatever listed it: the guard holds it to that on its own (a
+   meeting confirmation, which answers their booking, is the one exception). When
+   a later step is recorded as sent (by you, or found in your mailbox), the earlier steps that hadn't gone are passed
+   over, and the next one counts its gap from that send.
+   floorboss's work for an event ends with it. Once its last day has passed in the event's time, nothing more is
+   sent, made a send task, put in your mailbox drafts or shown as due in the summary, and the outbox page shows
+   those messages as not going, with nothing to copy. Recording what happened still works, and so do opt-out and
+   review tasks, exports and the agenda. A follow-up written again after approval (because the message before
+   it changed) plans the follow-ups after it again from its new day; they keep their text and approval.
+   An email follows on in the thread of their last email. A message
    goes only to people who haven't replied, booked or said stop on any channel, after their replies were checked
    in the last 90 seconds where it's going, and in the last 10 minutes on every other channel they were written
    to (where floorboss can't read one, you're asked). LinkedIn steps wait for you to send unless you turn on

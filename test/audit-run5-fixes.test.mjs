@@ -250,7 +250,9 @@ test('a step sent back or dropped holds the next approved step out of the mailbo
   assert.equal(staged(D).to_stage, 0);
   const K = mk();
   assert.equal(record(K, [{ who: 'Ana Berg', what: 'skipped', touch: 2, said: 'skip it' }]).applied, true);
-  const after = staged(K);
+  // Staged on its own day (the one rule): step 3, after a skipped step 2, is due Mon 26 Oct.
+  assert.equal(staged(K).to_stage, 0, 'not before its day');
+  const after = staged(K, later(14));
   assert.equal(after.to_stage, 1, 'a skipped step passes on to the next');
 });
 
@@ -382,7 +384,10 @@ test('a route step floorboss sends itself gets no CRM task; a LinkedIn step floo
   const t2 = cli(H, 'event-outreach', ['task-list', '--event', H.slug], later(14));
   assert.equal(t2.by_kind?.send || 0, 0, JSON.stringify(t2));
   sentMark(H, ana, 2, { channel: 'Grip' }, later(14));
-  const t3 = cli(H, 'event-outreach', ['task-list', '--event', H.slug], later(14));
+  // The LinkedIn step's task comes on its day: its gap after the app note really went (Mon 26 Oct, 15 days out: 4).
+  const early = cli(H, 'event-outreach', ['task-list', '--event', H.slug], later(14));
+  assert.equal(early.by_kind?.send || 0, 0, JSON.stringify(early));
+  const t3 = cli(H, 'event-outreach', ['task-list', '--event', H.slug], later(18));
   assert.equal(t3.by_kind?.send || 0, 1, JSON.stringify(t3));
 });
 

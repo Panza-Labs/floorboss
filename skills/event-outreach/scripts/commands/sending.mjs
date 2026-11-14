@@ -6,15 +6,15 @@ import { join } from 'node:path';
 import { allowedPath, home } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
-import { modeFor, daysUntilEvent, nextDue } from '../leadtime.mjs';
+import { noDayWhy } from '../../../../lib/spacing.mjs';
 import { readLedger } from '../../../../lib/ledger.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { approvalHash, verifySend, readersOf, withFallbacks, userWordCounts } from '../../../../lib/sendcheck.mjs';
+import { approvalHash, verifySend, readersOf, withFallbacks, userWordCounts, sentOrGoingToday } from '../../../../lib/sendcheck.mjs';
 import { validateReceipts } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig, saveConfig } from '../../../../lib/config.mjs';
 import { earlierWith, writtenInApp, toOf, sendRoute, appLimitReached, whereAt } from './routes.mjs';
 import { crmPending, lastSentTouch, ctxOf, led, sendingOn, idList, takenTest } from './context.mjs';
-import { draftFiles, savedDraft, readTodo, staleFor } from './saved-drafts.mjs';
+import { draftFiles, savedDraft, readTodo, staleFor, followupDayOf } from './saved-drafts.mjs';
 import { allOutboxCards, renderFile } from './cards.mjs';
 
 // Approved emails not yet staged and not sent: exactly what to put in the mailbox, from floorboss's files.
@@ -23,8 +23,16 @@ import { allOutboxCards, renderFile } from './cards.mjs';
 function stageable(c) {
   const out = [];
   const today = c.today;
+  // The event is over (today in its time past its last day): nothing is put in the mailbox for it.
+  if (today > c.event.end_date) return out;
+  const listed = new Set();
   for (const card of allOutboxCards(c)) {
     if (!['message', 'confirmation'].includes(card.kind) || card.channel !== 'email' || !card.address) continue;
+    // A follow-up is staged on its day, as everything else reads it (the one rule): not before, and not while it waits
+    // for the message before it or has no day at all.
+    if (card.due_on !== undefined && (!card.due_on || card.due_waits || card.due_on > today)) continue;
+    // One message a day to one person: the earliest step goes today, the next another day.
+    if (listed.has(card.id) || (card.touch !== 0 && sentOrGoingToday(c.entries, c.state[card.id] || {}, card, c.paths.dir, c.now.getTime()) != null)) continue;
     // With email sending on, floorboss sends the messages itself (send-list); only confirmations are staged.
     if (card.kind === 'message' && (c.settings.sending?.channels || []).includes('email')) continue;
     const st = c.state[card.id] || {};
@@ -34,6 +42,7 @@ function stageable(c) {
     if (card.touch === 1 && crmPending(c, card.id)) continue;
     const lastSent = lastSentTouch(st);
     const prev = card.touch > 1 ? earlierWith(st, card.touch, 'staged') : card.touch === 0 && lastSent ? st.touches?.[lastSent]?.staged : null;
+    listed.add(card.id);
     out.push({
       id: card.id,
       touch: card.touch,
@@ -101,7 +110,6 @@ export function sendList(opts) {
   c.config = loadConfig();
   if (!sendingOn(c.settings)) throw new Error('Sending is off for this event: floorboss stages drafts for you to send. Turn it on in onboarding (sending).');
   const today = c.today;
-  const mode = modeFor(daysUntilEvent(c.event, c.now));
   const roundOk = (id, t) =>
     c.settings.sending.followups === 'scheduled' || c.entries.some((e) => e.type === 'round_approved' && e.touch === t && (!e.ids || e.ids.includes(id)));
   const items = [],
@@ -189,13 +197,13 @@ export function sendList(opts) {
         waiting.push({ id, touch: t, why: 'the message before it changed after it was written: it needs a new draft' });
         continue;
       }
-      // The day it was planned and approved for; a follow-up drafted later uses the usual spacing.
-      // The planned day, but never sooner than the usual spacing after the message before it actually went (a
-      // first message sent late doesn't drag its follow-up to the same day).
-      const spaced = nextDue(prev, c.event, modeFor(daysUntilEvent(c.event, new Date(`${prev}T12:00:00Z`))));
-      const due = d.planned_due && spaced ? (d.planned_due > spaced ? d.planned_due : spaced) : d.planned_due || spaced;
+      // The day it was planned and approved for, never sooner than its gap after the message before it actually went;
+      // a follow-up drafted later, or planned with other gaps than the user's now, goes its gap after that send. The
+      // outbox and the guard work it out the same way (lib/spacing.mjs followupDay).
+      const r = followupDayOf(c, id, t, d);
+      const due = r.day;
       if (!due) {
-        waiting.push({ id, touch: t, why: 'no room left before the event ends for this follow-up' });
+        waiting.push({ id, touch: t, why: noDayWhy(r) });
         continue;
       }
       if (due > today) continue;
@@ -273,6 +281,13 @@ export function sendList(opts) {
     if (item.via === 'browser' && item.where !== 'LinkedIn' && t !== 0) appUsed.add(id);
     items.push(item);
   }
+  // One message a day to one person: the earliest step listed goes today; any other waits for another day.
+  items.sort((a, b) => String(a.id).localeCompare(String(b.id)) || a.touch - b.touch);
+  for (let i = items.length - 1; i >= 0; i--)
+    if (items.findIndex((x) => x.id === items[i].id) !== i) {
+      const [x] = items.splice(i, 1);
+      waiting.push({ id: x.id, touch: x.touch, via: x.via, where: x.where || null, why: `another message to ${x.name || x.id} is listed today: this one goes on another day` });
+    }
 
   writeJson(
     join(c.paths.derived, 'send-list.json'),

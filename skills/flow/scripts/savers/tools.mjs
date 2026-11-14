@@ -14,6 +14,8 @@ import { readUrl, listFileProblem } from '../../../../lib/security.mjs';
 import { saysNoOptOut } from '../../../crm-triage/scripts/mapping-words.mjs';
 import { ownerMatch } from '../../../../lib/names.mjs';
 import { parseRoute } from '../../../../lib/route.mjs';
+import { parseGap, gapWords } from '../../../../lib/spacing.mjs';
+import { approvedDays, gapNote } from './gap.mjs';
 import { crmOwners, config, answers, ledger, windowYes, cli, isNo, fileAnswer, writeWorkText, namedFile, pathOf, writeWork, listSourceOnly } from './helpers.mjs';
 
 export const TOOLS_SAVERS = {
@@ -85,6 +87,18 @@ export const TOOLS_SAVERS = {
     const saved = config(c, { route: parseRoute(t) });
     answers(c, { message_route_asked: true });
     return saved;
+  },
+  // The days between follow-ups, in the user's words ("3 days", "a week apart", "2 days, then 5", "the default"). One
+  // it can't read as whole days from 1 to 14 is refused with what to type, and the question stays open.
+  // It's the user's setting for every event (like the route); the answer names each approved follow-up it moves.
+  followup_gap: (v, c) => {
+    const gap = parseGap(v);
+    const before = approvedDays(c);
+    const saved = config(c, { followup_gap: gap });
+    answers(c, { followup_gap_asked: true });
+    const note = gapNote(c, gap, before, approvedDays(c));
+    // Said back whole: what was saved, and every approved follow-up it moves or drops.
+    return { ...saved, followup_gap: gap ? gapWords(gap) : 'the default', note, say_to_user: note, show: 'Say say_to_user to the user as written.' };
   },
   crm_create_contacts: (v, c) => {
     const t = String(v).toLowerCase();

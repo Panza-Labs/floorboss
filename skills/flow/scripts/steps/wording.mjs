@@ -55,6 +55,7 @@ const HELP_SECTIONS = {
     'followups_mode',
     'crm_log',
     'message_route',
+    'followup_gap',
     'crm_create_contacts',
     'crm_fill_blanks'
   ],
@@ -119,6 +120,7 @@ export const ANSWER_FORMAT = {
   profile: '{"name":"<profile slug>"}',
   sending: '{"channels":["email"]} or "none"',
   followups_mode: 'scheduled | each_round',
+  followup_gap: 'the user\'s words: "3 days", "a week apart", "2 days, then 5" (a gap for each follow-up in turn), or "the default"',
   send_setup: '{"own_email":"…"} then run discovery; or "skip"',
   drafter: '{"name","invoke","type":"skill|agent|instructions","covers":{"channels":[…],"kinds":[…]},"gaps":[…]}'
 };

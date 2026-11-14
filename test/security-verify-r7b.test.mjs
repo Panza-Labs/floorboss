@@ -83,6 +83,8 @@ test('1: text and verdict swapped together before approval are refused, and the 
 test('1: a send needs the ledger\'s critic PASS on that text, or the user\'s approval by name past a FAIL', () => {
   const run = (extra) => {
     const dir = mkdtempSync(join(tmpdir(), 'fb-r7b-'));
+    // The event's dates: the guard reads them (whether the event is over).
+    writeFileSync(join(dir, 'event.json'), JSON.stringify({ slug: 'ev', name: 'Test Expo', time_zone: 'Europe/Amsterdam', start_date: '2026-10-28', end_date: '2026-10-30' }));
     const hash = saveDraftFile(dir, { channel: 'email', to: 'ann@acme.example', subject: 'Hi', body: 'Hello Ann' });
     const L = (e) => appendFileSync(join(dir, 'ledger.jsonl'), JSON.stringify({ at: '2026-10-27T10:00:00Z', ...e }) + '\n');
     L({ type: 'person', who: 'floorboss', id: 'c001', name: 'Ann', email: 'ann@acme.example' });

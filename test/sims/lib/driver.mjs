@@ -76,6 +76,7 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
       if (v === undefined && s.ask.id === 'company_research') v = 'go';
       if (v === undefined && s.ask.id === 'agenda_news') v = 'go';
       if (v === undefined && s.ask.id === 'message_route') v = 'email, email (no other channels)';
+      if (v === undefined && s.ask.id === 'followup_gap') v = 'the default: set by how far off the event is (recommended)';
       if (v === undefined) throw new Error(`The persona has no answer for "${s.ask.id}": ${s.ask.question}`);
       // A simulated run answers only what the flow asks: never out of turn (FLOORBOSS_OUT_OF_TURN is for unit tests).
       const r = cli({ ...H, env: Object.fromEntries(Object.entries(H.env).filter(([k]) => k !== 'FLOORBOSS_OUT_OF_TURN')) }, 'flow', ['answer', ...(slug ? ['--event', slug] : []), '--ask', s.ask.id, '--value-file', file(H, `a-${s.ask.id}.json`, v)]);

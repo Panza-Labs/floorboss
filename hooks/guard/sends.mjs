@@ -3,9 +3,9 @@
 // Sends and staged drafts: the messages floorboss listed to go now, each checked against the approved record,
 // and what a send prompt shows.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { home } from '../../lib/paths.mjs';
-import { verifySend, eventRecord, eventDay, approvalHash } from '../../lib/sendcheck.mjs';
+import { verifySend, eventRecord, eventDay, approvalHash, eventEnded, followupNotToday } from '../../lib/sendcheck.mjs';
 import { contactable } from '../../lib/ledger.mjs';
 import { loadEvent, isMockSlug } from '../../lib/event.mjs';
 import { createHash } from 'node:crypto';
@@ -88,6 +88,17 @@ export function stageRefusal(evDir, item, nowMs = Date.now()) {
   if (kind !== 'confirmation' && (st.replied || st.booked)) return 'they replied or booked';
   if (kind === 'confirmation' && !folded.people[item.id]?.booked) return 'their booking was taken back';
   if (!recent(item.listed_at, nowMs, 30 * 60 * 1000)) return 'it wasn\'t listed in the last 30 minutes: run "outreach stage-list" again';
+  // Nothing is put in the mailbox once the event is over, and a follow-up only on its day (the same rule as a send).
+  if (eventEnded(evDir, nowMs)) return 'the event is over';
+  if (kind === 'message' && Object.keys(st.sent || {}).some((k) => Number(k) > touch)) return 'a later message already went';
+  if (kind === 'message' && touch > 1) {
+    let settings = {};
+    try {
+      settings = loadEvent(basename(evDir)).settings;
+    } catch {}
+    const why = followupNotToday(evDir, settings, eventRecord(evDir).entries, st, { ...item, touch }, nowMs);
+    if (why) return why;
+  }
   return null;
 }
 

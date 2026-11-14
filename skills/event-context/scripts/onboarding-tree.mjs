@@ -70,6 +70,7 @@ const LEVEL_OF = {
   crm_log: 'full',
   crm_create_contacts: 'full',
   message_route: 'full',
+  followup_gap: 'full',
   crm_fill_blanks: 'full',
   followups_mode: 'full',
   app_request_limit: 'full'
@@ -751,6 +752,18 @@ NODES.push(
       `Which channel should each message go on, in order? The usual route is email, then ${s.ev?.app_name || 'the event app'}, then LinkedIn, then email. Anyone you can't reach on a step skips it. You can make it longer, shorter or a different order.`,
     options: () => ['email, app, linkedin, email (recommended)', 'email, email (no other channels)', 'your own order, like "email, linkedin, email"'],
     saves: 'config: route (a list of email, app, linkedin); answers: message_route_asked'
+  },
+  // The days between follow-ups: the lead-time table unless the user says otherwise (any step takes the answer too).
+  {
+    id: 'followup_gap',
+    round: 'sending',
+    phase: 'later',
+    when: (s) => !!s.ans.sending_asked,
+    done: (s) => !!s.ans.followup_gap_asked,
+    ask: () =>
+      'How many days should floorboss leave between follow-ups? By default it goes by how far off the event is: 7 days apart from three weeks out, 4 days from one to three weeks, 2 days in the last week. Say a number of days, or a gap for each follow-up in turn.',
+    options: () => ['the default: set by how far off the event is (recommended)', '3 days between follow-ups', 'a week apart', 'your own, like "2 days, then 5"'],
+    saves: 'config: followup_gap (whole days from 1 to 14: one for every gap, or one per follow-up; null for the default); answers: followup_gap_asked'
   },
   {
     id: 'crm_create_contacts',

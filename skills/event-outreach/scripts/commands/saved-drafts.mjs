@@ -8,6 +8,8 @@ import { readJson } from '../../../../lib/jsonio.mjs';
 import { parseInsights } from '../../../event-context/scripts/context-check.mjs';
 import { readDraft } from '../../../../lib/drafts.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
+import { followupDay } from '../../../../lib/spacing.mjs';
+import { planFor } from '../../../../lib/sendcheck.mjs';
 import { hashOf } from './routes.mjs';
 import { skillsOf, isOut } from './context.mjs';
 
@@ -91,7 +93,12 @@ export function ledgerTouch(c, id, touch) {
     own: drafted
       ? {
           ...(has('drafted_by') ? {} : { drafted_by: 'floorboss' }),
-          ...Object.fromEntries(['structure', 'fact_source', 'brief', 'planned_due', 'drafted_by', 'language'].filter(has).map((k) => [k, drafted[k]]))
+          ...Object.fromEntries(['structure', 'fact_source', 'brief', 'planned_due', 'planned_gap', 'planned_from', 'drafted_by', 'language'].filter(has).map((k) => [k, drafted[k]])),
+          // A day moved since (the message before it was planned again): the replanned entry's plan.
+          ...(() => {
+            const p = planFor(c.entries, id, touch, drafted.hash);
+            return p?.has_plan ? { planned_due: p.planned_due, planned_gap: p.planned_gap, planned_from: p.planned_from } : {};
+          })()
         }
       : {},
     verdict,
@@ -259,3 +266,36 @@ export function jobFor(c, id, touch) {
   if (!job) throw new Error(`${id} touch ${touch} isn't in the current drafting list. Run "todo" first.`);
   return job;
 }
+
+// A follow-up's day from this event's record (lib/spacing.mjs followupDay, the one rule every reader uses): the day the
+// message before it went, the plan its saved draft holds (none yet: its gap after that send alone), and the plan of
+// the message before it (sent on its own planned day, the plan stands). prevSent: a day to count from instead of a
+// real send (the gap answer projects a follow-up from the day the one before it is due).
+export function followupDayOf(c, id, t, d = savedDraft(c, id, t), prevSent = undefined) {
+  const st = c.state[id] || {};
+  const b = touchBefore(st, t);
+  const p = b > 1 ? savedDraft(c, id, b) : null;
+  return followupDay(c.settings, c.event, {
+    prevSent: prevSent !== undefined ? prevSent : st.sent?.[b] || null,
+    touch: t,
+    planned_due: d?.planned_due,
+    planned_gap: d?.planned_gap,
+    planned_from: d?.planned_from,
+    prev_planned_due: p?.planned_due,
+    prev_planned_gap: p?.planned_gap,
+    // Today in the event's time (past its last day, nothing goes), and the latest send to this person at any step.
+    today: c.today,
+    lastSent: latestSend(st),
+    // A later step already went (recorded by hand or found in the mailbox): this one is passed over.
+    laterSent: laterSent(st, t)
+  });
+}
+// The latest day any message to this person was recorded as sent (any step, any channel), or null. Only plain dates
+// count: a malformed one is left out of the search (its own step still fails closed at the guard).
+export const latestSend = (st) =>
+  Object.values(st?.sent || {})
+    .filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort()
+    .pop() || null;
+// Whether a step after `t` was recorded as sent.
+export const laterSent = (st, t) => Object.keys(st?.sent || {}).some((k) => Number(k) > t);

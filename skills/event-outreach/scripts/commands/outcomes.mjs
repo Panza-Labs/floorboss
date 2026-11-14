@@ -7,7 +7,6 @@ import { allowedPath } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { todayKeyIn, addDays } from '../../../../lib/tz.mjs';
-import { modeFor, daysUntilEvent, touchesThatFit, nextDue } from '../leadtime.mjs';
 import { awayUntil } from '../../../../lib/ledger.mjs';
 import { parseStatus, planFromStatus, bookingConflicts } from '../status.mjs';
 import { planRecord } from '../record.mjs';
@@ -17,7 +16,7 @@ import { loadConfig } from '../../../../lib/config.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { kindAt, routeOf } from './routes.mjs';
 import { ctxOf, led, sinceOf, idList, crmIdOf, awayNote, isOut, colleagueTold, sendingOn } from './context.mjs';
-import { readTodo, savedDraft, criticFails } from './saved-drafts.mjs';
+import { readTodo, savedDraft, criticFails, followupDayOf } from './saved-drafts.mjs';
 
 export function status(opts) {
   need(opts, 'event');
@@ -215,7 +214,9 @@ export function summary(opts) {
   const listAway = (id) => {
     if (!away.some((a) => a.id === id)) away.push({ id, name: c.byId[id]?.name, until: awayOf(id), note: awayNote(awayOf(id)) });
   };
-  for (const [id, st] of Object.entries(c.state)) {
+  // Once the event is over (today in its time past its last day), nothing is due or waiting to go.
+  const over = c.today > c.event.end_date;
+  for (const [id, st] of Object.entries(over ? {} : c.state)) {
     const sent = Object.keys(st.sent || {})
       .map(Number)
       .sort((a, b) => a - b);
@@ -223,21 +224,21 @@ export function summary(opts) {
     // Coordinate notes go to a colleague once; they have no follow-ups.
     if ((c.short.coordinate || []).includes(id)) continue;
     const last = sent[sent.length - 1];
-    const sentKey = st.sent[last];
-    const mode = modeFor(daysUntilEvent(c.event, new Date(`${sentKey}T12:00:00Z`)));
-    const d = nextDue(sentKey, c.event, mode);
     let upcoming = last + 1;
     while (st.touches?.[upcoming]?.skipped) upcoming++;
     const steps = routeOf(c, id);
     const already = isOut(st.touches?.[upcoming]?.status);
-    const fits = d && !already && upcoming <= touchesThatFit(sentKey, c.event, mode, steps ? steps.length : c.settings.touches);
+    // Its day by the one rule todo, send-list and the guard use (lib/spacing.mjs followupDay), within the sequence.
+    const d = upcoming <= (steps ? steps.length : c.settings.touches) ? followupDayOf(c, id, upcoming).day : null;
+    const fits = d && !already;
     if ((fits || already) && awayOf(id)) listAway(id);
     if (fits) due.push({ id, name: c.byId[id]?.name, next_touch: upcoming, due: d });
     else if (already) waiting.push({ id, name: c.byId[id]?.name, touch: upcoming });
   }
-  // Anything approved or in the outbox and not yet sent is waiting to be sent, first messages included.
+  // Anything approved or in the outbox and not yet sent is waiting to be sent, first messages included; once the
+  // event is over (today in its time past its last day) nothing is (follow-ups have no day then either).
   const blockedNow = [];
-  for (const [id, st] of Object.entries(c.state)) {
+  for (const [id, st] of Object.entries(over ? {} : c.state)) {
     for (const [t, tt] of Object.entries(st.touches || {})) {
       if (!isOut(tt.status) || st.sent?.[t]) continue;
       // What the message is comes from its own draft, not from today's lists: a cold email to someone now
@@ -277,7 +278,9 @@ export function summary(opts) {
     do_not_send: blockedNow.length
       ? { note: "Approved earlier, but now blocked: don't send these. They're out of the outbox; delete any copy already in your mailbox.", people: blockedNow }
       : undefined,
-    note: due.length
+    note: over
+      ? `${c.event.name} is over: nothing more is sent for it, and no follow-up is due.`
+      : due.length
       ? `Run /floorboss:start again on or after ${due[0].due}.`
       : sendingOn(c.settings)
         ? 'floorboss sends the approved messages on the channels you turned on (step 6c); anything on another channel is in the outbox for you to send and tick.'
