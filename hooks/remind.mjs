@@ -7,6 +7,7 @@
 // offers first messages to people already written to. It only adds context: it never blocks a prompt, and
 // any failure is silent.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { nowMs } from '../lib/clock.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { home } from '../lib/paths.mjs';
@@ -89,7 +90,7 @@ if (isMain(import.meta.url)) {
   process.stdin.on('end', () => {
     try {
       const input = JSON.parse(raw || '{}');
-      const text = reminder(input.prompt, liveEvents(join(home(), 'events')));
+      const text = reminder(input.prompt, liveEvents(join(home(), 'events'), nowMs()));
       if (text) {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }), () => process.exit(0));
         return;

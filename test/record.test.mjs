@@ -130,7 +130,7 @@ test('remind hook: an outreach report during a live event reminds Claude to reco
   assert.deepEqual(liveEvents(join(H.HOME, 'events'), now).map((e) => e.slug), [H.slug]);
   assert.deepEqual(liveEvents(join(H.HOME, 'events'), Date.parse('2026-12-01T00:00:00Z')), [], 'two weeks after the event');
   // As a hook: JSON context on stdout, exit 0, and silence on junk input.
-  const run = (input) => spawnSync('node', [join(ROOT, 'hooks/remind.mjs')], { input, env: { ...process.env, FLOORBOSS_HOME: H.HOME }, encoding: 'utf8' });
+  const run = (input) => spawnSync('node', [join(ROOT, 'hooks/remind.mjs')], { input, env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_TEST: '1', FLOORBOSS_NOW: NOW }, encoding: 'utf8' });
   const out = run(JSON.stringify({ prompt: 'tomas booked monday' }));
   assert.equal(out.status, 0);
   assert.match(JSON.parse(out.stdout).hookSpecificOutput.additionalContext, /Test Expo/);
