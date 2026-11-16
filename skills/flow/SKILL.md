@@ -39,6 +39,20 @@ The answer has `step`, `why` (plain words, say it to the user when it helps), an
 `tell_user`, on any step: something the user must hear now (for example drafts that still fail floorboss's
 checks after three tries). Say it in one or two plain lines before doing the step.
 
+`unattended_summary`: what floorboss did on its own since the user last looked (`tell_user` holds it). Show it
+whole, then ask its question; only the user's own "seen" goes on. When it lists a draft as "may or may not be in your
+drafts folder" or "tried and failed", and the user says it isn't there (they looked), run the event-outreach script's
+`draft-missing` with `--event` (the event's slug, in brackets after its name on that line), `--id` (the person's id,
+after their name), `--touch` (the step: the follow-up's number plus one, so follow-up 1 is `--touch 2`), and
+`--said` with their own words.
+Claude Code then asks the user to confirm, naming the person and the follow-up; once they allow it, that step can go
+in again. Never run it without their word that they looked, and never answer that prompt for them.
+
+`unattended_authorise`: one question, yes or "not now". On their yes, the answer's result has `run_this`: run that
+command as it is, with nothing before or after it. Claude Code then shows the user every follow-up in full, and only
+their allow at that prompt authorises anything. Never run it on your own, and never answer the prompt's question for
+them.
+
 `say_to_user`, in an answer: what a gate saved (by ID and name) or, with `pending: true`, the reading it is holding
 for the user's yes. Show it to the user word for word every time, before anything else. A pending reading saves
 nothing: wait for the user's own reply and save it with `flow answer` like any answer ("yes", "ok" or "sure" on its own

@@ -110,7 +110,9 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       followup_note: dueNote(j.followup_note || d.followup_note, due, c, j),
       slots: (j.slot_ids || d.slot_ids || []).map((id) => ({ id, label: labelOf(c, id) })),
       pending: !ready,
-      staged: c.state[j.id]?.touches?.[j.touch]?.staged ? true : undefined,
+      staged: c.state[j.id]?.touches?.[j.touch]?.staged || c.state[j.id]?.touches?.[j.touch]?.stage_released ? true : undefined,
+      // Put in the drafts by an unattended run (the guard's own record): the card says so.
+      staged_unattended: c.state[j.id]?.touches?.[j.touch]?.stage_released?.unattended || c.state[j.id]?.touches?.[j.touch]?.staged?.unattended ? true : undefined,
       // Still failing floorboss's own checks after three rewrites: said on the card, never passed on in silence.
       checks_stuck: j.kind === 'message' && d.checks?.length && (d.attempts || 0) >= 3 ? d.checks : undefined
     });

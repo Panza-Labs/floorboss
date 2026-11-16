@@ -10,6 +10,13 @@ export const PROTOCOL = '2025-06-18';
 
 // Thrown by a tool on bad input; becomes an isError result, not a JSON-RPC error.
 export class BadInput extends Error {}
+// A tool's whole result as it is (content blocks, structuredContent, isError), for a stand-in that answers the way a
+// real connector might when something is off: an error text with no isError, text and structured data that disagree.
+export class RawResult {
+  constructor(result) {
+    this.result = result;
+  }
+}
 
 export function loadData() {
   const path = process.env.STANDIN_DATA;
@@ -33,6 +40,13 @@ export function saveDraft(draft) {
   const all = loadDrafts().filter((d) => d.id !== draft.id);
   all.push(draft);
   writeFileSync(p, JSON.stringify(all, null, 2) + '\n');
+}
+
+// The same, removing one draft by its id.
+export function deleteDraft(id) {
+  const p = draftsPath();
+  if (!p) return;
+  writeFileSync(p, JSON.stringify(loadDrafts().filter((d) => d.id !== id), null, 2) + '\n');
 }
 
 function logCall(server, tool, args, ok) {
@@ -148,7 +162,8 @@ export function serve(name, tools, { version = '0.1.0' } = {}) {
       }
       try {
         const payload = tool.run(args);
-        logCall(name, params.name, args, true);
+        logCall(name, params.name, args, payload instanceof RawResult ? payload.result?.isError !== true : true);
+        if (payload instanceof RawResult) return payload.result;
         return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
       } catch (err) {
         logCall(name, params.name, args, false);

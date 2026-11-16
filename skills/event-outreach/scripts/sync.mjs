@@ -18,10 +18,44 @@ const subj = (v) =>
     .trim()
     .slice(0, 80);
 
+const subjectKey = (s) =>
+  String(s ?? '')
+    .replace(/^\s*((re|fwd?|aw|sv|wg)\s*:\s*)+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+const words = (s) =>
+  String(s ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+// The text of a sent message and a draft's are the same message: the start of one is in the other (a signature, a
+// quoted thread or a small edit at the end aside).
+function sameText(a, b) {
+  const x = words(a),
+    y = words(b);
+  const k = Math.min(120, x.length, y.length);
+  return k >= 20 && (y.includes(x.slice(0, k)) || x.includes(y.slice(0, k)));
+}
+// A draft floorboss put in the user's drafts folder for this step (staged, or let through by an unattended run) that this
+// sent message is: sent after the draft went in, not in another conversation than the draft's, and with the draft's
+// subject, its text, or the draft's own message id.
+function draftSent(d, x, t) {
+  if (!Number.isFinite(d.at) || t < d.at - 5 * 60000) return false;
+  if (d.thread && x.thread && String(d.thread) !== String(x.thread)) return false;
+  if (d.message_id && String(x.ext) === String(d.message_id)) return true;
+  if (d.subject && x.subject && subjectKey(d.subject) && subjectKey(d.subject) === subjectKey(x.subject)) return true;
+  return !!(d.body && x.text && sameText(d.body, x.text));
+}
+
 // people: [{id, items}] from validateSync. state: the folded log. since: id → ISO (when floorboss planned
-// them). source: 'mailbox' | 'crm'. zone: the event's time zone (days are its local days).
+// them). source: 'mailbox' | 'crm'. zone: the event's time zone (days are its local days). drafts: id → the drafts
+// floorboss put in their drafts folder that aren't recorded as sent ([{ touch, at (ms), thread, message_id, subject,
+// body }]): a sent message that is one of them is that step, before any same-send rule below. filed: id → the message
+// ids floorboss already has for each step ([{ touch, message_id }]): a mailbox message with one of those ids is never
+// filed as another step's draft sent (a follow-up after it would go in reply to the wrong message).
 // Returns { entries, lines, asks, ignored }.
-export function planSync(people, { state, since, source, now, byId, zone = 'UTC' }) {
+export function planSync(people, { state, since, source, now, byId, zone = 'UTC', drafts = {}, filed = {} }) {
   const entries = [],
     lines = [],
     asks = [];
@@ -42,6 +76,8 @@ export function planSync(people, { state, since, source, now, byId, zone = 'UTC'
       .map(([t, d]) => ({ t: Number(t), d }))
       .sort((a, b) => a.t - b.t);
     let touch = Math.max(0, ...Object.keys(st.sent || {}).map(Number));
+    // Drafts in their drafts folder, each matched once, for a step not recorded as sent.
+    const open = (Array.isArray(drafts[p.id]) ? drafts[p.id] : []).filter((d) => Number.isInteger(d?.touch) && d.touch >= 1 && !st.sent?.[d.touch]).sort((a, b) => a.touch - b.touch);
     let replied = !!st.replied;
     // The meeting booked with them, as this read goes (a cancellation frees it).
     let booked = st.booked ? { booked: st.booked, booked_blocks: st.booked_blocks || null, booked_at: st.booked_at || null } : null;
@@ -92,6 +128,28 @@ export function planSync(people, { state, since, source, now, byId, zone = 'UTC'
         continue;
       }
       if (x.kind === 'message' && x.direction === 'out') {
+        // The user sent a draft floorboss put in their drafts folder: it is that draft's step, whenever it went. Ahead of
+        // the same-send rule below, which would file a follow-up sent within 36 hours of the message before it as that
+        // message, so the step after it would never come due.
+        const d = open.find((y) => draftSent(y, x, t));
+        // A mailbox id floorboss already has for another step is that step's own message, never this draft's send:
+        // filed as it, a draft of the step after it would reply to the wrong message. Seen, nothing more.
+        const owner = d && source === 'mailbox' ? (Array.isArray(filed[p.id]) ? filed[p.id] : []).find((f) => f?.message_id != null && String(f.message_id) === String(x.ext) && f.touch !== d.touch) : null;
+        if (owner) {
+          entries.push({ type: 'synced', id: p.id, ext, source });
+          lines.push(`${who}: a message in your mailbox has the id floorboss already has for message ${owner.touch}, so it isn't counted as message ${d.touch}`);
+          continue;
+        }
+        if (d) {
+          open.splice(open.indexOf(d), 1);
+          touch = Math.max(touch, d.touch);
+          // The mailbox's own ids for the message that went (a follow-up after it goes in reply to it).
+          const ids = source === 'mailbox' ? { message_id: String(x.ext).slice(0, 200), thread_id: String(x.thread || d.thread || '').slice(0, 200) || undefined } : {};
+          entries.push({ type: 'sent', id: p.id, touch: d.touch, date: day(x.at), source, ext: `${ext}#t${d.touch}`, ...ids, ...(x.subject ? { subject: subj(x.subject) } : {}) });
+          sentDays.push(t);
+          lines.push(`sent to ${who} on ${day(x.at)} from the draft floorboss put in your drafts folder, found in your ${source === 'crm' ? 'CRM' : 'mailbox'} (counted as message ${d.touch})`);
+          continue;
+        }
         // A send floorboss already has: the same day, or a send the user reported on or after this day (a late
         // report dated the day they told Claude). The mailbox's day is the real one, so that touch takes it.
         const sameDay = sentDays.some((d) => Math.abs(d - t) < 36 * 3600000);

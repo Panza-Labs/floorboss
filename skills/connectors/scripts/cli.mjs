@@ -28,6 +28,7 @@ import {
   validateEnriched,
   TEST_TASK
 } from './tasks.mjs';
+import { unattendedOn, unattendedStatus } from './unattended.mjs';
 import { movedNow } from '../../../lib/clock.mjs';
 
 const now = () => (movedNow() ? new Date(movedNow()) : new Date()).toISOString();
@@ -369,4 +370,4 @@ function check(opts) {
   return screenTool(opts.task, opts.tool);
 }
 
-run({ 'test-allow': testAllow, tasks, screen, validate, 'save-recipe': saveRecipe, forget, status, recipe, check });
+run({ 'test-allow': testAllow, tasks, screen, validate, 'save-recipe': saveRecipe, forget, status, recipe, check, 'unattended-on': unattendedOn, 'unattended-status': unattendedStatus });

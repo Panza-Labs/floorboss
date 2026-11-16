@@ -27,7 +27,7 @@ export function floorbossScriptCall(command) {
 }
 // A command's words exactly as the shell reads them: "save-recipe" and sa''ve-recipe are both save-recipe, and a
 // backslash in double quotes stands only before $ ` " \ or a line break (which it removes).
-function shellWords(command) {
+export function shellWords(command) {
   const words = [];
   let word = null,
     q = null;
@@ -233,23 +233,54 @@ function readOnlyLook(command) {
     `launchctl list \\| grep (?:-i )?${lit(LABEL_PREFIX)}?(?:[a-z-]{0,30})`,
     `(?:cat|ls|ls -l|ls -la|ls -al|plutil -lint|plutil -p) ${plist}`,
     `(?:ls|ls -l|ls -la|ls -al) ${folder}/?`,
-    `(?:cat|head|tail|tail -f|(?:head|tail) -n \\d{1,4}|wc -l) ${folder}/(?:log\\.jsonl|brief-state\\.json|brief-installed\\.json|brief-told|off)`
+    `(?:cat|head|tail|tail -f|(?:head|tail) -n \\d{1,4}|wc -l) ${folder}/(?:log\\.jsonl|brief-state\\.json|brief-installed\\.json|followups-installed\\.json|brief-told|off|summary-\\d{4}-\\d{2}-\\d{2}\\.md)`
   ].some((re) => new RegExp(`^${re}$`).test(cmd));
 }
 
 // The names, read from a text with no model of the shell at all. Each test is one pass over the text.
-// launchctl: the word, and anywhere after it one of the words that load, enable or start a job, or that run a
-// command through it (asuser, bsexec). It does not ask whether that word is launchctl's own subcommand, so
-// "man launchctl | grep bootstrap" and a sentence that holds both words are refused too: the cost of not guessing.
+// launchctl: the word, and anywhere after it one of the words that load, enable or start a job, that run a command
+// through it (asuser, bsexec), or that set what every job started later is given (setenv, unsetenv, config: a job's
+// FLOORBOSS_HOME, FLOORBOSS_TEST or NODE_OPTIONS set this way would reach the follow-up job). It does not ask whether
+// that word is launchctl's own subcommand, so "man launchctl | grep bootstrap" and a sentence that holds both words
+// are refused too: the cost of not guessing.
 const LAUNCHCTL = /\blaunchctl\b/i;
-const STARTS = /\b(bootstrap|load|enable|kickstart|start|submit|asuser|bsexec)\b/i;
+const STARTS = /\b(bootstrap|load|enable|kickstart|start|submit|asuser|bsexec|setenv|unsetenv|config)\b/i;
 const startsJob = (t) => {
   const at = t.search(LAUNCHCTL);
   return at >= 0 && STARTS.test(t.slice(at));
 };
 const INSTALLER = /unattended(\.mjs|\s*[*?[{])/i;
+// The unattended run's token, which only the launcher hands to the Claude Code run it starts, and the launcher's
+// follow-up drafts mode, which only macOS's scheduler starts: no session names either.
+const TOKEN_NAME = /FLOORBOSS_UNATTENDED/i;
+const LAUNCH_FOLLOWUPS = /(?<![\w.-])scheduled(?:\.mjs)?\W+followups(?![\w-])/i;
+const NOT_THE_TOKEN = "this names FLOORBOSS_UNATTENDED, the token floorboss's scheduler gives the one run it starts: no session sets, reads or passes it.";
+const NOT_THE_LAUNCHER = "this starts floorboss's follow-up drafts launcher (scheduled.mjs followups), which only macOS's scheduler starts, from the job you install yourself in your own terminal.";
 const LABEL = LABEL_PREFIX.toLowerCase();
 const FOLDER = /(?<![\w.-])unattended(?![\w.-])/i;
+// The plugin's own folder, as a whole, is never floorboss's data folder: a copy of the plugin kept in a folder that
+// happens to be called "unattended" doesn't make every call to its scripts name that folder. Only the folder's own
+// path is set aside; anything written after it ("/../.floorboss/unattended") is read as it is.
+const ROOT_FORMS = () => [...new Set([PLUGIN_ROOT, realPath(PLUGIN_ROOT)].flatMap((r) => [r, normPath(r)]))].filter((r) => r.length > 1).sort((a, b) => b.length - a.length);
+// A text with its paths as the shell would reach them, for the name rules: ~ (a word's start) and $HOME or ${HOME} as
+// your home folder, // and /./ as one /, and /private/tmp as /tmp (one folder on macOS). Still a reading of the text,
+// not of the shell: a path built another way stays unseen.
+export function normPath(text) {
+  const h = homedir();
+  let s = String(text)
+    .replace(/\$\{HOME\}|\$HOME(?![A-Za-z0-9_])/g, h)
+    .replace(/(^|[\s=:'"(<>|;&])~(?=[\\/]|$|[\s'")<>|;&])/g, (m, pre) => `${pre}${h}`);
+  for (let i = 0; i < 10; i++) {
+    const next = s.replace(/\/{2,}/g, '/').replace(/\/\.(?=\/|$|[\s'")<>|;&])/g, '');
+    if (next === s) break;
+    s = next;
+  }
+  return s.replace(/(^|[^\w.-])\/private\/tmp(?=\/|$|[^\w.-])/g, '$1/tmp');
+}
+const namesFolder = (texts) => {
+  const roots = ROOT_FORMS();
+  return texts.some((t) => FOLDER.test(roots.reduce((x, r) => x.split(r).join('<plugin>'), t)));
+};
 // The text as written, and a few more ways the shell could join it: quotes, $'…' and $"…", backticks and
 // backslashes taken out; the braces and commas of {a,b} taken out, or read as spaces; and a written-out line
 // break or tab (the two characters "\n" in a printf) read as a space.
@@ -270,20 +301,57 @@ export function scheduleRefusal(command) {
   const cmd = String(command || '');
   if (!cmd) return null;
   if (readOnlyLook(cmd)) return null;
-  const texts = readings(cmd);
+  // Each reading as written and with its paths as the shell reaches them (normPath).
+  const texts = [...new Set(readings(cmd).flatMap((t) => [t, normPath(t)]))];
   const has = (re) => texts.some((t) => re.test(t));
   if (has(INSTALLER) && !unattendedCall(cmd))
     return `this names floorboss's unattended.mjs with something other than "off" or "status". Installing, removing or switching on what floorboss runs on its own ${YOURS}`;
+  if (has(TOKEN_NAME)) return NOT_THE_TOKEN;
+  if (has(LAUNCH_FOLLOWUPS)) return NOT_THE_LAUNCHER;
   if (texts.some((t) => t.toLowerCase().includes(LABEL))) return `this names floorboss's scheduled job (${LABEL_PREFIX}…) or its launchd file. Installing, loading or changing it ${YOURS}`;
-  if (texts.some(startsJob)) return `this names launchctl with a word that loads or starts a launchd job, and with floorboss installed that ${YOURS}`;
-  const inData = [home(), realPath(home())].some((h) => texts.some((t) => t.includes(h)) || process.cwd() === h || process.cwd().startsWith(h + sep));
+  if (texts.some(startsJob)) return `this names launchctl with a word that loads or starts a launchd job, or sets what the jobs it starts are given, and with floorboss installed that ${YOURS}`;
+  const inData = [...new Set([home(), realPath(home())].flatMap((h) => [h, normPath(h)]))].some((h) => texts.some((t) => t.includes(h)) || process.cwd() === h || process.cwd().startsWith(h + sep));
   const mine = has(/floorboss/i) || inData;
-  if (has(FOLDER) && mine)
+  if (namesFolder(texts) && mine)
     return `this names floorboss's unattended folder (its off switch, log and records). Only floorboss's own scripts write there; switching unattended runs back on ${YOURS}`;
   // today.html is read freely (open, cat); written, moved or removed only by floorboss's own scripts.
   if (mine && has(/today\.html/i) && has(/>|(?<![\w.-])(rm|mv|cp|ln|tee|dd|sed|truncate|unlink|mkfifo|touch|chmod|install|rsync)(?![\w.-])/i))
     return `this writes, moves or removes floorboss's today.html, which only its own scripts write. ${YOURS.replace(/^is done/, 'What runs on its own is set up')}`;
+  // floorboss's guard hooks, run from a shell: Claude Code runs them itself, and one run by hand (a PostToolUse input
+  // made up for a call that never ran, or that the user declined) could record what only a call they allowed records
+  // (a follow-up let go in again, a send's ids, an opt-in, an authorisation). The plugin's hooks folder named by its
+  // path (or ${CLAUDE_PLUGIN_ROOT}); node with a file named guard.mjs and a hook's word (pre, post, start, failure,
+  // end, or an event's name), wherever that file is; or, from inside the plugin folder, node with the guard named.
+  if (runsHook(texts)) return "this runs floorboss's own guard hook from a shell. Claude Code runs floorboss's hooks itself, after each call; run by hand, a hook could record what only a call you allowed may record.";
+  // A link to the plugin's folder (or into it): the guard run through it would be the plugin's under another path.
+  if (linksRoot(texts)) return "this makes a link to floorboss's plugin folder. Claude Code runs floorboss's hooks itself, from the plugin folder; a hook run by hand through a link could record what only a call you allowed may record.";
+  // floorboss's ledger and its release marks: written only by its own scripts and its guard. (Also by a wildcard on the
+  // name's end: ledger.json?, ledger*, release*.)
+  if (mine && has(/ledger(?:\.jsonl|\.?(?:j(?:s(?:o(?:n)?)?)?)?\s*[*?[{])|(?<![\w.-])released[\\/]|(?<![\w.-])released?\s*[*?[{]/i) && has(/>|(?<![\w.-])(rm|mv|cp|ln|tee|dd|sed|awk|perl|python3?|ruby|node|truncate|unlink|mkfifo|touch|chmod|install|rsync)(?![\w.-])/i))
+    return "this writes, moves or removes floorboss's ledger or its release marks, which only floorboss's own scripts and its guard write. Ask floorboss to record what happened instead (outreach record).";
   return null;
+}
+const litRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const RUNTIME = /(?<![\w.-])(node|nodejs|bun|deno)(?![\w.-])/i;
+// A file named guard.mjs (or that name with a wildcard on its end: guard*, guard.m?), and a word a hook is run with
+// (hooks/hooks.json's pre, post, start; failure, end) or a hook event's name, in the same command.
+const GUARD_FILE = /(?<![\w-])guard(?:\.mjs(?![\w.-])|\.?(?:m(?:j(?:s)?)?)?\s*[*?[])/i;
+const HOOK_WORD = /(?<![\w-])(pre|post|start|failure|end)(?![\w-])|(?:pre|post)tooluse(?:failure)?|session(?:start|end)/i;
+function runsHook(texts) {
+  const roots = [...ROOT_FORMS().map(litRe), '\\$\\{?CLAUDE_PLUGIN_ROOT\\}?'];
+  const named = new RegExp(`(?:${roots.join('|')})[\\\\/]+(?:\\.[\\\\/]+)*hooks(?![\\w-])`, 'i');
+  if (texts.some((t) => named.test(t))) return true;
+  // In any folder: node on a guard.mjs with a hook's word (a copy or a link of the plugin, a path built from a variable).
+  if (texts.some((t) => RUNTIME.test(t) && GUARD_FILE.test(t) && HOOK_WORD.test(t))) return true;
+  const inRoot = ROOT_FORMS().some((r) => process.cwd() === r || process.cwd().startsWith(r + sep));
+  return inRoot && texts.some((t) => RUNTIME.test(t) && /(?<![\w-])guard(?:\.mjs(?![\w.-])|[\\/])/i.test(t));
+}
+// ln -s (or --symbolic) with the plugin's folder, or a path inside it, named (its path or ${CLAUDE_PLUGIN_ROOT}).
+function linksRoot(texts) {
+  const roots = [...ROOT_FORMS().map(litRe), '\\$\\{?CLAUDE_PLUGIN_ROOT\\}?'];
+  const named = new RegExp(`(?:${roots.join('|')})(?![\\w.-])`, 'i');
+  const link = /(?<![\w.-])ln(?![\w.-])[^|;&\n]*?\s(?:-[A-Za-z]*s[A-Za-z]*|--symbolic)(?![\w-])/;
+  return texts.some((t) => link.test(t) && named.test(t));
 }
 
 // ---------- the same names in a connected tool's input (MCP) ----------
@@ -383,13 +451,15 @@ export function mcpScheduleRefusal(tool, input, pathRefusal) {
       }
     }
     if (texts.some((t) => t.toLowerCase().includes(LABEL))) return `this names floorboss's scheduled job (${LABEL_PREFIX}…) or its launchd file. Installing, loading or changing it ${YOURS}`;
-    if (texts.some(startsJob)) return `this names launchctl with a word that loads or starts a launchd job, and with floorboss installed that ${YOURS}`;
+    if (texts.some(startsJob)) return `this names launchctl with a word that loads or starts a launchd job, or sets what the jobs it starts are given, and with floorboss installed that ${YOURS}`;
+    if (has(TOKEN_NAME)) return NOT_THE_TOKEN;
+    if (has(LAUNCH_FOLLOWUPS)) return NOT_THE_LAUNCHER;
     // floorboss's unattended folder and today.html: named as a path into its data folder, or beside a word that
     // writes, moves or removes in a text that names floorboss.
     const homes = [home(), realPath(home())].map((h) => h.toLowerCase());
     const inData = texts.some((t) => homes.some((h) => t.toLowerCase().includes(h))) || has(/\.floorboss(?![\w-])/i);
     const acts = has(/>|(?<![\w.-])(rm|mv|cp|ln|tee|dd|sed|truncate|unlink|rmdir|mkfifo|touch|chmod|chown|install|rsync|write|delete|remove|move|rename|overwrite)(?![\w.-])/i);
-    if ((has(FOLDER) || has(/today\.html/i)) && (inData || (acts && has(/floorboss/i))))
+    if ((namesFolder(texts) || has(/today\.html/i)) && (inData || (acts && has(/floorboss/i))))
       return `this names floorboss's unattended folder or today.html (its off switch, log, records and page), which only floorboss's own scripts write. Switching unattended runs back on ${YOURS}`;
     // At most a second on the paths: a tree planted 480 folders deep, or a chain of links, can make each one slow.
     const started = Date.now();

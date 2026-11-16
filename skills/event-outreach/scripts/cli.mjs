@@ -14,6 +14,7 @@ import { logList, crmLogged, openLogWindow, crmLogResults, contactList, crmRecor
 import { taskList, tasksCreated, taskStatus } from './commands/tasks.mjs';
 import { agendaDataCmd, agendaNews, agendaSave, agendaFacts, calendarBookings } from './commands/calendar.mjs';
 import { rateSet, rate, voiceSave } from './commands/ratings.mjs';
+import { authoriseUnattended, crmJudge, draftMissing } from './commands/unattended.mjs';
 export { blockReason, sendingOn } from './commands/context.mjs';
 
 run({
@@ -53,6 +54,9 @@ run({
   open: openOutbox,
   redraft,
   'stage-list': stageList,
+  'authorise-unattended': authoriseUnattended,
+  'crm-judge': crmJudge,
+  'draft-missing': draftMissing,
   staged,
   'batch-check': batchCheck,
   status,

@@ -257,12 +257,13 @@ test('N5: calls at the same moment put one draft per person per step into the dr
     approveRounds(H);
     const sl = cli(H, 'event-outreach', ['stage-list', '--event', H.slug], NOW);
     const [it] = JSON.parse(readFileSync(sl.file, 'utf8'));
-    const input = JSON.stringify({ tool_name: 'mcp__gmail__create_draft', tool_input: { to: it.to, subject: it.subject, body: it.body }, session_id: 's1' });
-    const one = () =>
+    // (Each call with its own tool_use_id, as Claude Code gives it: a staged draft call with none is refused.)
+    const input = (n) => JSON.stringify({ tool_name: 'mcp__gmail__create_draft', tool_input: { to: it.to, subject: it.subject, body: it.body }, session_id: 's1', tool_use_id: `toolu_n5_${rep}_${n}` });
+    const one = (_, n) =>
       new Promise((res) => {
         const p = spawn('node', [join(ROOT, 'hooks/guard.mjs')], { env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: NOW } });
         p.on('close', (code) => res(code));
-        p.stdin.end(input);
+        p.stdin.end(input(n));
       });
     const codes = await Promise.all(Array.from({ length: 10 }, one));
     assert.equal(codes.filter((c) => c === 0).length, 1, `rep ${rep}: ${codes.join(',')}`);

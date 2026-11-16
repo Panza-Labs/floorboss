@@ -21,7 +21,14 @@ process.env.FLOORBOSS_SAVED_BY = 'drafter';
 
 const RECIPE = { server: 'gmail', tool: 'send_email', args: { to: '{to}', subject: '{subject}', body: '{body}' }, reading: 'x', tool_hash: 'a'.repeat(64), test_draft: { draft_id: 't1', user_confirmed: true } };
 const hook = (H, input, { now = NOW, env = {} } = {}) => spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify(input), env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now, ...env }, encoding: 'utf8' });
-const guard = (H, tool_name, tool_input, opts) => hook(H, { tool_name, tool_input, session_id: opts?.session }, opts);
+// Claude Code gives each call its own id (tool_use_id), and the guard refuses a staged draft call that comes without
+// one (fix round 4, R2-N2): here a draft call's id is made from its tool and input, so its post hook is the same call.
+const draftCallId = (tool_name, tool_input) => {
+  let h = 2166136261;
+  for (const ch of `${tool_name}${JSON.stringify(tool_input)}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return /draft/i.test(String(tool_name)) ? { tool_use_id: `toolu_draft_${h.toString(16)}` } : {};
+};
+const guard = (H, tool_name, tool_input, opts) => hook(H, { tool_name, tool_input, session_id: opts?.session, ...draftCallId(tool_name, tool_input) }, opts);
 const file = (H, data) => { const f = join(H.dir, `f${Math.random().toString(36).slice(2)}.json`); writeFileSync(f, JSON.stringify(data)); return f; };
 const lock = (H, o = {}) => writeFileSync(join(H.HOME, 'active.json'), JSON.stringify({ at: new Date().toISOString(), ...o }));
 const RUN = { active: true, until: '2026-10-30T12:00:00.000Z' };
@@ -36,11 +43,8 @@ test('commands: no unscoped Read, Write, Edit, Grep or WebFetch; writes are scop
     const fm = readFileSync(join(ROOT, 'commands', f), 'utf8').split('---')[1];
     const tools = JSON.parse(/allowed-tools: (\[.*\])/.exec(fm)[1]);
     for (const t of ['Read', 'Write', 'Edit', 'Grep', 'WebFetch', 'NotebookEdit']) assert.ok(!tools.includes(t), `${f} pre-approves bare ${t}`);
-    // unattended.md pre-approves two exact script calls (off, status) and nothing else: no write at all. Exempt by name.
-    if (f === 'unattended.md') {
-      assert.deepEqual(tools, ['Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" off)', 'Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" status)']);
-      continue;
-    }
+    // unattended.md never pre-approves installing, removing or switching back on what runs on its own.
+    if (f === 'unattended.md') for (const t of tools) assert.doesNotMatch(t, /install|uninstall|unattended\.mjs" on/, t);
     assert.ok(tools.includes('Write(~/.floorboss/**)') && tools.includes('Edit(~/.floorboss/**)'), `${f}: writes scoped to the data folder`);
     assert.ok(tools.every((t) => !/^(Write|Edit)\(/.test(t) || /^(Write|Edit)\(~\/\.floorboss\/\*\*\)$/.test(t)), `${f}: no other write scope`);
   }

@@ -204,6 +204,44 @@ The first public version.
   folded at 75 bytes, as the calendar format asks. For ordinary input the page and the short version are byte for
   byte what they were; the calendar file differs only by that folding.
 
+### Unattended follow-up drafts
+- Follow-ups you approved and authorised can go into your mailbox's drafts folder on their day while you are away,
+  with no prompt (macOS only for now; Linux and Windows are planned). Nothing is sent: you press Send. A first
+  message never goes in on its own.
+- Turning it on is three steps, each yours: `/floorboss:unattended on` asks you to type a sentence; Claude Code asks
+  you to allow it, naming the event and its last day; and `node scripts/unattended.mjs install-followups`, in your
+  own terminal, asks you to type a code and installs one launchd job that runs every hour, day and night (a draft
+  still goes in only on a weekday from 09:00 to 17:00 in the event's time zone). The opt-in ends with the event.
+- One Claude Code prompt authorises a whole sequence's follow-ups, showing each person, address, day and full
+  text. A changed text, address, thread or mail tool after that means it waits for you.
+- With nothing due, the hourly job starts no model. Otherwise it starts one `claude -p` run with a one-time ticket,
+  and for each person floorboss's guard reads the mailbox's own answer (and the CRM's, through its activity reader)
+  for anything since your last email, each read exactly as its saved recipe. Anything from them holds the draft. Other CRM activity is judged by Claude (hold, or go
+  with the approved text; unsure holds), and each judgement and reason is logged. The guard lets a draft in only
+  on a weekday from 09:00 to 17:00 event time, on its due day or the next, before the event's end, once, in your
+  thread with them, and the run stops at the first refusal or failure.
+- Each day's summary is built from the log; your next floorboss run shows it first, and Claude Code mentions it
+  once. If you installed the morning brief, the morning page names people you wrote to on LinkedIn or in the event
+  app whose draft goes in that day, since floorboss can't see replies there in an unattended run. A draft whose
+  result never came back is said as "may or may not be in your drafts folder" (`outreach draft-missing` lets it go
+  in again once you confirm at Claude Code's prompt), and a due follow-up that can't go in is said once, with why.
+  The job waits only when floorboss ran something in the last 30 minutes, not for a session left open.
+- Works with the claude.ai Gmail connector: with it, floorboss reads the whole thread of your last email to them and
+  searches for anything from or to them since then, and the draft goes in as a reply to that email. It searches
+  every folder but Spam, which Gmail leaves out, and floorboss can only show that the search covered your own last
+  email and the time since, not that it matched mail from them.
+- With a CRM connected, its logged activity is always checked: Salesforce or Close (which floorboss can't read on its
+  own), or a CRM with no activity reader connected, holds every draft, with the reason, and the opt-in says so first.
+- Each run is a Claude Code session on your account and counts toward your plan's usage and limits.
+- `/floorboss:unattended off` stops it and the brief. The guard refuses the job's install, its launcher mode and the
+  run's token from any session, and `launchctl setenv`, `unsetenv` and `config` too. `npm run self-check` pins
+  where the launcher checks its Claude Code run's flags and its main flags.
+- An unattended draft has every check an attended one has. That covers one message a day to a person across all
+  your events, and the same send locks for each of their addresses. It also covers a stop, a send or an approval
+  recorded for them at another event since the run's stage list, which holds it. The draft counts as that day's
+  message to them at your other events, as a send does. The hourly job doesn't put anyone on a ticket whom that
+  rule holds today: it starts no run for them and says why once.
+
 ### Connections and safety
 - What floorboss runs on its own is installed, removed and switched back on only by the user, in their own
   terminal: the install script refuses without a real terminal (with `--yes` too) and from Claude Code's shell.

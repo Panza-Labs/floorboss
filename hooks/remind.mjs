@@ -6,7 +6,7 @@
 // record it in floorboss's log. Otherwise floorboss goes on believing nothing was sent, and the next run
 // offers first messages to people already written to. It only adds context: it never blocks a prompt, and
 // any failure is silent. On a day the morning brief built itself (scripts/scheduled.mjs), it also says once
-// where the page is.
+// where the page is; and after an unattended run put drafts in or held something, it says so once, in one line.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { nowMs } from '../lib/clock.mjs';
 import { join, dirname } from 'node:path';
@@ -15,6 +15,7 @@ import { home } from '../lib/paths.mjs';
 import { isMain } from '../lib/main.mjs';
 import { writeText } from '../lib/jsonio.mjs';
 import { readBriefState, todayPage, unattendedDir } from '../lib/unattended.mjs';
+import { unseen, logEntries, toldFile, summaryFile, dayOf } from '../lib/unattended-drafts.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 // Words of a report about what already happened (not plans): sends, replies, bookings and their changes.
@@ -110,6 +111,32 @@ export function briefLine(now = nowMs()) {
   return `floorboss built today's meeting brief on its own (facts only; nothing was sent): ${clean(todayPage(), 300)}. Tell the user where it is, in one line. Nothing else.`;
 }
 
+// What floorboss did on its own since the user last looked (lib/unattended-drafts.mjs unseen): one line, once for each
+// new thing. The first attended floorboss run shows it in full.
+export function unattendedLine() {
+  const news = unseen(logEntries());
+  if (!news.length) return null;
+  const last = news[news.length - 1].at;
+  try {
+    if (readFileSync(toldFile(), 'utf8').trim() === last) return null;
+  } catch {
+    /* not said yet */
+  }
+  try {
+    writeText(toldFile(), `${last}\n`);
+  } catch {
+    return null;
+  }
+  const drafts = news.filter((e) => e.type === 'draft_result' && e.ok === true).length;
+  const held = news.filter((e) => e.type === 'held').length;
+  const other = news.length - drafts - held;
+  const parts = [`${drafts} follow-up draft${drafts === 1 ? '' : 's'} put into your drafts folder`, `${held} held for you`, ...(other ? [`${other} other thing${other === 1 ? '' : 's'} to look at`] : [])];
+  // The day's summary file is named only when it is there.
+  const file = summaryFile(dayOf(last));
+  const where = existsSync(file) ? `; the day's summary is ${clean(file, 300)}` : '';
+  return `floorboss worked on its own since the user last looked (nothing was sent): ${parts.join(', ')}. /floorboss:start shows it first${where}. Tell the user this in one line. Nothing else.`;
+}
+
 if (isMain(import.meta.url)) {
   let raw = '';
   process.stdin.on('data', (d) => {
@@ -118,13 +145,21 @@ if (isMain(import.meta.url)) {
   process.stdin.on('end', () => {
     try {
       const input = JSON.parse(raw || '{}');
+      // The scheduled run itself gets none of this: it has its one job.
+      if (process.env.FLOORBOSS_UNATTENDED) process.exit(0);
       let brief = null;
       try {
         brief = briefLine();
       } catch {
         brief = null;
       }
-      const text = [reminder(input.prompt, liveEvents(join(home(), 'events'), nowMs())), brief].filter(Boolean).join('\n\n') || null;
+      let un = null;
+      try {
+        un = unattendedLine();
+      } catch {
+        un = null;
+      }
+      const text = [reminder(input.prompt, liveEvents(join(home(), 'events'), nowMs())), brief, un].filter(Boolean).join('\n\n') || null;
       if (text) {
         process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } }), () => process.exit(0));
         return;

@@ -47,7 +47,7 @@ const SEND_LOCK_STALE_MS = 60 * 1000;
 // died holds it until it is a minute old).
 const SEND_BUSY = 'another call to this person, at this address or another of theirs, is being checked at this moment, or one stopped while it was: try again in a minute.';
 import { isSubagent, inheritedRun, transcriptRanFloorboss, CHECKED_TOOLS, QUIET_TOOLS } from './guard/run.mjs';
-import { ask, allow, promptId, promptPerson, promptAddr, promptLine, personName, holdHistory, letThroughBefore } from './guard/prompts.mjs';
+import { ask, allow, allowUnattended, blockedSaid, promptId, promptPerson, promptAddr, promptLine, personName, holdHistory, letThroughBefore } from './guard/prompts.mjs';
 import { isBrowser, givenServer } from './guard/connectors.mjs';
 import { testOnItsServer, testContactItem, testPasses, markOnce, nameOfStaged } from './guard/test-calls.mjs';
 import { callNote, enrichNotes, windowUsed, windowAllowed, lookupsGone, enrichPendingDir } from './guard/lookups.mjs';
@@ -55,9 +55,10 @@ import { listed, listedSends, refusedSends, fullText, stageBatch, recipientShown
 import { openWindow, openLogWindow, callId, windowKey, browserItems, logItems, KEY_OK, logTyping, noteWhy } from './guard/browser.mjs';
 import { READ_TOOLS, WRITE_TOOLS, fileRefusal, schedulePathRefusal } from './guard/files.mjs';
 import { recordSearchHosts, WEB_TOOLS, webRefusal, knownEventSites, isResearcher, seenHosts, companyHosts } from './guard/web.mjs';
-import { bashRefusal, floorbossScriptCall, connectorChange, scheduleRefusal, mcpScheduleRefusal, unattendedCall } from './guard/shell.mjs';
+import { bashRefusal, floorbossScriptCall, connectorChange, scheduleRefusal, mcpScheduleRefusal, unattendedCall, shellWords } from './guard/shell.mjs';
 import { check } from './guard/check.mjs';
-import { afterCall } from './guard/after-call.mjs';
+import { afterCall, afterCallFailure, noteStageCall, hasCallId, NO_CALL_ID } from './guard/after-call.mjs';
+import { sessionStart as unattendedStart, unattendedSession, unattendedMcp, bashCall as unattendedBash, afterBash, afterMcp as unattendedAfterMcp, afterMcpFailure as unattendedAfterMcpFailure, runToken, stopHere } from './guard/unattended.mjs';
 export { leaves, recent } from './guard/shared.mjs';
 export { runReads, sendsOrDeletes, plainServerRead, foundServer, givenServer } from './guard/connectors.mjs';
 export { testPasses, testArgProblems, testContactItem, testOnItsServer } from './guard/test-calls.mjs';
@@ -74,6 +75,11 @@ export { afterCall } from './guard/after-call.mjs';
 
 // recordFile (the records only floorboss's scripts write) lives in lib/paths.mjs: script --out paths use it too.
 export { recordFile };
+
+// The floorboss script calls an unattended run makes, and no others: its flow's next step (--unattended), its run-end,
+// and the CRM judgement the flow asks for.
+const runStep = (call, command) =>
+  (call.skill === 'flow' && ((call.sub === 'next' && shellWords(command).includes('--unattended')) || call.sub === 'run-end')) || (call.skill === 'event-outreach' && call.sub === 'crm-judge');
 
 // Well inside the hook timeout in hooks.json (30 seconds), so a slow check ends blocked rather than timed out.
 // Two things hold it: a timer, for a check that is waiting; and, because a timer can't fire while a check holds
@@ -124,12 +130,46 @@ if (isMain(import.meta.url)) {
       process.stderr.write("floorboss blocked this call: its guard couldn't read it. This is for you, the user, to look at.\n");
       process.exit(2);
     }
-    if (['PostToolUse', 'SessionStart', 'SessionEnd'].includes(String(input?.hook_event_name || ''))) judging = false;
+    if (['PostToolUse', 'PostToolUseFailure', 'SessionStart', 'SessionEnd'].includes(String(input?.hook_event_name || ''))) judging = false;
     const toolName = String(input?.tool_name || '');
     const session = typeof input?.session_id === 'string' ? input.session_id : null;
     // Inside a subagent (agent_id set), held to any live run lock: the docs don't say its session_id is the parent's.
     // Any agent_id that isn't empty counts, whatever its type (a number or an object is not the main session).
     const subagent = isSubagent(input);
+    // In a ticketed unattended run, any refusal stops the run (design section 9.4: the first failure or unexpected result
+    // ends it), whichever rule below refused: the run's stop mark is written as the guard exits, with what it said.
+    if (judging && runToken()) {
+      let said = '';
+      const write = process.stderr.write.bind(process.stderr);
+      process.stderr.write = (chunk, ...rest) => {
+        said = String(chunk);
+        return write(chunk, ...rest);
+      };
+      process.on('exit', (code) => {
+        if (code !== 2 && process.exitCode !== 2) return;
+        try {
+          if (unattendedSession(input, clockNow(), subagent).ok) stopHere(session, String(blockedSaid.text || said || 'a call in the run was refused').replace(/^floorboss blocked this call: /, '').trim().slice(0, 300));
+        } catch {
+          /* refused either way */
+        }
+      });
+    }
+    // A call that failed after it was let through (PostToolUseFailure): in an unattended run, the guard notes it as
+    // what it is (a read it couldn't read, a draft that may or may not be in), and the run stops. With the user there,
+    // a staged draft's failed call is noted as one that may or may not have gone in (its call mark's .failed), so no
+    // unattended draft of that step follows until the user says; nothing else is recorded: a failed call confirmed
+    // nothing.
+    if (input?.hook_event_name === 'PostToolUseFailure') {
+      try {
+        if (!subagent && /^mcp__/.test(toolName)) {
+          if (runToken()) unattendedAfterMcpFailure(input, clockNow());
+          else afterCallFailure(input, clockNow());
+        }
+      } catch {
+        /* unattended: the run's next step finds the draft's result missing, and stops there */
+      }
+      process.exit(0);
+    }
     // PostToolUse ("post"): records what a call that ran had asked about; never blocks anything.
     if (process.argv[2] === 'post' || input?.hook_event_name === 'PostToolUse') {
       // A web search while floorboss runs (the researcher's, usually): the hosts it turned up are the ones the
@@ -143,8 +183,23 @@ if (isMain(import.meta.url)) {
         }
         process.exit(0);
       }
+      // A floorboss script call that asked to turn unattended drafts on, to authorise follow-ups, or to let an unattended
+      // draft that isn't in the drafts folder go in again: recorded only now, once it ran after the user allowed it
+      // (hooks/guard/unattended.mjs).
+      if (toolName === 'Bash') {
+        try {
+          if (!subagent) afterBash(input, clockNow());
+        } catch {
+          /* not recorded: nothing is turned on or authorised */
+        }
+        process.exit(0);
+      }
       try {
-        if (!subagent) afterCall(input);
+        // In an unattended run, what the guard reads for itself in the answer (and the draft's result); else the usual.
+        if (!subagent) {
+          if (runToken()) unattendedAfterMcp(input, clockNow());
+          else afterCall(input);
+        }
       } catch {
         /* not recorded: the next call asks again */
       }
@@ -156,6 +211,12 @@ if (isMain(import.meta.url)) {
     // SessionStart: a session resumed (or compacted) that ran floorboss before still holds that run's text in its
     // transcript, so the run's limits come back with it.
     if (input?.hook_event_name === 'SessionStart') {
+      // A scheduled run's session: its ticket is bound only at a fresh startup of the session the launcher named.
+      try {
+        unattendedStart(input, clockNow());
+      } catch {
+        /* unbound: every call in it is refused */
+      }
       try {
         // Resumed, compacted or forked (a fork has a new id): known by its id or transcript, or by a floorboss script
         // call in the transcript it carries over.
@@ -175,6 +236,11 @@ if (isMain(import.meta.url)) {
     // another session) can't carry the run's text out before floorboss knows what it does.
     if (process.argv[2] === 'other') {
       if (/^mcp__/.test(toolName) || CHECKED_TOOLS.has(toolName)) process.exit(0);
+      // An unattended run uses floorboss's scripts and three connected-tool calls, nothing else.
+      if (runToken() && !QUIET_TOOLS.has(toolName) && !(toolName === 'Skill' && /^floorboss:/.test(String(input.tool_input?.skill ?? input.tool_input?.name ?? '')))) {
+        process.stderr.write(`floorboss blocked this call: an unattended run doesn't use ${toolName || 'this tool'}.\n`);
+        process.exit(2);
+      }
       const otherRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
       if (!(otherRun.active && (otherRun.session || subagent))) process.exit(0);
       if (QUIET_TOOLS.has(toolName)) process.exit(0);
@@ -201,6 +267,10 @@ if (isMain(import.meta.url)) {
     // A subagent started in the session that ran floorboss (or while a run is live) reads what that session
     // read: only floorboss's own agents, and the drafter the user chose, may be started then.
     if (toolName === 'Agent' || toolName === 'Task') {
+      if (runToken()) {
+        process.stderr.write('floorboss blocked this call: an unattended run starts no agents.\n');
+        process.exit(2);
+      }
       const agentRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
       if (agentRun.active && (agentRun.session || subagent)) {
         const type = String(input.tool_input?.subagent_type || '');
@@ -248,6 +318,10 @@ if (isMain(import.meta.url)) {
     // script, so in the session that ran floorboss (or a subagent while a run is live) they're refused like any
     // other shell command; elsewhere they're left to Claude Code's own prompt.
     if (toolName === 'PowerShell' || toolName === 'Monitor') {
+      if (runToken()) {
+        process.stderr.write(`floorboss blocked this call: an unattended run runs only floorboss's own scripts.\n`);
+        process.exit(2);
+      }
       // What floorboss runs on its own is set up from the user's terminal only (scheduleRefusal), in any session.
       {
         let sched = null;
@@ -292,6 +366,42 @@ if (isMain(import.meta.url)) {
       } catch {
         call = null;
       }
+      // In an unattended run: a ticketed session runs floorboss's own scripts only, and the scripts that turn unattended
+      // drafts on or authorise follow-ups ask the user (hooks/guard/unattended.mjs).
+      {
+        const nowU = clockNow();
+        const un = runToken() ? unattendedSession(input, nowU, subagent) : { on: false };
+        // Turning unattended runs off (or looking at them) only reduces what can happen: allowed even here.
+        if (un.on && !un.ok && !unattendedCall(input.tool_input?.command)) {
+          process.stderr.write(`floorboss blocked this call: this unattended run can't go on: ${un.why}.\n`);
+          process.exit(2);
+        }
+        if (un.on && !call && !unattendedCall(input.tool_input?.command)) {
+          stopHere(session, 'a shell command that is not one of floorboss\'s scripts');
+          process.stderr.write("floorboss blocked this call: an unattended run runs only floorboss's own scripts.\n");
+          process.exit(2);
+        }
+        const mine = call && ((call.skill === 'connectors' && call.sub === 'unattended-on') || (call.skill === 'event-outreach' && ['authorise-unattended', 'crm-judge', 'draft-missing'].includes(call.sub)));
+        if (mine || (un.on && call && ['unattended-on', 'authorise-unattended'].includes(call.sub))) {
+          let u = null;
+          try {
+            u = unattendedBash(input, call, { config: readJsonStrict(join(home(), 'config.json'), {}), nowMs: nowU, un });
+          } catch (e) {
+            u = { refuse: `its guard couldn't check this call (${String(e?.message).slice(0, 120)}).` };
+          }
+          if (u?.refuse) {
+            if (un.on && un.ok) stopHere(session, u.refuse);
+            process.stderr.write(`floorboss blocked this call: ${u.refuse}\n`);
+            process.exit(2);
+          }
+          if (u?.ask) ask(u.ask);
+        }
+        // And of floorboss's scripts, only the run's own steps: flow next --unattended, flow run-end and crm-judge.
+        if (un.on && call && !runStep(call, input.tool_input?.command)) {
+          process.stderr.write(`floorboss blocked this call: an unattended run runs only its own steps (flow next --unattended, flow run-end and crm-judge), not ${String(call.skill || 'this script').slice(0, 40)} ${String(call.sub || '').slice(0, 40)}.\n`);
+          process.exit(2);
+        }
+      }
       // The session that ran floorboss (and any subagent while a run is live) has read text from lists, CRM
       // notes, pages and replies: there, a shell command other than floorboss's own scripts could send that text
       // anywhere, or rewrite floorboss's records. Refused until the session ends (/clear or a new session).
@@ -322,7 +432,7 @@ if (isMain(import.meta.url)) {
         if (change.ask) ask(change.ask);
       }
       try {
-        if (call && session && !['run-end', 'record'].includes(call.sub)) stampRun({ session, transcript: input.transcript_path });
+        if (call && session && !['run-end', 'record', 'unattended-status'].includes(call.sub)) stampRun({ session, transcript: input.transcript_path });
       } catch {
         /* best effort */
       }
@@ -341,6 +451,10 @@ if (isMain(import.meta.url)) {
         process.exit(0);
       }
       if (WEB_TOOLS.has(toolName)) {
+        if (runToken()) {
+          process.stderr.write('floorboss blocked this call: an unattended run reads nothing on the web.\n');
+          process.exit(2);
+        }
         const webRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
         const why = webRun.active
           ? webRefusal(
@@ -374,6 +488,26 @@ if (isMain(import.meta.url)) {
       const server = /^mcp__(.+?)__/.exec(input.tool_name)[1];
       const toolPart = String(input.tool_name).replace(/^mcp__.+?__/, '');
       const browserCall = isBrowser(server, toolPart);
+      // An unattended run (a token in this Claude Code process's environment): its own rules, and the one "allow" floorboss
+      // gives. A call that fails them is refused and the run stops; nothing here ever asks.
+      if (runToken()) {
+        let out;
+        try {
+          out = unattendedMcp(input, { config, run, nowMs, subagent });
+        } catch (e) {
+          out = { refuse: `its guard couldn't check this call (${String(e?.message).slice(0, 120)})` };
+          try {
+            stopHere(session, out.refuse);
+          } catch {
+            /* refused either way */
+          }
+        }
+        if (!out?.allow) {
+          process.stderr.write(`floorboss blocked this call: ${out?.refuse || 'an unattended run could not check it'}\n`);
+          process.exit(2);
+        }
+        allowUnattended(out.allow);
+      }
       const pendingPath = join(home(), 'test-pending.json');
       if (!subagent && existsSync(pendingPath)) {
         const pending = readJsonStrict(pendingPath, null);
@@ -504,6 +638,12 @@ if (isMain(import.meta.url)) {
       // once a draft of the batch went in after this prompt: until then every draft asks, so a "no" stops the
       // rest. This hook writes only stage-pending.json (the batch it asked about), which only that hook reads.
       for (const it of staged.slice(0, 1)) {
+        // Each draft call is noted by Claude Code's id for it, so its post hook marks that call's own mark however late
+        // its prompt is answered, and a failed one as maybe in: a call with no id is refused.
+        if (!hasCallId(input)) {
+          process.stderr.write(`floorboss blocked this call: ${NO_CALL_ID}.\n`);
+          process.exit(2);
+        }
         const evDir = join(home(), 'events', it._event);
         // One message a day to a person across all your events, for a draft too: checked again under the send locks for
         // the person's addresses (hooks/guard/daymark.mjs sendLocks), so a send at another event that is between its
@@ -555,6 +695,9 @@ if (isMain(import.meta.url)) {
             if (e.code !== 'EEXIST') throw e;
             inFlight = true;
           }
+          // Noted for this call, so its post hook marks this mark done however late its prompt is answered, also once the
+          // list is out of date or written again (hooks/guard/after-call.mjs).
+          if (!inFlight) noteStageCall(String(input.tool_use_id), { event: it._event, id: it.id, touch: it.touch ?? 1, mark: `stage-call-${it.id}-${it.touch ?? 1}-${batch}-${n + 1}` }, nowMs);
         }
         if (inFlight && !wentIn) {
           process.stderr.write(

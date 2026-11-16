@@ -146,12 +146,15 @@ test('the whole table: how the 1,563 decisions moved from the first-reviewed gua
     const k = `${c.old}->${now.get(c)}`;
     moved[k] = (moved[k] || 0) + 1;
   }
-  assert.deepEqual(moved, { '2->2': 818, '2->0': 40, '0->2': 278, '0->0': 427 });
+  // (Two more refused since the 2026-11-14 review, finding A6: launchctl setenv of FLOORBOSS_HOME and of NODE_OPTIONS.
+  // One more since fix round 4 of 2026-11-15, R1-N4: "ln -s <plugin>/scripts/un*.mjs /tmp/u.mjs; node /tmp/u.mjs on",
+  // a link of the plugin's folder.)
+  assert.deepEqual(moved, { '2->2': 818, '2->0': 40, '0->2': 281, '0->0': 424 });
   // Newly refused: all of it is connected tools (the first-reviewed guard read none of their input), three brace
   // forms, a write to today.html, and the launchd-file rules made stricter.
   const newly = {};
   for (const c of cases) if (c.old === 0 && now.get(c) === 2) newly[c.g] = (newly[c.g] || 0) + 1;
-  assert.deepEqual(newly, { 'r1-bash': 1, 'r1-files-mcp': 11, 'lc-inner': 3, 'mcp-8': 8, 'mcp-nest': 27, 'mcp-cap': 16, 'mcp-readname': 117, 'mcp-prose': 7, x: 11, x2: 7, c5: 41, h2: 29 });
+  assert.deepEqual(newly, { 'r1-bash': 4, 'r1-files-mcp': 11, 'lc-inner': 3, 'mcp-8': 8, 'mcp-nest': 27, 'mcp-cap': 16, 'mcp-readname': 117, 'mcp-prose': 7, x: 11, x2: 7, c5: 41, h2: 29 });
   // Ordinary work the reviewers expected to pass: none of it newly refused. What is refused of it was refused by
   // the first-reviewed guard too: the stated cost of reading launchctl and a start word anywhere in one text.
   const ordinary = cases.filter((c) => c.e === 'A');

@@ -32,8 +32,9 @@ user at it, and floorboss's guard refuses it from a session (and `uninstall-brie
 starting a job, and writes to the job's launchd file or floorboss's `unattended` folder).
 
 Say what it does in two or three lines. Early each morning (or when the Mac next wakes), on a day with a booked
-meeting, a small floorboss script builds a brief from what floorboss already recorded and opens it in the
-browser; the last one built is also at `today.html` in floorboss's folder. It looks up no news and writes no
+meeting (or, with unattended drafts on, a day a follow-up draft goes in for someone you also wrote to on LinkedIn
+or in the event app: then a short page names them), a small floorboss script builds a brief from what floorboss
+already recorded and opens it in the browser; the last one built is also at `today.html` in floorboss's folder. It looks up no news and writes no
 talking points: those still come from `/floorboss:agenda`. An agenda saved for that day is kept while its facts
 are unchanged; if they changed, the page is rebuilt from the facts, keeps the talking points of meetings that did
 not change, and says in one line that some were built before the facts changed.

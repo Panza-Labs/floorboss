@@ -11,8 +11,15 @@ import { parseDncReport } from '../skills/crm-triage/scripts/dnc.mjs';
 import { readEnriched, overlay } from '../skills/crm-triage/scripts/enrich.mjs';
 import { foundServer } from '../hooks/guard.mjs';
 
+// Claude Code gives each call its own id (tool_use_id), and the guard refuses a staged draft call that comes without
+// one (fix round 4, R2-N2): here a draft call's id is made from its tool and input, so its post hook is the same call.
+const draftCallId = (tool_name, tool_input) => {
+  let h = 2166136261;
+  for (const ch of `${tool_name}${JSON.stringify(tool_input)}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return /draft/i.test(String(tool_name)) ? { tool_use_id: `toolu_draft_${h.toString(16)}` } : {};
+};
 const hook = (H, input, args = [], now = NOW) =>
-  spawnSync('node', [join(ROOT, 'hooks/guard.mjs'), ...args], { input: JSON.stringify(input), env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now }, encoding: 'utf8' });
+  spawnSync('node', [join(ROOT, 'hooks/guard.mjs'), ...args], { input: JSON.stringify({ ...draftCallId(input.tool_name, input.tool_input), ...input }), env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now }, encoding: 'utf8' });
 const run = (H, skill, args, env = {}) =>
   spawnSync('node', [join(ROOT, 'skills', skill, 'scripts', 'cli.mjs'), ...args], { env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: NOW, ...env }, encoding: 'utf8' });
 const asks = (r) => /"permissionDecision":"ask"/.test(r.stdout || '');

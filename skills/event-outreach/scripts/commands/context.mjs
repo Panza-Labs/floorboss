@@ -123,6 +123,7 @@ const USER_TYPES = new Set([
   'round_approved',
   'browser_send_opened',
   'release_cleared',
+  'stage_cleared',
   'no_reply_said',
   'user_says_no_reply',
   'status_pasted',

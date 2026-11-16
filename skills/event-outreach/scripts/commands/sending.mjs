@@ -29,11 +29,15 @@ function testWriteDuringList(c) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(event)) || event === c.event.slug || !line || typeof line !== 'object') return;
   append(join(home(), 'events', event, 'ledger.jsonl'), line, c.now);
 }
+import { ticketByToken } from '../../../../lib/unattended-drafts.mjs';
 
 // Approved emails not yet staged and not sent: exactly what to put in the mailbox, from floorboss's files.
 // Approved, not sent, not staged, and still allowed: removed, dropped and suppressed people are checked
 // again here, because they can change after the gate.
-function stageable(c, held = []) {
+// unattended: the list an unattended run stages from (stage-list --unattended, only inside a ticketed run): email
+// follow-ups too when email sending is on, since that run puts them in the drafts instead of sending them. held: the
+// people another event's message holds today, with why (said by stage-list).
+function stageable(c, { unattended = false, held = [] } = {}) {
   const out = [];
   const today = c.today;
   // The event is over (today in its time past its last day), or its dates can't be read: nothing is put in the mailbox
@@ -49,11 +53,11 @@ function stageable(c, held = []) {
     // One message a day to one person: the earliest step goes today, the next another day.
     if (listed.has(card.id) || (card.touch !== 0 && sentOrGoingToday(c.entries, c.state[card.id] || {}, card, c.paths.dir, c.now.getTime()) != null)) continue;
     // With email sending on, floorboss sends the messages itself (send-list); only confirmations are staged.
-    if (card.kind === 'message' && (c.settings.sending?.channels || []).includes('email')) continue;
+    if (card.kind === 'message' && (c.settings.sending?.channels || []).includes('email') && !(unattended && card.touch > 1)) continue;
     const st = c.state[card.id] || {};
     if (c.blocked(card.id) || (card.kind !== 'confirmation' && (st.replied || st.booked))) continue;
     const tt = st.touches?.[card.touch] || {};
-    if (tt.staged || st.sent?.[card.touch]) continue;
+    if (tt.staged || tt.stage_released || st.sent?.[card.touch]) continue;
     if (card.touch === 1 && crmPending(c, card.id)) continue;
     // One message a day to a person across all your events, by address (the guard's rule for a draft too): held, and
     // said, while another event's message to that address went or is going today.
@@ -65,7 +69,11 @@ function stageable(c, held = []) {
       }
     }
     const lastSent = lastSentTouch(st);
-    const prev = card.touch > 1 ? earlierWith(st, card.touch, 'staged') : card.touch === 0 && lastSent ? st.touches?.[lastSent]?.staged : null;
+    // A follow-up goes in the thread of the message before it: the draft of it that went in, or the send floorboss made.
+    const prev = card.touch > 1 ? earlierWith(st, card.touch, 'staged') || earlierWith(st, card.touch, 'sent_msg') : card.touch === 0 && lastSent ? st.touches?.[lastSent]?.staged : null;
+    // For a draft tool that threads by the message it replies to (Gmail's replyToMessageId): the email that went
+    // before it, as sent (the send tool's own answer, or the mailbox), else its draft's message.
+    const prevSent = card.touch > 1 ? earlierWith(st, card.touch, 'sent_msg') : null;
     listed.add(card.id);
     out.push({
       id: card.id,
@@ -74,6 +82,7 @@ function stageable(c, held = []) {
       subject: card.subject || '',
       body: card.body,
       reply_in_thread: prev?.thread_id || null,
+      reply_to_message_id: prevSent?.message_id || prev?.message_id || null,
       replaces: tt.stale_staged
         ? {
             draft_id: tt.stale_staged.draft_id,
@@ -89,16 +98,20 @@ export function stageList(opts) {
   need(opts, 'event');
   const c = ctxOf(opts.event, opts);
   const recipe = loadConfig().connectors?.stage_draft || null;
+  // --unattended: only inside a scheduled run (its token names a ticket), never from an attended session.
+  if (opts.unattended && !ticketByToken(process.env.FLOORBOSS_UNATTENDED))
+    throw new Error('stage-list --unattended is for the scheduled run only (floorboss starts it with its own ticket).');
   // The other events' records as the view read them (ctxOf), checked before and after the items are listed, as
   // send-list does: each item records what the other events lend about its person (lib/lent.mjs), and the guard reads
-  // it again when the draft is staged (hooks/guard/sends.mjs stageRefusal), so a stop or a send recorded at another
-  // event since the list was made holds the draft. A record that changed while the list was made holds every item.
+  // it again when the draft is staged (hooks/guard/sends.mjs stageRefusal; for an unattended draft too,
+  // hooks/guard/unattended.mjs), so a stop or a send recorded at another event since the list was made holds the
+  // draft. A record that changed while the list was made holds every item.
   const othersChanged = othersMoved(c.paths.dir, c.inputsAt);
   testWriteDuringList(c);
   // listed_at: the guard stages an item only within 30 minutes of its listing (a stop or reply after that
   // can't be missed by a list made before it).
   const held = [];
-  const listed = stageable(c, held).map((x) => ({
+  const listed = stageable(c, { unattended: !!opts.unattended, held }).map((x) => ({
     ...x,
     listed_at: c.now.toISOString(),
     elsewhere: othersChanged ? CHANGED_ELSEWHERE : lentAbout(c.paths.dir, { ...(c.folded.people[x.id] || {}), emails: [x.to].filter((y) => /@/.test(String(y || ''))) })

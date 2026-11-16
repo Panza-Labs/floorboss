@@ -4,12 +4,14 @@
 // Talk to one stand-in server over stdio, the way an MCP client would.
 // Usage: node call.mjs <server> list
 //        node call.mjs <server> call <tool> '<json args>'
+//        node call.mjs <server> raw <tool> '<json args>'   (the tool's whole result as JSON: content, structuredContent,
+//                                                           isError; an error result is printed, not failed on)
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const SERVERS = ['calendar-a', 'calendar-b', 'crm-a', 'crm-b', 'mail-a', 'mail-b', 'gmail', 'browser-app', 'enrich-a'];
+export const SERVERS = ['calendar-a', 'calendar-b', 'crm-a', 'crm-b', 'mail-a', 'mail-b', 'mail-c', 'gmail', 'gmail-real', 'browser-app', 'enrich-a'];
 const here = dirname(fileURLToPath(import.meta.url));
 
 // Sets the exit code instead of exiting, so piped output is flushed first.
@@ -21,7 +23,7 @@ const nl = process.stdout.isTTY ? '\n' : '';
 
 const [server, verb, tool, rawArgs = '{}'] = process.argv.slice(2);
 if (!SERVERS.includes(server)) usage(`Server must be one of: ${SERVERS.join(', ')}.`);
-if (verb !== 'list' && !(verb === 'call' && tool)) usage("Usage: node call.mjs <server> list | call <tool> '<json args>'");
+if (verb !== 'list' && !(['call', 'raw'].includes(verb) && tool)) usage("Usage: node call.mjs <server> list | call <tool> '<json args>' | raw <tool> '<json args>'");
 let args;
 try {
   args = JSON.parse(rawArgs);
@@ -50,6 +52,10 @@ createInterface({ input: child.stdout }).on('line', (line) => {
   if (msg.error) return fail(`JSON-RPC error ${msg.error.code}: ${msg.error.message}`);
   if (verb === 'list') {
     process.stdout.write(JSON.stringify(msg.result.tools, null, 2) + '\n');
+    return;
+  }
+  if (verb === 'raw') {
+    process.stdout.write(JSON.stringify(msg.result) + nl);
     return;
   }
   const text = msg.result.content.map((c) => c.text).join('');

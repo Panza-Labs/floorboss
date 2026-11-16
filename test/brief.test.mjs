@@ -276,8 +276,10 @@ test('launcher: nothing booked that day, the off file, an event that is over, no
   const r = launch({ HOME: empty }, MORNING);
   assert.equal(r.status, 0);
   assert.ok(!existsSync(empty));
-  // Any other mode is refused.
-  assert.equal(spawnSync(process.execPath, [join(ROOT, 'scripts/scheduled.mjs'), 'followups'], { env: { ...process.env, FLOORBOSS_HOME: empty }, encoding: 'utf8' }).status, 2);
+  // Any other mode is refused. (followups is the follow-up drafts' mode: with no data folder it does nothing.)
+  assert.equal(spawnSync(process.execPath, [join(ROOT, 'scripts/scheduled.mjs'), 'sends'], { env: { ...process.env, FLOORBOSS_HOME: empty }, encoding: 'utf8' }).status, 2);
+  assert.equal(spawnSync(process.execPath, [join(ROOT, 'scripts/scheduled.mjs'), 'followups'], { env: { ...process.env, FLOORBOSS_HOME: empty }, encoding: 'utf8' }).status, 0);
+  assert.ok(!existsSync(empty));
 });
 
 test('launcher: an evening run builds tomorrow\'s brief, and the next morning opens it again', () => {

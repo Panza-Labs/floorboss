@@ -61,6 +61,20 @@ export function listedSends() {
   });
 }
 
+// For the PostToolUse hook: the listed sends the guard let through (a send_released line for that step), as listed.
+// listedSends() no longer lists them once released, so the call that just ran is matched against these instead.
+export function releasedSends() {
+  const dir = join(home(), 'events');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).flatMap((slug) => {
+    if (notRealEvent(slug)) return [];
+    const v = readJsonStrict(join(dir, slug, 'derived', 'send-list.json'), []);
+    if (!Array.isArray(v) || !v.length) return [];
+    const released = eventRecord(join(dir, slug)).entries.filter((e) => e?.type === 'send_released');
+    return v.filter((x) => x && typeof x === 'object' && released.some((e) => e.id === x.id && (e.touch ?? 1) === (x.touch ?? 1))).map((x) => ({ ...x, _event: slug }));
+  });
+}
+
 export function listed(file, nowMs = Date.now()) {
   const dir = join(home(), 'events');
   if (!existsSync(dir)) return [];
@@ -113,6 +127,8 @@ export function stageRefusal(evDir, item, nowMs = Date.now()) {
   // A follow-up goes in only after the message before it went, and each step's draft goes in once.
   if (kind === 'message' && touch > 1 && !st.sent?.[touchBefore(st, touch)]) return "the message before it hasn't gone";
   if (st.touches?.[touch]?.staged) return 'its draft is already in your drafts';
+  // An unattended run let its draft in (the guard's own record of it, written before the call ran).
+  if (st.touches?.[touch]?.stage_released) return 'its draft already went into your drafts on its own (an unattended run): check your drafts folder';
   if (kind === 'message' && touch > 1) {
     let settings = {};
     try {

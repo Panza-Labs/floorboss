@@ -36,8 +36,9 @@ const file = (H, data) => {
   return f;
 };
 const env = (H, now, extra = {}) => ({ ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now, ...extra });
+// A call as Claude Code makes it, with its id (tool_use_id): the guard keeps track of each draft call by it.
 const guard = (H, input, now, extra = {}, tool = 'mcp__gmail__send_email') =>
-  spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify({ tool_name: tool, tool_input: input }), env: env(H, now, extra), encoding: 'utf8' });
+  spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify({ tool_name: tool, tool_input: input, tool_use_id: `tu-${Math.random().toString(36).slice(2)}` }), env: env(H, now, extra), encoding: 'utf8' });
 const guardAsync = (H, input, now, extra = {}) =>
   new Promise((res) => {
     const p = spawn('node', [join(ROOT, 'hooks/guard.mjs')], { env: env(H, now, extra) });

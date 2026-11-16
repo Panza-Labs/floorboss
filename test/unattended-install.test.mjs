@@ -155,12 +155,13 @@ test('install-brief --yes: writes the launchd file, loads it with launchctl, say
   assert.equal(W.run(['uninstall-brief']).status, 0);
 });
 
-test('install-brief: without FLOORBOSS_HOME set, the file carries no environment at all', () => {
+test('install-brief: without FLOORBOSS_HOME set, the file still names the data folder (~/.floorboss), and nothing else', () => {
+  // Fixed by the install, never left to a variable set later for every job (launchctl setenv): review finding A6.
   const W = world();
   const r = W.run(['install-brief', '--yes'], { FLOORBOSS_HOME: '' });
   assert.equal(r.status, 0, r.stderr);
   const p = parsePlist(readFileSync(W.plist, 'utf8'));
-  assert.ok(!('EnvironmentVariables' in p));
+  assert.deepEqual(p.EnvironmentVariables, { FLOORBOSS_HOME: join(W.HOME, '.floorboss') });
   assert.ok(existsSync(join(W.HOME, '.floorboss', 'unattended', 'brief-installed.json')), 'its own note went under the throwaway home');
 });
 

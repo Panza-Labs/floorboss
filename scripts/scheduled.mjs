@@ -20,18 +20,69 @@
 // "07:00" is the machine's clock, because launchd has no other, and it is the user's morning where they are.
 //
 // Running it twice does no harm: the same event, day and records on the same date build and open nothing again.
-import { readdirSync, existsSync, lstatSync, unlinkSync, rmSync } from 'node:fs';
+//
+// A second mode: `followups`, started by launchd every hour of the day on the machine's clock
+// (scripts/unattended.mjs install-followups); each follow-up still goes in only on a weekday from 09:00 to 17:00 in its
+// event's time zone. With no model, it works out from floorboss's records which authorised
+// follow-ups are due now (runFollowups below); with none, it ends there. Otherwise it writes a one-time ticket and
+// starts one Claude Code run (lib/unattended.mjs claudeRun, a pure value the tests read) whose only job is to put
+// those follow-ups in the user's drafts folder, each after the guard read the mailbox (and the CRM) for it. It never
+// passes a flag that turns the guard off or answers a prompt for the user.
+import { readdirSync, existsSync, lstatSync, unlinkSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
 import { home, readChecked } from '../lib/paths.mjs';
 import { nowMs } from '../lib/clock.mjs';
 import { todayKeyIn, addDays, wallParts, isValidZone } from '../lib/tz.mjs';
 import { readJson, writeJson, writeText } from '../lib/jsonio.mjs';
-import { readLedger, fold } from '../lib/ledger.mjs';
+import { readLedger, fold, contactable } from '../lib/ledger.mjs';
 import { withLock, removeLock } from '../lib/lock.mjs';
 import { isMain } from '../lib/main.mjs';
-import { isOff, logLine, readBriefState, briefStateFile, todayPage, openerFor, privateDir } from '../lib/unattended.mjs';
+import { ranRecently, endSession, RUN_LOCK_MINUTES } from '../lib/runlock.mjs';
+import { loadEvent } from '../lib/event.mjs';
+import { loadConfig } from '../lib/config.mjs';
+import { eventRecord, followupDueDay, eventDay, sentOrGoingToday, addressBusyToday, busyWhy, homeSends } from '../lib/sendcheck.mjs';
+import { touchBefore } from '../lib/route.mjs';
+import { isOff, logLine, readBriefState, briefStateFile, todayPage, openerFor, privateDir, oneLine, followupsInstalledFile, claudeFor, claudeRun, unattendedDir } from '../lib/unattended.mjs';
+import {
+  liveOptins,
+  authorisedLines,
+  authorisationFor,
+  recipeFp,
+  emailBefore,
+  earlierStepWhy,
+  windowWhy,
+  hoursWhy,
+  weekendIn,
+  crmUnreadableWhy,
+  attendedDraftIn,
+  attendedDraftOpen,
+  attendedOpenWhy,
+  olderDraftOf,
+  olderDraftWhy,
+  gmailReads,
+  gmailSearchWhy,
+  messageIdOf,
+  shortDay,
+  crmIdFor,
+  readPrivate,
+  readTicket,
+  endedFile,
+  present,
+  createOnce,
+  runFile,
+  logEntries,
+  unclearDrafts,
+  writeSummary,
+  dayOf,
+  sha256,
+  otherChannelPeople,
+  DISCLAIMER,
+  RUN_LIMIT_MS
+} from '../lib/unattended-drafts.mjs';
+import { crossEventWhy } from '../hooks/guard/unattended.mjs';
 import { buildFactsBrief } from '../skills/event-outreach/scripts/commands/calendar.mjs';
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -74,13 +125,46 @@ const shown = (t, n) =>
     .slice(0, n);
 // Meetings at more than one event on the day: today.html lists each event's brief. Like the brief, it loads
 // nothing and runs no script, and an event's name is shown as text.
-export function indexPage(items) {
+// notices: people an unattended follow-up goes into the drafts for today who were also written to on LinkedIn or in
+// the event app (lib/unattended-drafts.mjs otherChannelPeople), named with the disclaimer.
+// day: the day it is for (YYYY-MM-DD, the machine's own day), said in the page's heading: a page left from an earlier
+// day never reads as today's.
+export function indexPage(items, notices = [], day = null) {
   const csp = "default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your meetings</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:24px 16px}</style></head><body>
-<h1>Your meetings</h1><ul>${items
-    .filter((x) => SLUG.test(String(x.slug)))
-    .map((x) => `<li><a href="events/${esc(x.slug)}/agenda.html">${esc(shown(x.name, 200))}</a>: ${Number(x.meetings) || 0} on ${esc(shown(x.day, 10))}</li>`)
-    .join('')}</ul></body></html>`;
+  const where = (w) => (w || []).map((k) => (k === 'linkedin' ? 'LinkedIn' : 'the event app')).join(' and ');
+  const dated = /^\d{4}-\d{2}-\d{2}$/.test(String(day || '')) ? `${shortDay(day)} ${day.slice(0, 4)}` : null;
+  const others = notices.length
+    ? `<h2>Follow-ups going into your drafts on their own${dated ? ` on ${esc(dated)}` : ' today'}</h2><p>You also wrote to these people on LinkedIn or in the event app. Before you send their draft, check those inboxes for a reply.</p><ul>${notices
+        .map((n) => `<li>${esc(shown(n.name, 120))} (${esc(where(n.where))})</li>`)
+        .join('')}</ul><p>${esc(DISCLAIMER)}</p>`
+    : '';
+  const meetings = items.filter((x) => SLUG.test(String(x.slug)));
+  const list = meetings.length || !notices.length;
+  // The day itself, never "Today": a page left on disk from an earlier day still reads true.
+  const title = list ? 'Your meetings' : dated ? esc(dated) : 'Today';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:24px 16px}</style></head><body>
+${list ? `<h1>Your meetings</h1><ul>${meetings.map((x) => `<li><a href="events/${esc(x.slug)}/agenda.html">${esc(shown(x.name, 200))}</a>: ${Number(x.meetings) || 0} on ${esc(shown(x.day, 10))}</li>`).join('')}</ul>` : `<h1>${title}</h1>`}${others}</body></html>`;
+}
+// The people the morning page names (see indexPage), for every event with unattended drafts on. A failure names nobody.
+function followupNotices(now) {
+  const out = [];
+  // Only while drafts can go in on their own: the follow-up job installed, for this version of floorboss.
+  const inst = readPrivate(followupsInstalledFile(), null);
+  if (!inst || !PLUGIN_VERSION || inst.version !== PLUGIN_VERSION) return out;
+  let config = {};
+  try {
+    config = loadConfig();
+  } catch {
+    return out;
+  }
+  for (const { slug } of liveOptins(now))
+    try {
+      const settings = { ...loadEvent(slug).settings, connectors: config.connectors || {} };
+      out.push(...otherChannelPeople(slug, { settings, nowMs: now }));
+    } catch {
+      /* named nowhere */
+    }
+  return out.slice(0, 200);
 }
 
 // A plain file's text, or null: never through a link, never from a pipe or a device (those can hold a read for ever).
@@ -180,10 +264,11 @@ export function runBrief() {
   const briefs = results.filter((r) => r.day);
   const fresh = briefs.filter((r) => r.fresh);
   const failed = results.filter((x) => x.failed);
+  const notices = followupNotices(now);
   for (const r of failed.slice(0, MAX_FAILURE_LINES)) logLine('brief_failed', { event: r.slug, reason: r.failed });
   if (failed.length > MAX_FAILURE_LINES) logLine('brief_failed', { reason: `${failed.length - MAX_FAILURE_LINES} more events could not be read` });
   if (left) logLine('brief_skipped', { reason: `more than ${MAX_BRIEFS} events have meetings that day: ${left} left out` });
-  if (!briefs.length) {
+  if (!briefs.length && !notices.length) {
     const whys = results.filter((r) => r.skipped).map((r) => r.skipped);
     if (!failed.length) logLine('brief_skipped', { reason: whys.includes('nothing booked') || !whys.length ? 'nothing booked' : whys[0] });
     return { skipped: 'nothing booked', results };
@@ -191,8 +276,21 @@ export function runBrief() {
   // today.html, written here and only here, last: the one event's page as this run rendered it, or a list when
   // there is more than one (each link leads to a page this run rendered or checked byte for byte). Written again
   // whenever it differs, so nothing left at that name by an earlier day, an earlier run or anyone else is opened.
-  const page = briefs.length > 1 ? indexPage(briefs) : briefs[0].html;
+  // With people to name for the unattended drafts (LinkedIn or the event app), the list, with them under it.
+  // The machine's own day (the brief runs at 07:00 on its clock): the day the page says it is for.
+  const localDay = todayKeyIn(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC', new Date(now));
+  const page = briefs.length > 1 || notices.length ? indexPage(briefs, notices, localDay) : briefs[0].html;
   if (plainFile(todayPage()) !== page) writeText(todayPage(), page);
+  if (!briefs.length) {
+    // No meeting, only people to name: opened once a day, and again only if the names change.
+    const key = { day: localDay, hash: sha256(page).slice(0, 24) };
+    if (state._followups?.day === key.day && state._followups?.hash === key.hash) return { skipped: 'unchanged', results };
+    privateDir();
+    state._followups = key;
+    writeJson(briefStateFile(), state);
+    logLine('brief_built', { names: notices.length, page: todayPage() });
+    return { built: [], page: todayPage(), results, notices: notices.length };
+  }
   if (!fresh.length) {
     logLine('brief_skipped', { reason: 'already built, and the records are the same', events: briefs.map((r) => r.slug) });
     return { skipped: 'unchanged', results };
@@ -286,11 +384,486 @@ export function noteOpened(slugs) {
   writeJson(briefStateFile(), state);
 }
 
+// ---------- followups: the unattended email drafts ----------
+const PLUGIN_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  } catch {
+    return null;
+  }
+})();
+// The authorised follow-ups that may go into the drafts now, worked out from floorboss's records with no model and no
+// network: each event with a live opt-in, each authorised step not yet in the drafts or sent, whose approval, address,
+// thread and mail tools are the ones authorised, on its due day or the day after, before the event's end, on a weekday
+// between 09:00 and 17:00 event time. held: the ones that can't go and won't by waiting (said once a day in the log).
+// Pure: it reads and writes nothing else.
+export function followupsDue(now = nowMs(), log = null) {
+  const items = [];
+  const held = [];
+  // Due, but blocked by something waiting can't fix on its own today: said once in the log, so the user hears why.
+  const waiting = [];
+  const config = loadConfig();
+  const stageFp = recipeFp(config.connectors?.stage_draft);
+  const readFp = recipeFp(config.connectors?.['email.messages']);
+  const lines = authorisedLines();
+  // Held by a run earlier today (the guard or the run's flow said why, in the log): not put on another ticket today, so
+  // one person the guard keeps refusing never stops every run before the people after them, and a person held because
+  // something came in doesn't start a model run every hour. A hold for timing only (retry: a read older than 90
+  // seconds, outside the event's hours, a prompt that may be open with the user there) is tried again next hour.
+  const today = dayOf(new Date(now).toISOString());
+  const heldToday = new Set((log || logEntries()).filter((e) => e.type === 'held' && e.session && e.retry !== true && dayOf(e.at) === today).map((e) => `${e.event}:${e.id}:${e.touch}`));
+  // Held for timing only by a run earlier today: put after everyone else on the ticket, the least recently tried of
+  // them first (by each one's latest timing hold today), so a person whose draft keeps missing its 90 seconds never
+  // stops every run before the people after them get theirs, even when they too were held once.
+  const retriedToday = new Map();
+  for (const e of (log || logEntries()).filter((x) => x.type === 'held' && x.session && x.retry === true && dayOf(x.at) === today)) {
+    const k = `${e.event}:${e.id}:${e.touch}`;
+    const at = Date.parse(e.at);
+    if (Number.isFinite(at)) retriedToday.set(k, Math.max(retriedToday.get(k) ?? -Infinity, at));
+  }
+  // A CRM connected that floorboss can't read for itself (Salesforce, Close, or a CRM with no activity reader): every
+  // draft waits for the user.
+  const crmGap = crmUnreadableWhy(config);
+  // A draft tool that threads by the message it replies to (Gmail's replyToMessageId): a follow-up with no message id
+  // for the email it answers is held by the guard, so it is never put on a ticket.
+  const repliesById = JSON.stringify(config.connectors?.stage_draft?.args || {}).includes('{reply_to_message_id}');
+  const gmail = !!gmailReads(config);
+  // Every event's sends, read once for all the follow-ups looked at here (lib/sendcheck.mjs addressBusyToday).
+  let sends = null;
+  for (const { slug } of liveOptins(now)) {
+    let settings;
+    let ev;
+    try {
+      const e = loadEvent(slug);
+      ev = e.event;
+      settings = { ...e.settings, connectors: config.connectors || {} };
+    } catch {
+      continue;
+    }
+    const evDir = join(home(), 'events', slug);
+    const { entries, state, folded } = eventRecord(evDir);
+    // The latest authorisation of each step: an older one for another text is no authorisation of this one.
+    const steps = new Map();
+    for (const a of lines.filter((x) => x.event === slug && /^c\d+$/.test(String(x.id)) && Number.isInteger(x.touch))) steps.set(`${a.id}:${a.touch}`, a);
+    for (const a of steps.values()) {
+      const p = folded.people?.[a.id];
+      const x = p?.touches?.[a.touch];
+      const name = p?.name || a.id;
+      const hold = (why, extra = {}) => held.push({ event: slug, id: a.id, touch: a.touch, name, to: a.to, why, ...extra });
+      const wait = (why) => waiting.push({ event: slug, id: a.id, touch: a.touch, name, to: a.to, why });
+      if (!p || !x || x.sent || x.staged || x.stage_released) continue;
+      if (p.stopped || p.dropped) continue;
+      if (p.replied || p.booked) {
+        // Over, not waiting on the user: said once, as over.
+        hold('they replied or booked: nothing more goes on its own', { final: true });
+        continue;
+      }
+      if (!x.approved?.hash || x.approved.hash !== x.hash || x.approved.hash !== a.hash) {
+        hold('its text changed since you authorised it: it waits for you');
+        continue;
+      }
+      const before = touchBefore({ touches: p.touches }, a.touch);
+      if (!p.touches?.[before]?.sent) {
+        // The step before it is a draft in the user's drafts folder that floorboss hasn't seen sent yet; or one an
+        // unattended run let through that floorboss never heard went in (no draft id came back): it may not be there.
+        const b = p.touches?.[before];
+        const step = before > 1 ? `follow-up ${before - 1}` : 'first message';
+        if (b?.staged) wait(`it waits until floorboss sees your ${step} draft was sent: once you've sent it from your mail app, run floorboss (it reads your mailbox for it)`);
+        else if (b?.stage_released)
+          wait(`floorboss doesn't know whether your ${step} draft went into your drafts folder (the mail tool never said it did), so this one waits. Look there. If it's there, send it, then run floorboss (it reads your mailbox for it). If it isn't, tell floorboss it isn't there (outreach draft-missing) and that draft can go in again`);
+        continue;
+      }
+      const due = followupDueDay(evDir, settings, entries, state[a.id] || {}, { id: a.id, touch: a.touch }, now);
+      if (due.why || !due.day || due.today < due.day) continue;
+      // The ledger's own rule for who may be written to (a stop, a skip or colleague decision, a duplicate, a damaged
+      // line, a bounce): the guard refuses the draft, so no run is started for it.
+      {
+        const no = contactable(folded, a.id, 'message', eventDay(evDir, now));
+        if (no) {
+          hold(`${no}: nothing more goes on its own`);
+          continue;
+        }
+      }
+      // One message a day to a person, at this event and across all your events (the guard's rules: lib/sendcheck.mjs
+      // sentOrGoingToday and addressBusyToday): someone another message went or is going to today waits for another
+      // day, with no model run spent on them today.
+      if (sentOrGoingToday(entries, state[a.id] || {}, { id: a.id, touch: a.touch, to: a.to }, evDir, now) != null) {
+        wait(`another message to ${name} already went or is going today: one message a day to a person, so it waits for another day`);
+        continue;
+      }
+      {
+        sends ||= homeSends();
+        const busy = addressBusyToday(evDir, a.to, now, a.id, sends);
+        if (busy) {
+          wait(`${busyWhy(busy, name, a.to)}. One message a day to one person, across all your events`);
+          continue;
+        }
+      }
+      // The day the authorisation prompt showed binds: never earlier.
+      if (a.due_day && due.day < a.due_day) {
+        hold(`its day moved since you authorised it (you allowed it for ${shortDay(a.due_day)}, it's due ${shortDay(due.day)} now): it waits for you`);
+        continue;
+      }
+      const ww = windowWhy({ due: due.day, today: due.today, end: ev.end_date || ev.start_date });
+      if (ww) {
+        // Too late to go on its own ("more than a day ago: it waits for you") is the user's to send: held for them. Only
+        // an event that is over is the end of it.
+        hold(ww, /is over/.test(ww) ? { final: true } : {});
+        continue;
+      }
+      // An attended draft of this step, for any of its texts, that went in or failed with no receipt saved: never a
+      // second one on its own.
+      const went = attendedDraftIn(evDir, a.id, a.touch, entries);
+      if (went) {
+        hold(went.why);
+        continue;
+      }
+      // A draft of an older text of this step that may still be in the drafts folder: never a second one (the guard's
+      // rule too).
+      const older = olderDraftOf(entries, a.id, a.touch, x.approved.hash);
+      if (older) {
+        hold(olderDraftWhy(older));
+        continue;
+      }
+      if (crmGap) {
+        hold(crmGap);
+        continue;
+      }
+      // An attended draft of this step whose Claude Code prompt may still be open: its call still runs once allowed, so
+      // nothing goes in on its own until it ran or 12 hours passed (lib/unattended-drafts.mjs attendedDraftOpen).
+      const open = attendedDraftOpen(evDir, a.id, a.touch, now);
+      if (open) {
+        wait(attendedOpenWhy(open));
+        continue;
+      }
+      if (gmail && gmailSearchWhy(a.to)) {
+        hold(gmailSearchWhy(a.to));
+        continue;
+      }
+      if (hoursWhy(ev.time_zone, now)) {
+        // The job runs every hour, so only a weekend there keeps a follow-up in its window from going today: said, so
+        // the day doesn't pass unseen.
+        if (weekendIn(ev.time_zone, now)) {
+          const place = String(ev.time_zone).split('/').pop().replace(/_/g, ' ');
+          wait(`it's the weekend in ${place}, and drafts go in on their own on weekdays only (Monday to Friday, ${place} time), so it can't go in on its own today`);
+        }
+        continue;
+      }
+      const thread = emailBefore(p, a.touch, a.to)?.thread || null;
+      if (!authorisationFor({ event: slug, id: a.id, touch: a.touch, hash: a.hash, to: a.to }, { stageFp, readFp, thread })) {
+        hold('it is not authorised as it is now (its address, thread or mail tool changed since you authorised it)');
+        continue;
+      }
+      if (repliesById && !messageIdOf(emailBefore(p, a.touch, a.to)?.x)) {
+        hold("floorboss has no message id for your last email to them (its send's answer didn't give one), so this draft couldn't go in reply to it");
+        continue;
+      }
+      // The CRM record the run reads for them is the one bound at the authorisation.
+      const crmId = crmIdFor(evDir, folded, a.id);
+      if (Object.hasOwn(a, 'crm_id') && String(a.crm_id ?? '') !== String(crmId ?? '')) {
+        hold('its CRM record changed since you authorised it: it waits for you');
+        continue;
+      }
+      // The guard's own rules for the email it answers and for every event's ledger, checked here too: an item the
+      // guard would refuse is never put on a ticket.
+      const early = earlierStepWhy(evDir, entries, folded, { id: a.id, touch: a.touch, to: a.to, thread });
+      if (early) {
+        hold(early);
+        continue;
+      }
+      const prevSent = Date.parse(emailBefore(p, a.touch, a.to)?.x?.sent_at);
+      const since = Math.min(...[Date.parse(a.at), prevSent].filter(Number.isFinite), Infinity);
+      const other = crossEventWhy({ slug, id: a.id, to: a.to, since: Number.isFinite(since) ? since : 0, nowMs: now });
+      if (other) {
+        hold(other);
+        continue;
+      }
+      if (heldToday.has(`${slug}:${a.id}:${a.touch}`)) continue;
+      items.push({ event: slug, id: a.id, touch: a.touch, hash: a.hash, to: a.to, name: String(name).slice(0, 80), thread_id: thread, crm_id: crmId });
+    }
+  }
+  // (A stable sort: the rest keep their order.)
+  const tried = (x) => retriedToday.get(`${x.event}:${x.id}:${x.touch}`) ?? -Infinity;
+  items.sort((x, y) => (tried(x) === tried(y) ? 0 : tried(x) < tried(y) ? -1 : 1));
+  return { items, held, waiting };
+}
+// A held or waiting follow-up is said in the log once for each reason, not every hour or every day: a summary that
+// says the same lines daily teaches its reader to stop reading it. daily: once a day instead (a line about the whole
+// job, such as an update to reinstall for).
+function logHeldOnce(held, now, { type = 'held', daily = false } = {}) {
+  const today = dayOf(new Date(now).toISOString());
+  const seen = new Set(
+    logEntries()
+      .filter((e) => e.type === type && !e.session && (!daily || dayOf(e.at) === today))
+      .map((e) => `${e.event}:${e.id}:${e.touch}:${e.why}`)
+  );
+  for (const h of held) if (!seen.has(`${h.event}:${h.id}:${h.touch}:${oneLine(h.why)}`)) logLine(type, h);
+}
+
+// The launcher's own one-run-at-a-time file (O_EXCL). One left by a run that died is taken away once its process is
+// gone, or once it is older than a run can last.
+function takeRunFile(now) {
+  const text = `${process.pid} ${new Date(now).toISOString()}\n`;
+  for (let i = 0; i < 2; i++) {
+    privateDir();
+    try {
+      writeFileSync(runFile(), text, { flag: 'wx', mode: 0o600 });
+      return true;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+    let left = null;
+    try {
+      left = lstatSync(runFile());
+    } catch {
+      continue;
+    }
+    const pid = Number(String((() => {
+      try {
+        return readChecked(runFile(), 200);
+      } catch {
+        return '';
+      }
+    })()).split(' ')[0]);
+    let alive = false;
+    try {
+      if (Number.isInteger(pid) && pid > 1) {
+        process.kill(pid, 0);
+        alive = true;
+      }
+    } catch {
+      alive = false;
+    }
+    if (left.isFile() && alive && Date.now() - left.mtimeMs < RUN_LIMIT_MS + 5 * 60000) return false;
+    try {
+      rmSync(runFile(), { force: true });
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+// Drafts of this run the guard let through whose result never came back: each said in the log as unclear (they may or
+// may not be in the drafts folder), for the summary, the reminder and the next attended run. Returns how many.
+function noteUnclear(session, mine) {
+  const open = unclearDrafts(mine);
+  for (const e of open) logLine('draft_unclear', { session, event: e.event, id: e.id, touch: e.touch, name: e.name, to: e.to });
+  return open.length;
+}
+// Tickets whose launcher is gone without having ended them: ended now, with their session's run lock, and anything
+// they let through unclear is said.
+function endDeadRuns() {
+  let names = [];
+  try {
+    names = readdirSync(join(unattendedDir(), 'tickets')).filter((f) => /\.json$/.test(f));
+  } catch {
+    return;
+  }
+  for (const f of names) {
+    const session = f.replace(/\.json$/, '');
+    const t = readTicket(session);
+    if (!t || present(endedFile(session)) || t.pid === process.pid) continue;
+    let alive = false;
+    try {
+      if (Number.isInteger(t.pid) && t.pid > 1) {
+        process.kill(t.pid, 0);
+        alive = true;
+      }
+    } catch (e) {
+      alive = e?.code === 'EPERM';
+    }
+    if (alive) continue;
+    try {
+      if (!createOnce(['tickets'], `${session}.ended`, { at: new Date().toISOString(), why: 'its launcher was gone' })) continue;
+      try {
+        endSession(session);
+      } catch {
+        /* no lock of its own was left */
+      }
+      const mine = logEntries().filter((e) => e.session === session);
+      const unclear = noteUnclear(session, mine);
+      if (mine.some((e) => e.type === 'run_started')) logLine('run_ended', { session, why: 'its launcher was stopped before the run ended (the Mac slept, logged out or was turned off): ended now', ...(unclear ? { unclear } : {}) });
+    } catch {
+      /* the next launch tries again */
+    }
+  }
+}
+
+// Starts the one Claude Code run and waits for it, stopping it at the run's limit. It runs in a process group of its
+// own, so at the limit the whole group goes (the connectors it started with it).
+function startRun(run, limit) {
+  return new Promise((done) => {
+    let tail = '';
+    let over = false;
+    const child = spawn(run.program, run.args, { stdio: ['ignore', 'ignore', 'pipe'], env: run.env, detached: true });
+    const group = (sig) => {
+      try {
+        process.kill(-child.pid, sig);
+      } catch {
+        /* gone already */
+      }
+    };
+    const stop = setTimeout(() => {
+      group('SIGTERM');
+      setTimeout(() => group('SIGKILL'), 10000).unref();
+    }, limit);
+    child.stderr.on('data', (b) => {
+      tail = `${tail}${b}`.slice(-2000);
+    });
+    child.on('error', (e) => {
+      clearTimeout(stop);
+      if (!over) done({ code: null, error: String(e?.code || e?.message || 'could not start'), tail });
+      over = true;
+    });
+    // Its own end, not its output's: a connector left holding the pipe doesn't keep the launcher waiting.
+    child.on('exit', (code, signal) => {
+      clearTimeout(stop);
+      group('SIGTERM');
+      child.stderr.destroy();
+      if (!over) done({ code, signal, tail });
+      over = true;
+    });
+  });
+}
+
+export async function runFollowups() {
+  if (!existsSync(home())) return 0;
+  // Never from a Claude Code session: macOS's scheduler starts this, from the job the user installed.
+  if ('CLAUDECODE' in process.env) {
+    logLine('followups_refused', { reason: 'started from a Claude Code session: only the job you install starts it' });
+    return 1;
+  }
+  if (isOff()) return 0;
+  const inst = readPrivate(followupsInstalledFile(), null);
+  if (!inst) return 0;
+  const now = nowMs();
+  // The day's summary, written whenever something was said in the log (the reminder names this file).
+  const summarise = () => {
+    try {
+      writeSummary(dayOf(new Date(nowMs()).toISOString()));
+    } catch {
+      /* the log still holds it */
+    }
+  };
+  if (!PLUGIN_VERSION || inst.version !== PLUGIN_VERSION) {
+    logHeldOnce([{ event: '-', id: '-', touch: 0, name: 'every follow-up', why: 'floorboss was updated since the schedule was installed: run install-followups again from your terminal' }], now, { daily: true });
+    summarise();
+    return 0;
+  }
+  // A run whose launcher was stopped before it could end it (the Mac slept, logged out or was turned off): ended now,
+  // so its session's lock doesn't keep every later launch waiting for hours.
+  endDeadRuns();
+  const due = followupsDue(now);
+  logHeldOnce(due.held, now);
+  logHeldOnce(due.waiting, now, { type: 'waiting' });
+  // Nothing due: no model, nothing started.
+  if (!due.items.length) {
+    if (due.held.length || due.waiting.length) summarise();
+    return 0;
+  }
+  // floorboss ran something in the last 30 minutes (lib/runlock.mjs ranRecently: the run lock's own window, not the
+  // 12-hour backstop a session that ran floorboss keeps): the user may be at work in it, so this hour waits. A session
+  // merely left open doesn't hold the follow-ups.
+  const recent = ranRecently(Date.now());
+  if (recent.active) {
+    // A run lock file it can't read counts as floorboss in use (fails closed): said as what it is, with the way out.
+    const [reason, why] = recent.unreadable
+      ? [
+          "floorboss's run lock file (active.json in its data folder) can't be read, so the follow-ups wait: running any floorboss command once writes it again",
+          `floorboss's run lock file (active.json in its data folder) can't be read, so its draft didn't go in: run any floorboss command once, and it can go at a later hour, once floorboss has had ${RUN_LOCK_MINUTES} quiet minutes`
+        ]
+      : [
+          `floorboss ran something in the last ${RUN_LOCK_MINUTES} minutes: trying again at the next hour`,
+          `floorboss was in use in the ${RUN_LOCK_MINUTES} minutes before this hour's run, so its draft didn't go in then: it can go at a later hour, once floorboss has had ${RUN_LOCK_MINUTES} quiet minutes`
+        ];
+    logLine('followups_skipped', { reason, due: due.items.length });
+    // Said once a day for each follow-up it keeps from going in.
+    logHeldOnce(
+      due.items.map((x) => ({ event: x.event, id: x.id, touch: x.touch, name: x.name, to: x.to, why })),
+      now,
+      { type: 'waiting', daily: true }
+    );
+    summarise();
+    return 0;
+  }
+  if (!takeRunFile(now)) {
+    logLine('followups_skipped', { reason: 'another unattended run is under way' });
+    return 0;
+  }
+  let exit = 0;
+  try {
+    const session = randomUUID();
+    const token = randomBytes(32).toString('hex');
+    if (!createOnce(['tickets'], `${session}.json`, { v: 1, session, token_sha256: sha256(token), pid: process.pid, at: new Date(now).toISOString(), items: due.items }))
+      throw new Error('a ticket for this session id was there already');
+    const test = process.env.FLOORBOSS_TEST === '1';
+    const env = { ...process.env, ...(typeof inst.path === 'string' && inst.path ? { PATH: inst.path } : {}) };
+    const run = claudeRun({
+      program: claudeFor(process.env, inst),
+      session,
+      token,
+      env,
+      extra: test ? { pluginDir: process.env.FLOORBOSS_E2E_PLUGIN_DIR || null, mcpConfig: process.env.FLOORBOSS_E2E_MCP_CONFIG || null } : {}
+    });
+    logLine('run_launched', { session, items: due.items.length, events: [...new Set(due.items.map((x) => x.event))] });
+    const limit = (test && Number(process.env.FLOORBOSS_FOLLOWUPS_LIMIT_MS)) || RUN_LIMIT_MS;
+    const r = await startRun(run, limit);
+    createOnce(['tickets'], `${session}.ended`, { at: new Date().toISOString() });
+    try {
+      endSession(session);
+    } catch {
+      /* no lock of its own was left */
+    }
+    const mine = logEntries().filter((e) => e.session === session);
+    const unclear = noteUnclear(session, mine);
+    logLine('run_ended', {
+      session,
+      exit: r.code,
+      ...(r.signal ? { signal: r.signal } : {}),
+      ...(r.error ? { error: r.error } : {}),
+      drafts: mine.filter((e) => e.type === 'draft_result' && e.ok === true).length,
+      held: mine.filter((e) => e.type === 'held').length,
+      ...(unclear ? { unclear } : {}),
+      ...(r.code !== 0 && r.tail ? { said: oneLine(r.tail, 300) } : {})
+    });
+    exit = r.code === 0 ? 0 : 1;
+  } catch (e) {
+    logLine('followups_failed', { reason: String(e?.message || e) });
+    exit = 1;
+  } finally {
+    try {
+      unlinkSync(runFile());
+    } catch {
+      /* gone */
+    }
+    try {
+      writeSummary(dayOf(new Date(nowMs()).toISOString()));
+    } catch {
+      /* the log still holds it */
+    }
+  }
+  return exit;
+}
+
 if (isMain(import.meta.url)) {
   const mode = process.argv[2];
-  if (mode !== 'brief' || process.argv.length > 3) {
-    process.stderr.write('floorboss: this is the launcher for scheduled runs. Its one mode is "brief".\n');
+  if (!['brief', 'followups'].includes(mode) || process.argv.length > 3) {
+    process.stderr.write('floorboss: this is the launcher for scheduled runs. Its modes are "brief" and "followups".\n');
     process.exit(2);
+  }
+  if (mode === 'followups') {
+    let code = 1;
+    try {
+      code = await runFollowups();
+    } catch (e) {
+      try {
+        logLine('followups_failed', { reason: String(e?.message || e) });
+      } catch {
+        /* nowhere to say so */
+      }
+    }
+    process.exit(code);
   }
   // The limit is shorter only under floorboss's own tests.
   const ms = (process.env.FLOORBOSS_TEST === '1' && Number(process.env.FLOORBOSS_BRIEF_LIMIT_MS)) || TIME_LIMIT_MS;

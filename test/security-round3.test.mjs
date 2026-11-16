@@ -17,9 +17,16 @@ import { cli as simCli } from './sims/lib/driver.mjs';
 const PEOPLE = [{ id: 'c001', name: 'Ana Berg', company: 'Acme' }, { id: 'c002', name: 'Bo Li', company: 'Globex' }, { id: 'c003', name: 'Cy Park', company: 'Initech' }];
 
 const hook = (H, input, { now = NOW, env = {} } = {}) => spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify(input), env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now, ...env }, encoding: 'utf8' });
-const guard = (H, tool_name, tool_input, opts) => hook(H, { tool_name, tool_input, session_id: opts?.session }, opts);
+// Claude Code gives each call its own id (tool_use_id), and the guard refuses a staged draft call that comes without
+// one (fix round 4, R2-N2): here a draft call's id is made from its tool and input, so its post hook is the same call.
+const draftCallId = (tool_name, tool_input) => {
+  let h = 2166136261;
+  for (const ch of `${tool_name}${JSON.stringify(tool_input)}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  return /draft/i.test(String(tool_name)) ? { tool_use_id: `toolu_draft_${h.toString(16)}` } : {};
+};
+const guard = (H, tool_name, tool_input, opts) => hook(H, { tool_name, tool_input, session_id: opts?.session, ...draftCallId(tool_name, tool_input) }, opts);
 // The PostToolUse hook after a call ran (round 4: an ask is recorded only once the call went through).
-const post = (H, tool_name, tool_input, { now = NOW } = {}) => spawnSync('node', [join(ROOT, 'hooks/guard.mjs'), 'post'], { input: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name, tool_input, tool_response: {}, session_id: 's1' }), env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now }, encoding: 'utf8' });
+const post = (H, tool_name, tool_input, { now = NOW } = {}) => spawnSync('node', [join(ROOT, 'hooks/guard.mjs'), 'post'], { input: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name, tool_input, tool_response: {}, session_id: 's1', ...draftCallId(tool_name, tool_input) }), env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now }, encoding: 'utf8' });
 const asks = (r) => /"permissionDecision":"ask"/.test(r.stdout || '');
 const reasonOf = (r) => JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
 const lock = (H) => writeFileSync(join(H.HOME, 'active.json'), JSON.stringify({ at: new Date().toISOString() }));

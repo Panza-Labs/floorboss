@@ -16,9 +16,10 @@ import { TOOLS_SAVERS } from './savers/tools.mjs';
 import { PROFILE_SAVERS } from './savers/profile.mjs';
 import { SHORTLIST_SAVERS } from './savers/shortlist.mjs';
 import { DRAFTS_SAVERS } from './savers/drafts.mjs';
+import { UNATTENDED_SAVERS } from './savers/unattended.mjs';
 
 // Every saver, by question id, in the order the questions were written (the order `asks` lists them in).
-const SAVERS = { ...SETUP_SAVERS, ...TOOLS_SAVERS, ...PROFILE_SAVERS, ...SHORTLIST_SAVERS, ...DRAFTS_SAVERS };
+const SAVERS = { ...SETUP_SAVERS, ...TOOLS_SAVERS, ...PROFILE_SAVERS, ...SHORTLIST_SAVERS, ...DRAFTS_SAVERS, ...UNATTENDED_SAVERS };
 
 // A question whose node saves one answer key and nothing else: the answer goes there as it is.
 function plainSaver(id) {
@@ -116,7 +117,8 @@ export function answer(opts) {
       'app_send_window',
       'crm_log_window',
       'app_outcome',
-      'crm_contacts'
+      'crm_contacts',
+      'unattended_seen'
     ].includes(opts.ask)
   ) {
     try {

@@ -15,9 +15,78 @@ import { readJsonStrict, recent } from './shared.mjs';
 import { isBrowser } from './connectors.mjs';
 import { markOnce } from './test-calls.mjs';
 import { enrichServerTool, enrichNotes, enrichPendingDir, callNote, windowUsed } from './lookups.mjs';
-import { listed, stageBatch } from './sends.mjs';
+import { listed, releasedSends, stageBatch } from './sends.mjs';
+import { rawValue } from './witness.mjs';
+import { append as appendLedger } from '../../lib/ledger.mjs';
 import { openWindow, openLogWindow, windowKey, sameCall } from './browser.mjs';
 import { check } from './check.mjs';
+
+// What a send or draft tool answered for one listed step, as the guard reads the raw answer (never Claude's report of
+// it): the message id and the thread (a draft's id too), appended to that event's ledger as call_result. A send
+// answers the message itself (id, threadId); a draft answers the draft (id) with its message (message.id,
+// message.threadId) or its thread (threadId). Nothing is written when the answer names none of them. True if written.
+function recordResult(item, kind, input, tool, nowMs) {
+  const r = rawValue(input?.tool_response);
+  if (!r.ok || !r.value || typeof r.value !== 'object' || Array.isArray(r.value)) return false;
+  const v = r.value;
+  const one = (...xs) => {
+    const x = xs.find((y) => (typeof y === 'string' && y.trim()) || (typeof y === 'number' && Number.isFinite(y)));
+    return x == null ? null : String(x).slice(0, 200);
+  };
+  const message_id = kind === 'send' ? one(v.id, v.message?.id, v.message_id, v.messageId) : one(v.message?.id, v.message_id, v.messageId);
+  const thread_id = one(v.threadId, v.message?.threadId, v.thread_id, v.conversationId);
+  const draft_id = kind === 'draft' ? one(v.id, v.draft_id, v.draftId) : null;
+  if (!message_id && !thread_id) return false;
+  appendLedger(
+    join(home(), 'events', item._event, 'ledger.jsonl'),
+    { type: 'call_result', who: 'guard', id: item.id, touch: item.touch ?? 1, kind, message_id, thread_id, ...(draft_id ? { draft_id } : {}), tool: String(tool).slice(0, 120) },
+    new Date(nowMs)
+  );
+  return true;
+}
+
+// A staged draft's call as the pre hook let it through (hooks/guard.mjs): its event, its step and the call mark it took,
+// noted by tool_use_id. Its prompt can be answered long after its stage list (past the list's 30 minutes) or after the
+// list was written again, and the list then no longer matches the call; the note still says which mark is this call's.
+const stageCallDir = () => join(home(), 'stage-calls');
+// The note needs Claude Code's id for the call (tool_use_id), so a staged draft's call that comes with none is refused,
+// with the user there or not (hooks/guard.mjs, hooks/guard/unattended.mjs).
+export const NO_CALL_ID = "Claude Code didn't give this draft call an id (tool_use_id), and floorboss keeps track of each draft call by it: update Claude Code, then try again";
+export const hasCallId = (input) => typeof input?.tool_use_id === 'string' && input.tool_use_id.trim() !== '';
+export function noteStageCall(callId, note, nowMs) {
+  writeText(join(stageCallDir(), callNote(callId)), JSON.stringify({ ...note, at: new Date(nowMs).toISOString() }));
+}
+// This call's note, used once (it goes), or null. Notes over a day old (a prompt declined, a call that failed) go too.
+function takeStageNote(input, nowMs) {
+  const dir = stageCallDir();
+  let names = [];
+  try {
+    names = readdirSync(dir).filter((f) => /^[0-9a-f]{32}$/.test(f));
+  } catch {
+    return null;
+  }
+  const id = String(input?.tool_use_id || '');
+  const mine = id ? callNote(id) : null;
+  let note = null;
+  for (const f of names) {
+    let v = null;
+    try {
+      v = JSON.parse(readFileSync(join(dir, f), 'utf8'));
+    } catch {
+      v = null;
+    }
+    if (f === mine) note = v;
+    if (f === mine || !v || !recent(v.at, nowMs, 864e5))
+      try {
+        unlinkSync(join(dir, f));
+      } catch {
+        /* gone */
+      }
+  }
+  if (!note || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(note.event || '')) || !/^c\d+$/.test(String(note.id || '')) || !Number.isInteger(note.touch)) return null;
+  if (!new RegExp(`^stage-call-${note.id}-${note.touch}-[0-9a-f]{24}-[1-9]\\d*$`).test(String(note.mark || ''))) return null;
+  return note;
+}
 
 // PostToolUse: the call ran, so the user said yes to any prompt it had (a call declined at the prompt never
 // runs and never gets here). Only now is the ask recorded: a lookup counted against its window, and a staged
@@ -136,8 +205,18 @@ export function afterCall(input, nowMs = clockNow()) {
       out.task_made = made.key;
     }
   }
+  // A send floorboss let through, and that ran: the tool's own answer names the message and its thread (Gmail's
+  // send_message answers id and threadId). Recorded for that step (call_result), so a follow-up can go in reply to it.
+  if (config.connectors?.['email.send']) {
+    const sentNow = [];
+    if (!check(input, { config, sendItems: releasedSends(), sent: sentNow }) && sentNow[0]?.via === 'email.send' && sentNow[0]._event) {
+      if (recordResult(sentNow[0], 'send', input, m[2], nowMs)) out.send_result = `${sentNow[0].id}:${sentNow[0].touch}`;
+    }
+  }
   const staged = [];
-  if (config.connectors?.stage_draft && !check(input, { config, stageItems: listed('stage-list.json', nowMs), staged }) && staged[0]) {
+  const onList = !!config.connectors?.stage_draft && !check(input, { config, stageItems: listed('stage-list.json', nowMs), staged }) && !!staged[0];
+  if (onList) {
+    if (staged[0]._event && recordResult(staged[0], 'draft', input, m[2], nowMs)) out.draft_result = `${staged[0].id}:${staged[0].touch ?? 1}`;
     const evDir = join(home(), 'events', staged[0]._event);
     const batch = stageBatch(evDir);
     const sp = join(evDir, 'stage-pending.json');
@@ -181,5 +260,39 @@ export function afterCall(input, nowMs = clockNow()) {
         /* gone */
       }
   }
+  // The draft call this one is, as its pre hook noted it: it ran, so its mark is done (a draft of that step went in:
+  // lib/unattended-drafts.mjs attendedDraftIn keeps an unattended one of the step out, whatever text it is for, until its
+  // receipt is saved or you say it isn't there), and its answer is recorded when the list no longer matched it.
+  const noted = config.connectors?.stage_draft ? takeStageNote(input, nowMs) : null;
+  if (noted) {
+    const mark = join(home(), 'events', noted.event, 'released', noted.mark);
+    if (existsSync(mark))
+      try {
+        writeFileSync(`${mark}.done`, new Date(nowMs).toISOString(), { flag: 'wx', mode: 0o600 });
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw e;
+      }
+    if (!onList && recordResult({ _event: noted.event, id: noted.id, touch: noted.touch }, 'draft', input, m[2], nowMs)) out.draft_result = `${noted.id}:${noted.touch}`;
+  }
   return out;
+}
+
+// PostToolUseFailure, with the user there: a staged draft's call that was let through (its prompt, if any, allowed)
+// and then failed may still have put the draft in (a mail tool can make it and time out after). Its call mark, as its
+// pre hook noted it, gets <mark>.failed: lib/unattended-drafts.mjs attendedDraftIn then holds an unattended draft of
+// that step (whatever text it is for) as "may or may not be in your drafts" until its receipt is saved or you say it
+// isn't there (outreach draft-missing). Nothing else is recorded: a failed call confirmed nothing.
+export function afterCallFailure(input, nowMs = clockNow()) {
+  if (!/^mcp__/.test(String(input?.tool_name || ''))) return {};
+  const config = readJsonStrict(join(home(), 'config.json'), {});
+  const noted = config.connectors?.stage_draft ? takeStageNote(input, nowMs) : null;
+  if (!noted) return {};
+  const mark = join(home(), 'events', noted.event, 'released', noted.mark);
+  if (!existsSync(mark)) return {};
+  try {
+    writeFileSync(`${mark}.failed`, new Date(nowMs).toISOString(), { flag: 'wx', mode: 0o600 });
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  }
+  return { failed: `${noted.id}:${noted.touch}` };
 }

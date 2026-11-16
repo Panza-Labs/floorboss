@@ -34,7 +34,9 @@ sites the user named, and no web address or search query may run past 300 charac
 email address, so WebFetch should not be on "always allow" in a floorboss session. Opening a browser window (to send notes in an event app or LinkedIn, or to log messages in your CRM) asks you at its first browser call, saying what the window lets the browser do; until you allow it, every call in it asks. The CRM log window is held to the same rules as the send window: only the CRM's contact, record,
 search and task pages, only the listed messages and their people's own details typed, and a prompt with the
 full text before each message goes in. During a run, saving a connection to a server setup didn't find, moving one to another server, or forgetting one asks you first; a subagent can do none of these, and a test call runs only on its own job's server. Every send, test call, CRM task, new CRM contact, browser note and logged message asks
-the user, showing the full text; a batch of mailbox drafts asks once, listing who each is to. Names and notes from lists and CRMs are scrubbed before they appear in a permission prompt (letters and a little punctuation only, cut short, quoted, with the person's id and address beside them); the approved text is shown verbatim under its own label. A message floorboss already let through once says so at its next prompt, and a draft batch's yes puts each draft in once. A PostToolUse hook records an ask (a lookup counted, a draft batch confirmed, a window allowed) only after the call has run, so a declined prompt is asked again and never counts as a yes. If the guard can't start, crashes or runs past its own 20-second deadline, the call is blocked. A guard that hangs outright, past Claude Code's 30-second hook timeout, is blocked only on Claude Code 2.1.295 or later (the hooks set `onFailure: "block"`); older versions let that call through, so use 2.1.295 or later. The records live in
+the user, showing the full text; a batch of mailbox drafts asks once, listing who each is to. The one call that
+doesn't ask is a follow-up draft you authorised for unattended drafts, inside a run floorboss's own scheduler
+started, once every check holds ([What runs on its own](#what-runs-on-its-own)); nothing is sent that way. Names and notes from lists and CRMs are scrubbed before they appear in a permission prompt (letters and a little punctuation only, cut short, quoted, with the person's id and address beside them); the approved text is shown verbatim under its own label. A message floorboss already let through once says so at its next prompt, and a draft batch's yes puts each draft in once. A PostToolUse hook records an ask (a lookup counted, a draft batch confirmed, a window allowed) only after the call has run, so a declined prompt is asked again and never counts as a yes. If the guard can't start, crashes or runs past its own 20-second deadline, the call is blocked. A guard that hangs outright, past Claude Code's 30-second hook timeout, is blocked only on Claude Code 2.1.295 or later (the hooks set `onFailure: "block"`); older versions let that call through, so use 2.1.295 or later. The records live in
 files a session could write, so that prompt is the final check: never set a send tool to "always allow".
 
 ### Reading the guard
@@ -49,7 +51,7 @@ The guard is split by topic, so a reviewer can take one file at a time:
 | `hooks/guard/test-calls.mjs` | The one test draft, task or contact that setup tries a connection with. |
 | `hooks/guard/lookups.mjs` | Contact-detail lookups: the window you agreed to, how many are left in it, and what one lookup may carry. |
 | `hooks/guard/sends.mjs` | Sends and staged drafts: each is checked against the text and recipient you approved. |
-| `hooks/guard/daymark.mjs` | One message a day to a person: the marker for a person's day at an event, and the locks a send is checked and released under across all your events: one for the address it goes to, one for each address the person has alone at that event, and one for each inbox address of theirs (info@, hello@) together with their name. |
+| `hooks/guard/daymark.mjs` | One message a day to a person: the marker for a person's day at an event, and the locks a send is checked and released under across all your events: one for the address it goes to, one for each address the person has alone at that event, and one for each inbox address of theirs (info@, hello@) together with their name. An unattended draft takes the same marker and locks. |
 | `hooks/guard/browser.mjs` | Where the browser may go during a run, and what may be clicked or typed in a send window or a CRM log window. |
 | `hooks/guard/prompts.mjs` | The permission prompts: the text you read before you say yes. |
 | `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records or to the launchd file of its scheduled job. |
@@ -57,6 +59,8 @@ The guard is split by topic, so a reviewer can take one file at a time:
 | `hooks/guard/web.mjs` | WebFetch and WebSearch during a run. |
 | `hooks/guard/run.mjs` | The run lock and the session: which tools are checked, subagents, forked sessions. |
 | `hooks/guard/after-call.mjs` | What is recorded after a call has run. |
+| `hooks/guard/unattended.mjs` | Unattended follow-up drafts: the opt-in and authorisation prompts and what their post hook writes, the run's ticket, the CRM judgements, and the guard's "allow", only in a ticketed run when every check holds, for three calls: the mailbox read and the CRM read for a person on the ticket, and that person's authorised draft. |
+| `hooks/guard/witness.mjs` | What the guard reads itself in a mailbox's or CRM's raw answer in an unattended run. |
 | `hooks/guard/shared.mjs` | Small helpers the rules share. |
 | `hooks/plugin-root.mjs` | The folder the plugin is installed in, which the file and shell rules compare paths against. |
 
@@ -87,7 +91,8 @@ while a run is under way:
 
 ### What runs on its own
 
-One thing, and only if you install it: the morning brief (macOS only for now; the README says how).
+Two things, each only if you install it: the morning brief, and the follow-up drafts (macOS only for now; the
+README says how). The brief is described first; the follow-up drafts after it.
 
 - **You install it, in your own terminal.** `node scripts/unattended.mjs install-brief` prints what will
   happen, asks you to type "yes", writes one file, `~/Library/LaunchAgents/com.floorboss.brief.plist`, and loads
@@ -159,6 +164,131 @@ One thing, and only if you install it: the morning brief (macOS only for now; th
   deletes the file. Disabling or uninstalling the plugin leaves the launchd file behind, pointing at a script
   that may be gone; remove it with that command first, or delete the file and log out and in.
 
+#### Unattended follow-up drafts
+
+With it on, an approved follow-up can go into your mailbox's drafts folder on its day with no prompt. Nothing is
+sent: you read each draft and press Send. It is the only place floorboss's guard returns "allow" instead of "ask", and
+it does so for three calls, all in a ticketed run: the mailbox read and the CRM read for a person on the run's ticket,
+and that person's authorised draft. In that run those three calls skip your own Claude Code prompt rules.
+
+- **Turning it on: three steps, each yours.** `/floorboss:unattended on` shows what happens with nobody there and
+  asks you to type "put my approved follow-ups in my drafts without asking me". Claude passes your words to
+  `connectors unattended-on`; the guard checks them and raises a Claude Code prompt that names the event and its
+  last day. Only the PostToolUse hook, after that very call ran, writes `unattended/optin/<event>.json`; a declined
+  prompt writes nothing. Then, in your own terminal, `scripts/unattended.mjs install-followups` shows the warning
+  again, asks you to type a six-letter code, records the Claude Code program on your PATH, writes
+  `~/Library/LaunchAgents/com.floorboss.followups.plist` (Node.js, the launcher, the word `followups`, every hour
+  of the day, never at load, no token) and loads it. The guard refuses that step, and the launcher's own
+  mode, in any session.
+- **Authorising: one prompt for the whole sequence.** `outreach authorise-unattended` makes the guard show every
+  approved email follow-up of the event that could go on its own: each person's quoted name, id and address, its
+  day and its whole text. Only a text the critic passed counts (never a skipped review or an approval past a
+  fail). Only the PostToolUse hook writes `unattended/authorised.jsonl`, and only if the list is still the one the
+  prompt showed. Each line is bound to the approval's hash, the address, the thread and the fingerprints of the draft
+  and mailbox recipes; a change to any of them means not authorised.
+- **The run.** Each hour the launcher works out from floorboss's records, with no model, what is authorised and due.
+  With nothing due it ends. Otherwise, with no floorboss run lock live in any session and no other unattended run,
+  it writes a one-time ticket (`unattended/tickets/<session>.json`: a fresh session id, the sha256 of a random 32-byte
+  token, the items) and starts `claude -p` with that session id, `--permission-prompts none`, `--no-chrome`,
+  `--no-session-persistence`, the agent, web, browser and scheduling tools refused, and the token in its
+  environment. It never passes `--bare`, `--safe-mode`, `--dangerously-skip-permissions` or a permission mode, and
+  it refuses to start one with any of them, or with `--environment`, `--allowedTools`, `--add-dir` (and, outside
+  floorboss's own tests, `--plugin-dir` or `--mcp-config`). self-check pins where that list is checked and the main
+  flags; `test/unattended-fixes.test.mjs` holds the rest. The run gets the launcher's environment without a variable
+  that loads code (`NODE_OPTIONS`, `BASH_ENV`, `DYLD_*` and the like) and, outside the tests, without floorboss's test
+  switches; the launchd file always names your data folder. Each run is a Claude Code session on your account and
+  counts toward your plan's usage and limits. It never starts from a Claude Code shell, stops the run after 40
+  minutes, and the summary is written from the log afterwards. A run whose launcher was stopped before it ended (the
+  Mac slept or was turned off) is ended at the next launch, so its lock doesn't hold later runs.
+- **The ticket.** The guard counts a session as the scheduled run only when its SessionStart hook saw a fresh
+  `startup` of that exact session id with the token, within 15 minutes of the ticket, once. A resume, a compact, a
+  fork, a subagent, a wrong or missing token, or a ticket already used never counts. In a session with a token,
+  every call that would ask is refused instead, Bash runs only the run's own steps (`flow next --unattended`,
+  `flow run-end` and `crm-judge`), and only three connected-tool calls pass: the mailbox read and the CRM read for a
+  person on the ticket, and the draft. The first refusal of anything in the run stops it.
+- **What the guard reads itself.** A read passes only when its arguments are exactly its saved recipe filled with
+  the run's own values for that person (their address, the day before the email this follow-up answers, the thread,
+  the CRM record bound at the authorisation, your address, their name): a later day, text after the day, another
+  thread, a value the model chose, or a key left out (or added, even holding an empty object or list) is refused.
+  After the mailbox read, the guard's PostToolUse hook reads the tool's raw answer (a Gmail-like or Outlook-like
+  shape) and counts what came from anyone but you since then; an answer with nothing in it, not even your own email
+  it answers, is unreadable. With a Gmail-like reader (get_thread or search_threads, as the claude.ai Gmail
+  connector has, on a server named for Gmail), two fixed reads replace the saved one in a run: the whole thread
+  (get_thread, metadata only) and a search of every folder but Spam for anything from them or to them since 15
+  minutes before the guard let that email or its draft through, in epoch seconds (only when that time is no later
+  than the send's own record and the end of its day, with a day's slack), or else since the day before it
+  (search_threads). The
+  search must prove it covered that time: it must show your own last email to them (by its message id when floorboss
+  has one, and then no other email of yours stands in for it; by a message of yours dated since the start only when
+  it has none) and every message of each conversation it shows (only the thread of that email, which the thread read
+  reads whole, may show fewer; a message count must be a whole number). Gmail's message count includes a thread's
+  drafts, which it never shows: in the thread of your last email (in the search and in the thread read) a count above
+  what is shown is no hold, and in any other conversation it holds the draft. An empty answer, or one without your email,
+  holds the draft as a search floorboss can't trust. Anything from them, from someone else in a conversation with
+  them, or an email you wrote to them yourself after your last floorboss one holds it too. In the thread of your last
+  email only what is dated since the start counts. In any other conversation the search shows, every message from
+  them or from anyone else but you holds the draft, whatever its date says: Gmail already kept the search to what
+  came in since the start, and a date that reads older is no reason to trust it. One that shows none of its messages
+  is unreadable. What this proves is that the search covered your own email: the `after:` start, sent mail and the
+  `to:` half of the group. It can't show that `from:` matched inside the group (a connector that rewrote the query
+  could drop it, and a reply from them in a new thread would then go unseen); no code can prove that without a
+  message from them. Real calls to the claude.ai Gmail connector (15 November 2026) took the grouping, `from:`,
+  `to:`, `in:anywhere` and `after:` in epoch seconds (exact to the second). Its own description says `in:anywhere`
+  covers Trash but leaves out Spam (and mail it treats as confidential, encrypted or suspicious), so a reply that
+  Gmail put in Spam isn't seen. A draft that replies by message id
+  must reply to your latest own message in the thread the guard read, dated since that start. An answer is read
+  only in one form: text and structured data that disagree, an error text, a search answer with anything beside its
+  conversations and Gmail's own guess of how many matched (`resultCountEstimate`, never read), such as
+  `omittedContent`, or one with no tool-result wrapper, is unreadable; so is a date it can't place for sure, a sender
+  with two addresses, and an address outside plain ASCII for the search. After the CRM read, what
+  the CRM logged since then (by when it was logged, too), split into what came from them, floorboss's own emails as
+  the CRM logged them (the same subject within a day of each send, one per send), and the rest. "From them" is held
+  by code: a message or email from their address, an inbound call, a meeting, an opt-out, a bounce, a logged
+  LinkedIn, SMS, WhatsApp or chat message, a call with no direction and any kind of activity floorboss doesn't
+  know. It writes `unattended/witness/<session>/`. Once it saw anything from them in a run, that person stays held
+  for the rest of the run, whatever a later read shows. An answer it can't read whole (another shape, an error, one
+  page of several) is no witness: the draft is held and the run stops. A reply check Claude records never counts
+  here. A call that fails after it was let through (Claude Code's PostToolUseFailure) counts as an answer it couldn't
+  read.
+- **Claude's judgement.** For each activity in "the rest", the run's model records hold or go and a one-line reason
+  (`outreach crm-judge`). The guard records it only for the activities its own witness listed, only "hold" or "go",
+  and records a "go" on an activity whose own text speaks to floorboss or Claude as a hold. A hold, once recorded,
+  stays for the run. Anything from the contact holds whatever the model says. Every judgement and reason goes in the
+  log and the summary. Only the CRM activity your CRM activity reader (`crm.activity`) returns is read: a reader that
+  lists only emails never shows calls, notes or stage changes. A CRM connected with no activity reader (only a
+  lookup) holds every draft, with the reason and how to fix it, and the opt-in says so first; only with no CRM
+  connected at all is email alone checked. With Salesforce or Close connected (floorboss can't read their activity
+  on its own), every draft is held.
+- **The draft's allow.** The guard returns "allow" for one stage_draft call only in a ticketed run, when all of these
+  hold: the opt-in is live and not switched off, no earlier draft in this run is waiting on its result, the schedule
+  is installed for this version, the follow-up is one of the ticket's and authorised exactly as it is now (and its
+  due day is not earlier than the one the authorisation showed), no draft of the same step is going in from a
+  session with you there or went in from one (or failed there) with no receipt saved, for any text of the step, no Salesforce or Close CRM is connected, it is a
+  follow-up by email, your last email to them went to that
+  address, in that thread, through a floorboss prompt you allowed, the critic passed this text, both reads are this
+  run's and under 90 seconds old and clean, every CRM judgement is in and "go", it is a weekday from 09:00 to 17:00
+  in the event's zone, its due day or the next, not after the event's last day, and every check a send or a staged
+  draft has (the recipe and its exact arguments, the thread, one message a day per person across your events, a
+  stop, a reply, a bounce). Your word that a draft isn't in your drafts folder (`outreach draft-missing`) gives that
+  step its day back, so its next draft can go in the same day as the one you said isn't there. It also reads every other event's ledger for that address: anything that holds the
+  person there, or anything done about them there since the authorisation or the email it answers (an approval, a
+  send, a draft, a hold, a decision of yours), holds the draft. All of it comes from the ledgers and the stored
+  authorisation, never from the outbox page or another rendered view. It then takes a once-only mark and writes `stage_released` to the ledger, marked
+  unattended, before the call runs. Anything else is refused with the reason, and the run stops there.
+- **What you see.** `unattended/log.jsonl` has every decision. Each day's `summary-<day>.md` is built from it
+  alone, with times in the event's zone. The next attended floorboss run shows it first, the reminder hook mentions
+  it once, and the ledger marks the drafts as unattended. A draft let through whose result never came back is said
+  as "may or may not be in your drafts folder": nothing else goes in for that person until you look; if it isn't
+  there, your words (`outreach draft-missing`, which the guard puts to you in a Claude Code prompt naming the person
+  and the follow-up; only its PostToolUse hook writes `stage_cleared`) let that step go in again, once. A due follow-up that can't go in is
+  said too, once: floorboss in use in the 30 minutes before the run, a weekend in the event's zone, or an earlier draft
+  floorboss hasn't seen sent yet. A finished case (they replied or booked) is said once, as over.
+- **Turning it off.** `/floorboss:unattended off` (allowed in any session) or `unattended.mjs off`: the same switch
+  stops the brief. `uninstall-followups` removes the job. The opt-in ends with the event's last day.
+- **What it can't see.** Replies on LinkedIn or in the event app: check those inboxes regularly and tell floorboss
+  or your CRM when one comes in. If you installed the morning brief, the morning page names the people written to
+  there whose draft can go in on its own that day.
+
 ### What floorboss can't control
 
 - **Anthropic.** floorboss runs inside Claude Code, so what Claude reads (your lists, CRM records, mail,
@@ -167,6 +297,7 @@ One thing, and only if you install it: the morning brief (macOS only for now; th
   floorboss's private data folder. If that folder is synced or backed up, so is what Claude read.
 - **Claude Code's own settings.** Its permission mode decides whether a call the guard lets through still
   asks you. Auto-approve or "always allow" on a send tool removes that prompt; don't use them for floorboss.
+  floorboss's own unattended drafts are separate: you turn them on in three steps, and they never send.
 - **The services you connect.** A CRM, mailbox or people-data tool keeps and logs what it's given under its
   own rules (CRM audit logs, what coworkers can see, a vendor's retention).
 - **Web search and pages.** Searches go to the search provider Claude Code uses, and the pages the browser
@@ -192,6 +323,8 @@ Anything else is refused.
 | A new CRM contact, in your browser | your CRM's web app | name, company, title, email and LinkedIn address, as listed; only someone the CRM search didn't find, so a message to them can be logged | once per batch, naming each person, if you chose "ask" in setup (the recommended answer); only at setup if you chose "yes"; never if you chose "no" (the default) | the CRM log window: every value typed must be a listed one. The guard can't tell a search box from a new-contact form, so it can't stop those listed values going into one. A result reporting a contact floorboss didn't list is recorded as failed. Tested in simulated runs, not yet against a real CRM. `test/browser-new-contact.test.mjs` |
 | A people-data lookup | your people-data tool (Apollo, Clay and the like) | the person's name and company, to find an email | the count first, then the calls | the lookup window, and only as many as you agreed |
 | Files | `~/.floorboss/` (or `FLOORBOSS_HOME`), and the temp folder | your event records, drafts, the outbox page | no | guard: Claude's file tools write nowhere else during a run; `test/security-supplychain.test.mjs` |
+| A follow-up draft, unattended (only if you turn it on) | your own drafts folder, in your thread with them | the authorised follow-up, word for word; nothing is sent | once, at authorisation, with every follow-up's whole text; then not again | guard: ticket, authorisation, the reads it witnessed, the time rules and every staging check; `test/unattended-drafts.test.mjs` |
+| The follow-up drafts' launchd file (macOS, only if you install it) | `~/Library/LaunchAgents/com.floorboss.followups.plist` | the paths of Node.js and floorboss's launcher, the word `followups`, the hours, `FLOORBOSS_HOME` if set | by the install itself, in your terminal, with a typed code | written only by `scripts/unattended.mjs`; the guard refuses it from a session; `test/unattended-launcher.test.mjs`, `test/security-unattended-drafts.test.mjs` |
 | The morning brief's launchd file (macOS, only if you install it) | `~/Library/LaunchAgents/com.floorboss.brief.plist` | the paths of Node.js and floorboss's launcher, the time, `FLOORBOSS_HOME` if set | by the install itself, in your terminal, before it writes | written only by `scripts/unattended.mjs`, which you run; the guard refuses it from a session; `test/unattended-install.test.mjs`, `test/security-unattended.test.mjs` |
 
 Through a connected tool, floorboss never deletes or merges a record, never changes a field that has a value, never
@@ -217,9 +350,10 @@ It changes nothing, installs nothing and makes no network call. It checks, and p
 - the only processes floorboss starts are Node.js running its own scripts, and your system's opener for the
   outbox page and the morning brief's page (it prints each place);
 - `launchctl` is started by one script only, `scripts/unattended.mjs`, the install you run in a terminal, by
-  its full path (the guard also names it, to refuse it); the scheduled launcher starts one process, the
-  opener, by its full path; the stand-ins the tests use for both are read only under the tests, and nothing
-  in floorboss's code sets that switch;
+  its full path (the guard also names it, to refuse it); the scheduled launcher starts two processes, the
+  opener by its full path and, for the follow-up drafts, Claude Code by the path the install recorded, with the
+  arguments `claudeRun` builds and `argsRefusal` checks, word for word; the stand-ins the tests use for all three
+  are read only under the tests, and nothing in floorboss's code sets that switch;
 - the hooks run only `hooks/guard.mjs` and `hooks/remind.mjs`;
 - floorboss's code creates its data folder private (0700 folders, 0600 files); this reads the code, not the
   folder on your machine;
@@ -278,7 +412,8 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
     51st that reaches a protected place through a link under another name passes;
   - two launchers started at the same instant over the lock of a run that died: both can run, and the page
     may open twice;
-  - a copy or a link of the install script under another name, and a relative file name with no folder;
+  - a copy of the install script under another name, a link to it made without naming the plugin's folder (`ln -s`
+    with the folder's path is refused), and a relative file name with no folder;
   - another scheduler (cron), and a shell command that writes into floorboss's data folder without naming any
     of this (`rm -rf ~/.floorboss`), in a session that never ran floorboss, where Claude Code's own prompt for
     the command is the check;
@@ -300,6 +435,57 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
   like "remove", "move" or "write" together (a note about cleaning up floorboss's page), or when it is too
   large for one pass (the caps above). Do those from your terminal, or
   turn the plugin off for that session.
+- **Unattended drafts.** What they rest on, and what is left:
+  - A shell that runs as you without a prompt can forge any file here, a ticket and an authorisation included
+    (the "Your environment" limit). The difference from an attended run: no prompt meets a forged draft. That is
+    why only a follow-up to someone you already emailed through a prompt, in that same thread, goes in, and why
+    nothing is sent: your own Send in your mail app is the last check.
+  - The guard's "allow" lets a call through only if Claude Code honours a hook's allow over its own prompt
+    [believed: Claude Code's docs]. With `--permission-prompts none`, anything that would still prompt is denied, so
+    a mistake here fails closed.
+  - The run's token is in its own process's environment, so its own shell commands could read it; there, Bash runs
+    only the run's own steps, and the guard refuses any command that names the token. The ticket is bound once, at
+    the session's fresh start, but a hook can't tell processes apart: a second process with the run's session id
+    and token would pass as the run. The token is only in the run's own process tree (its stdio MCP servers
+    included, believed), so that adds nothing the run itself couldn't do.
+  - The mailbox and CRM reads are as good as their search: a reply to another address, in a folder the tool
+    doesn't search, or by phone isn't seen. Replies on LinkedIn or in the event app aren't seen at all.
+  - Claude's judgement of CRM activity can be wrong. It can only hold a draft or let the approved text go in, and
+    the summary shows each call with its reason the same day.
+  - When floorboss ran something in the last 30 minutes (its run lock's own window), the schedule waits for the next
+    hour. A session that ran floorboss and is only left open doesn't hold it, so a run can start while that session is
+    still open: the once marks, the day markers and the attended draft marks keep two drafts of one step apart. An
+    attended draft whose Claude Code prompt is still open holds that step's unattended draft for 12 hours, in the
+    launcher and the guard. Once that prompt is allowed and its call runs, however long after its stage list and even
+    if the list was written again since, the post hook marks that call as gone in (by the note the guard kept for that
+    call). A prompt left open more than 12 hours and then allowed can still put a second draft of the step in, if an
+    unattended run put one in meanwhile. An attended draft of a step that went in with no receipt saved, or whose
+    call failed after it was let through (Claude Code's PostToolUseFailure), holds that step's unattended draft as
+    "may or may not be in your drafts", in the launcher and the guard, whatever text it was for (one from before you
+    changed and approved the text again included), until its receipt is saved or you say it isn't there (`outreach
+    draft-missing`). A call mark floorboss can't date holds the step until you run floorboss once with you there. A
+    draft of an older text of a follow-up (one an unattended run let through, or whose receipt was saved, before you
+    changed and approved the text again) holds that follow-up's unattended draft, in the launcher and the guard, until
+    you say it isn't in your drafts folder (`outreach draft-missing`, once you deleted it); the authorisation prompt
+    names it.
+    All of this relies on Claude Code giving each call its own id (`tool_use_id`): the guard keeps each draft call's
+    note by it, so a staged draft call that comes with no id is refused, with you there or not. A run lock file that
+    can't be read keeps the schedule waiting, said as that.
+  - In any session the guard refuses a shell command that runs its own hooks (the plugin's `hooks` folder by its
+    path; node on a file named `guard.mjs` with a hook's word such as `post` or `PostToolUse`, in any folder; or node
+    with the guard named from inside the plugin folder), that links the plugin folder (`ln -s`), or that writes
+    floorboss's ledger or release marks (a wildcard on the name's end, such as `ledger.json?`, included). Before
+    matching it reads `~` and `$HOME` as your home folder, `//` and `/./` as `/`, and `/private/tmp` as `/tmp`. Like
+    the other name rules it reads text, not the shell, so a path built some other way isn't seen: a copy of the
+    guard under another name, or a hook's input read from a file by a command with no hook word in it.
+  - The run's command pre-allows file writes under `~/.floorboss` only. With `FLOORBOSS_HOME` somewhere else, the CRM
+    judgement file can't be written there without a prompt, so a run that needs a judgement holds and stops (fails
+    closed).
+  - Your own earlier email is told from theirs by `own_email` (and its `+tag` forms). Sent from another alias, it
+    counts as in from someone else, and the draft is held (fails closed).
+  - Not yet tested on a real Mac: launchd starting the job after sleep, and claude.ai connectors and your login in
+    a run launchd started with the screen locked. The end-to-end test (`test/e2e/unattended-headless.test.mjs`,
+    stand-in connectors only) is run by hand.
 - **The guard's deadline.** The guard gives itself 20 seconds. A check that is still waiting then is stopped
   by a timer; a check that held the process past it is refused when it finishes, whatever it found. A send is
   checked against the deadline again just before its release is written, a second short of it, so a send refused
@@ -315,8 +501,10 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
   one. A new lock that a stale break renamed away in a race is left under another name, and removed once it is a
   day old, the next time a lock is taken. A guard's mark for a message with no release counts as a send that may
   have gone only once it is a minute old: before then it may be a call still being checked, and nothing can settle
-  it. A draft put in your drafts writes no release, so it holds nothing at your other events: you send it
-  yourself. The rule is by address: two events count as writing to one person when they share an address for
+  it. A draft put in your drafts while you are there writes no release, so it holds nothing at your other events:
+  you send it yourself. An unattended draft is different: the guard takes the same locks and the person's day mark
+  for it, and the release it writes (stage_released) counts as that day's message to them at every event, as a
+  send's does. The rule is by address: two events count as writing to one person when they share an address for
   that person (an email, a profile link, an address a message was approved to go to, a new address after a
   bounce), for a send recorded there and for one let through there. A coordinate note's approval names the
   colleague it goes to, not the person, and adds no address. An address that two people's list entries at one
@@ -387,7 +575,9 @@ floorboss can't tell a faithful relay from a made-up one:
   short and refuse any link or outside address they recognise (your own email and a phone number are fine).
 - **Your connected tools.** CRM lookups (opt-outs among them), mailbox history, replies, bounces and
   calendar times come back through files Claude writes. An opt-out or a reply that Claude leaves out is
-  never seen.
+  never seen. In an unattended run it is the other way round: the guard reads the mailbox's and the CRM's own
+  answers itself, and Claude's account of them doesn't count. What is left to Claude there is its judgement of
+  CRM activity that didn't come from the contact, recorded with its reason.
 - **CRM records you found or imported.** `crm-records --via check` and `--via import` record which CRM record
   belongs to whom from what Claude read in the CRM or an export; floorboss can't tie them to a call it saw, as it
   does for records it created.

@@ -86,10 +86,19 @@ export const promptPerson = (name, id, to) => {
 // Claude Code's permission prompt, with a reason the user reads before clicking. One call can need more than
 // one (a page and a typed text): every reason goes in the one prompt, written when the call is let through.
 const askReasons = [];
+// What the last refusal written here said (the guard's exit hook in an unattended run stops the run with it).
+export const blockedSaid = { text: '' };
 export function ask(reason) {
   askReasons.push(reason);
 }
 export function allow() {
+  // In an unattended run (a token in the environment) nobody is there to read a prompt: a call that would ask is
+  // refused, with what it would have asked, and the item waits for the user.
+  if (askReasons.length && process.env.FLOORBOSS_UNATTENDED) {
+    blockedSaid.text = `nobody is there to answer a prompt in an unattended run, so this waits for you. It would have asked: ${askReasons[0].split('\n')[0].slice(0, 300)}`;
+    writeSync(2, `floorboss blocked this call: ${blockedSaid.text}\n`);
+    process.exit(2);
+  }
   if (askReasons.length)
     writeSync(
       1,
@@ -97,6 +106,19 @@ export function allow() {
         hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: askReasons.join('\n\n---\n\n') }
       })
     );
+  process.exit(0);
+}
+// The "allow" floorboss's guard gives, only in a ticketed unattended run, for three calls that every check passed
+// (hooks/guard/unattended.mjs): the mailbox read and the CRM read for a person on the run's ticket, and the authorised
+// follow-up draft. Claude Code then runs it with no prompt, whatever the user's own prompt rules would have done.
+// Nothing else in floorboss returns it.
+export function allowUnattended(reason) {
+  if (askReasons.length) {
+    blockedSaid.text = 'it would have needed a prompt, and nobody is there in an unattended run.';
+    writeSync(2, `floorboss blocked this call: ${blockedSaid.text}\n`);
+    process.exit(2);
+  }
+  writeSync(1, JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', permissionDecisionReason: String(reason).slice(0, 2000) } }));
   process.exit(0);
 }
 // A message floorboss already let through once (then cleared to go again): said in the next prompt, since the user is

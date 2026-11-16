@@ -12,6 +12,7 @@ import { configPath } from '../../../lib/paths.mjs';
 import { nowFrom } from '../../../lib/event.mjs';
 import { dirname } from 'node:path';
 import { refreshOutbox } from '../../event-outreach/scripts/commands/cards.mjs';
+import { unattendedNext } from './steps/unattended.mjs';
 
 // Steps that only run one of floorboss's own commands (no judgement, no question, no send): next runs them
 // itself and moves on, so Claude gets a turn only where it has something to do. What each reported comes back
@@ -30,6 +31,8 @@ function withAnswerFile(out) {
 }
 
 export function next(opts) {
+  // A scheduled run (/floorboss:followups-due): its own steps, for the follow-ups its ticket names, and nothing else.
+  if (opts.unattended) return unattendedNext(opts);
   return withAnswerFile(nextStepOut(opts));
 }
 function nextStepOut(opts) {

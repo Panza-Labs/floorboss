@@ -13,6 +13,7 @@ import { draftSteps } from './steps/drafting.mjs';
 import { approvalSteps } from './steps/approval.mjs';
 import { sendSteps } from './steps/sending.mjs';
 import { step } from './steps/shared.mjs';
+import { unattendedSeenStep, unattendedOfferStep } from './steps/unattended.mjs';
 export { ROOT, script, context } from './context.mjs';
 export { followupsModeOf } from './steps/shared.mjs';
 export { CRM_INDEPENDENT_WARNING, DISCLAIMER, helpFor, ANSWER_FORMAT } from './steps/wording.mjs';
@@ -34,7 +35,11 @@ export function nextStep(c) {
   // Each phase returns the step to do now, or nothing when everything it looks at is settled. They run in this
   // order and the first step returned is the answer. x carries c and what earlier phases worked out for later ones.
   const x = { c };
-  // The disclaimer comes first; then an event whose dates can't be read stops here, before setup or anything else.
+  // What floorboss did on its own since the user last looked comes first (it already happened: the user hears it before
+  // anything else); then the disclaimer; then an event whose dates can't be read stops here, before setup or anything
+  // else.
+  const seen = unattendedSeenStep(x);
+  if (seen) return seen;
   const setup = setupSteps(x);
   if (setup?.step === 'disclaimer') return setup;
   return (
@@ -46,6 +51,7 @@ export function nextStep(c) {
     replySteps(x) ||
     draftSteps(x) ||
     approvalSteps(x) ||
+    unattendedOfferStep(x) ||
     sendSteps(x)
   );
 }

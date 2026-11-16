@@ -131,7 +131,7 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
     }
     if (s.call) {
       // The guard first, as Claude Code would run it; then the stand-in, then the receipt.
-      const g = spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify({ tool_name: persona.sendTool || s.call.recipe?.mcp_name || 'mcp__gmail__send_email', tool_input: argsFor(s.call) }), env: { ...H.env, FLOORBOSS_NOW: H.now }, encoding: 'utf8' });
+      const g = spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify({ tool_name: persona.sendTool || s.call.recipe?.mcp_name || 'mcp__gmail__send_email', tool_input: argsFor(s.call), tool_use_id: `toolu_sim_${s.call.item.id}_${s.call.item.touch}_${Math.random().toString(36).slice(2, 10)}` }), env: { ...H.env, FLOORBOSS_NOW: H.now }, encoding: 'utf8' });
       (persona.guardCalls ||= []).push({ step: s.step, item: s.call.item, status: g.status, stdout: g.stdout, stderr: g.stderr });
       if (g.status !== 0) throw new Error(`the guard refused ${s.call.item.id}:${s.call.item.touch}: ${g.stderr}`);
       // Sends and CRM tasks ask the user every time.

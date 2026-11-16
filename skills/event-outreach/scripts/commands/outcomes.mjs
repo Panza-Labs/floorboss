@@ -132,6 +132,49 @@ export function syncList(opts) {
   };
 }
 
+// The drafts floorboss put in each person's drafts folder (a staged receipt, or an unattended run's stage_released)
+// whose step isn't recorded as sent: when the draft went in (the earliest of those ledger lines), its thread, its
+// message id and its approved text. A sent message the mailbox or CRM shows that is one of them is that step
+// (sync.mjs planSync). From the ledger and floorboss's own draft files only.
+function draftsIn(c, ids) {
+  const out = {};
+  for (const id of ids) {
+    const p = c.folded.people?.[id];
+    for (const [tt, x] of Object.entries(p?.touches || {})) {
+      const touch = Number(tt);
+      if (!Number.isInteger(touch) || touch < 1 || x?.sent || !(x?.staged || x?.stage_released)) continue;
+      const times = c.entries.filter((e) => e?.id === id && (e.touch ?? 1) === touch && ['staged', 'stage_released'].includes(e.type)).map((e) => Date.parse(e.at)).filter(Number.isFinite);
+      const hash = x.stage_released?.hash || x.approved?.hash || x.hash || null;
+      let d = null;
+      try {
+        d = hash && /^[0-9a-f]{24}$/.test(String(hash)) ? readJson(join(c.paths.dir, 'drafts', `${hash}.json`), null) : null;
+      } catch {
+        d = null;
+      }
+      (out[id] ||= []).push({
+        touch,
+        at: times.length ? Math.min(...times) : NaN,
+        thread: x.staged?.thread_id || x.stage_released?.thread_id || null,
+        message_id: x.staged?.message_id || null,
+        subject: d?.subject ? String(d.subject) : null,
+        body: d?.body ? String(d.body) : null
+      });
+    }
+  }
+  return out;
+}
+
+// The message ids floorboss already has for each person's steps (a send's own answer, a receipt, a draft's), from the
+// ledger: a mailbox message with one of them is that step's (sync.mjs planSync).
+function filedIds(c, ids) {
+  const out = {};
+  for (const id of ids)
+    for (const [tt, x] of Object.entries(c.folded.people?.[id]?.touches || {}))
+      for (const v of [x?.sent?.message_id, x?.staged?.message_id, x?.send_result?.message_id, x?.stage_result?.message_id])
+        if (v != null && v !== '') (out[id] ||= []).push({ touch: Number(tt), message_id: String(v) });
+  return out;
+}
+
 // sync --event <slug> --source mailbox|crm --file <answers>: sends, replies and calls floorboss didn't make
 // itself, read from the user's mailbox (email.messages) or CRM (crm.activity), into the log.
 export function sync(opts) {
@@ -157,7 +200,8 @@ export function sync(opts) {
   }
   const r = validateSync(readJson(allowedPath(opts.file)), opts.source === 'crm' ? 'crm.activity' : 'email.messages', wanted);
   if (r.errors.length) return { saved: false, errors: r.errors };
-  const plan = planSync(r.people, { state: c.state, since: sinceOf(c), source: opts.source, now: c.now, byId: c.byId, zone: c.event.time_zone });
+  const ids = r.people.map((p) => p.id);
+  const plan = planSync(r.people, { state: c.state, since: sinceOf(c), source: opts.source, now: c.now, byId: c.byId, zone: c.event.time_zone, drafts: draftsIn(c, ids), filed: filedIds(c, ids) });
   for (const e of plan.entries) led(c, e);
   // A CRM read vouches for someone's email replies only when it shows the CRM has seen their email since your
   // last message (an email or message either way, on or after that day). Nothing logged can mean the CRM doesn't

@@ -11,13 +11,11 @@ test('every command and the README name the session window the code uses', () =>
   const flat = (p) => readFileSync(join(ROOT, p), 'utf8').replace(/\s+/g, ' ');
   for (const f of readdirSync(join(ROOT, 'commands'))) {
     const s = flat(join('commands', f));
-    // unattended.md starts no run and holds no session: exempt by name, and only while its two calls (off, status)
-    // are all it may make.
-    if (f === 'unattended.md') {
-      assert.deepEqual(JSON.parse(/allowed-tools: (\[.*\])/.exec(readFileSync(join(ROOT, 'commands', f), 'utf8'))[1]), ['Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" off)', 'Bash(node "${CLAUDE_PLUGIN_ROOT}/scripts/unattended.mjs" status)']);
-      assert.doesNotMatch(s, /skills\/[a-z-]+\/scripts\/cli\.mjs/, 'it runs none of the skills\' scripts');
-      continue;
-    }
+    // unattended.md turns unattended drafts on and authorises follow-ups through floorboss's scripts, so it holds a run
+    // like any command; and none of its calls installs, removes or switches back on what runs on its own.
+    if (f === 'unattended.md')
+      for (const t of JSON.parse(/allowed-tools: (\[.*\])/.exec(readFileSync(join(ROOT, 'commands', f), 'utf8'))[1]))
+        assert.doesNotMatch(t, /install|uninstall|unattended\.mjs" on/, t);
     assert.match(s, new RegExp(`until it ends, or at the latest ${SESSION_LOCK_HOURS} hours after its last floorboss step`), f);
     assert.match(s, new RegExp(`for any other session it lapses on its own ${RUN_LOCK_MINUTES} minutes`), f);
   }

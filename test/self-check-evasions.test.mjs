@@ -65,7 +65,18 @@ const EVASIONS = {
   'launchctl handed another file to load': (d) => change(d, 'scripts/unattended.mjs', "  const r = launchctl(['bootstrap', domain(), plist]);", "  const r = launchctl(['bootstrap', domain(), '/tmp/evil.plist']);"),
   'launchctl given a fourth thing to do': (d) => change(d, 'scripts/unattended.mjs', "  const r = launchctl(['bootstrap', domain(), plist]);", "  launchctl(['kickstart', '-k', 'system/com.apple.x']);\n  const r = launchctl(['bootstrap', domain(), plist]);"),
   'the launchd file given RunAtLoad true': (d) => change(d, 'lib/unattended.mjs', "    '  <key>RunAtLoad</key><false/>',", "    '  <key>RunAtLoad</key><true/>',"),
-  'the launchd file given a shell to run': (d) => change(d, 'lib/unattended.mjs', "    `  <array>${s(n)}${s(l)}${s('brief')}</array>`,", "    `  <array>${s('/bin/sh')}${s('-c')}${s(l)}</array>`,"),
+  'the launchd file given a shell to run': (d) => change(d, 'lib/unattended.mjs', "    `  <array>${s(n)}${s(l)}${s(j.mode)}</array>`,", "    `  <array>${s('/bin/sh')}${s('-c')}${s(l)}</array>`,"),
+  // The follow-up drafts' Claude Code run.
+  'the Claude Code run given --bare': (d) => change(d, 'lib/unattended.mjs', "'--no-session-persistence', '--disallowed-tools'", "'--no-session-persistence', '--bare', '--disallowed-tools'"),
+  'the Claude Code run given a permission mode that answers for the user': (d) =>
+    change(d, 'lib/unattended.mjs', "  const why = argsRefusal(args, { test: env.FLOORBOSS_TEST === '1' });", "  args.push('--permission-mode', 'bypassPermissions');\n  const why = argsRefusal(args, { test: env.FLOORBOSS_TEST === '1' });"),
+  "the check of the Claude Code run's flags skipped": (d) => change(d, 'lib/unattended.mjs', '  if (why) throw new Error(`nothing was started: ${why}`);', '  if (false) throw new Error(why);'),
+  "Claude Code's path taken from the environment outside the tests": (d) => change(d, 'lib/unattended.mjs', "  if (env.FLOORBOSS_TEST === '1') return env.FLOORBOSS_CLAUDE || null;", '  if (env.FLOORBOSS_CLAUDE) return env.FLOORBOSS_CLAUDE;'),
+  'the Claude Code run started with another program': (d) => change(d, 'scripts/scheduled.mjs', '      program: claudeFor(process.env, inst),', "      program: '/bin/sh',"),
+  'the Claude Code run started from a Claude Code shell': (d) => change(d, 'scripts/scheduled.mjs', "  if ('CLAUDECODE' in process.env) {", '  if (false) {'),
+  "the Claude Code run's time limit taken from the environment outside the tests": (d) =>
+    change(d, 'scripts/scheduled.mjs', '    const limit = (test && Number(process.env.FLOORBOSS_FOLLOWUPS_LIMIT_MS)) || RUN_LIMIT_MS;', '    const limit = Number(process.env.FLOORBOSS_FOLLOWUPS_LIMIT_MS) || RUN_LIMIT_MS;'),
+  'the Claude Code run started a second time': (d) => change(d, 'scripts/scheduled.mjs', '    const r = await startRun(run, limit);', '    await startRun(run, limit);\n    const r = await startRun(run, limit);'),
   'the launchd file given KeepAlive': (d) => change(d, 'lib/unattended.mjs', "    '  <key>RunAtLoad</key><false/>',", "    '  <key>RunAtLoad</key><false/>',\n    '  <key>KeepAlive</key><true/>',"),
   'the file written to the launchd folder made another text': (d) => change(d, 'scripts/unattended.mjs', "  writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });", "  writeFileSync(tmp, process.env.PLIST || text, { mode: 0o600, flag: 'wx' });"),
   // From the third review.
@@ -95,6 +106,6 @@ for (const [name, apply] of Object.entries(EVASIONS))
     assert.equal(r.code, 1, `the check still held:\n${r.out}`);
     assert.ok(r.failed.length >= 1);
     // A failed line made of several conditions names the ones that failed.
-    for (const line of r.failed.filter((l) => /the scheduled launcher starts one process|the install script starts one process|the launchd file runs Node|watchdog ends the process/.test(l)))
+    for (const line of r.failed.filter((l) => /the scheduled launcher starts|the install script starts one process|the launchd files? runs? Node|watchdog ends the process|the one Claude Code run/.test(l)))
       assert.match(r.out.slice(r.out.indexOf(line)).split('\n')[1] || '', /^ {6}not so: \S/, line);
   });

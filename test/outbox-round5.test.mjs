@@ -30,7 +30,8 @@ const lines = (dir) =>
     .map((l) => JSON.parse(l));
 const guard = (H, tool, item) => {
   const r = spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], {
-    input: JSON.stringify({ tool_name: tool, tool_input: { to: item.to, subject: item.subject, body: item.body } }),
+    // With its id (tool_use_id), as Claude Code gives it: the guard keeps track of each draft call by it.
+    input: JSON.stringify({ tool_name: tool, tool_input: { to: item.to, subject: item.subject, body: item.body }, tool_use_id: `tu-${Math.random().toString(36).slice(2)}` }),
     env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: NOW },
     encoding: 'utf8'
   });
