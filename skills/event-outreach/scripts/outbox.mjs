@@ -13,7 +13,8 @@ function verdictChip(v) {
   return v.verdict === 'PASS' ? '<span class="chip ok">critic: pass</span>' : `<span class="chip bad" title="${e(v.reasons.join('; '))}">critic: failed</span>`;
 }
 
-// copy: false for a message that can no longer go (the text stays readable, with nothing to copy it out).
+// copy: false for a message that can no longer go, or one not approved yet (the review page): its text stays readable,
+// with nothing to copy it out.
 function field(label, id, value, copy = true) {
   return (
     `<div class="field"><div class="k"><span>${e(label)}</span>${copy ? `<button type="button" class="copy" data-copy="${e(id)}">Copy</button>` : ''}</div>` +
@@ -47,9 +48,13 @@ function card(c, hosts = [], app = null) {
             ? `no address: paste it in ${e(app)}`
             : 'no address: paste it wherever you reach them';
   // A message that can no longer go (c.not_going: the event is over, or no day is left for it), or not today (c.not_today:
-  // another event wrote to that address today), is never queued to send and has nothing to copy.
+  // another event wrote to that address today), or one pending approval, is never in the LinkedIn queue: nothing on the
+  // page offers it to send.
   const hold = c.not_going || c.not_today;
-  const li = !hold && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
+  const li = !hold && !c.pending && !c.may_have_gone && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
+  // Nothing to copy: it can't go any more, or not today, it waits for approval, or floorboss let it through and it may
+  // have gone.
+  const copy = !hold && !c.pending && !c.may_have_gone;
   const channel =
     c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
@@ -78,11 +83,16 @@ function card(c, hosts = [], app = null) {
   ${failed}
   ${c.checks_stuck?.length ? `<p class="failnote">Still fails floorboss's checks after three rewrites: ${e(c.checks_stuck.join('; '))}. Edit it or drop it; it isn't offered for approval as it is.</p>` : ''}
   ${c.not_going ? `<p class="failnote">Not going: ${e(c.not_going)}. Don't send it.</p>` : c.not_today ? `<p class="failnote">Not today: ${e(c.not_today)}. Send it on another day: one message a day to a person, across all your events.</p>` : ''}
-  ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject, !hold) : ''}
-  ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body, !hold)}
+  ${
+    c.may_have_gone
+      ? `<p class="failnote">floorboss let this message through to send${/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(c.may_have_gone) ? ` (${e(c.may_have_gone.slice(0, 16).replace('T', ' '))} UTC)` : ''} and nothing says what happened: it may have gone. Look in your sent mail, then record it as sent, or say to send it again. Don't copy it.</p>`
+      : ''
+  }
+  ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject, copy) : ''}
+  ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body, copy)}
   <p class="stale" hidden>The earliest time offered here has passed. Run /floorboss:event-draft again for new times before sending.</p>
   ${
-    c.kind === 'coordinate'
+    c.kind === 'coordinate' || c.pending
       ? ''
       : `<div class="ticks">
     <label><input type="checkbox" data-tick="sent"> Sent</label>
@@ -92,6 +102,26 @@ function card(c, hosts = [], app = null) {
   </div>`
   }
 </article>`;
+}
+
+// The page left in place of one that could not be rebuilt: it offers nothing to copy or tick, and says how to get the
+// page back. build: the id of what the failed build read (page-inputs.mjs), so it is tried again only once one of those
+// changes; with none, the next check rebuilds it.
+export function renderOutOfDate({ name, why, slug, build = null }) {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">${build && /^[0-9a-f]{20}$/.test(build) ? `\n<meta name="floorboss-build" content="${build}">` : ''}
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${e(name || slug)} · floorboss outbox (out of date)</title>
+<style>body{margin:0;padding:24px 16px;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:#fbf0dc;color:#4a3000}.wrap{max-width:760px;margin:0 auto}code{font:13px ui-monospace,monospace}</style>
+</head>
+<body><div class="wrap">
+<h1>This outbox page is out of date</h1>
+<p>floorboss could not rebuild it after a change, so it shows nothing to copy or send. Nothing you approved is lost.</p>
+<p>Why: ${e(String(why || '').slice(0, 400))}</p>
+<p>To get the page back, run <code>event-outreach open --event ${e(slug)} --no-open</code>, or ask Claude to open the outbox.</p>
+</div></body></html>
+`;
 }
 
 export function renderOutbox(data) {
@@ -110,6 +140,8 @@ export function renderOutbox(data) {
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp()}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="floorboss-ledger" content="${Number(data.ledgerAt) || 0}">
+${/^[0-9a-f]{20}$/.test(data.build || '') ? `<meta name="floorboss-build" content="${data.build}">` : ''}
 <title>${e(data.event.name)} · floorboss outbox</title>
 <style>
 :root{--bg:#f4f5f7;--card:#fff;--ink:#16202a;--muted:#5c6774;--line:#dde1e6;--accent:#2347d6;--ok:#17703d;--okbg:#e3f3e9;--bad:#a3212b;--badbg:#fbe6e8;--warn:#8a5a00;--warnbg:#fbf0dc;color-scheme:light}
@@ -147,6 +179,7 @@ a{color:var(--accent)}textarea{width:100%;min-height:90px;font:12px ui-monospace
 <body><div class="wrap">
 <p class="banner">You're sending these yourself. Check the rules that apply to you and your recipients before you send. floorboss never sends anything.</p>
 <h1>${e(data.event.name)}</h1>
+${data.waiting ? `<p class="banner">${data.waiting} ${data.waiting === 1 ? 'draft is' : 'drafts are'} waiting for your approval and ${data.waiting === 1 ? 'is' : 'are'} not shown here.</p>` : ''}
 <p class="sub">${e(data.event.city || '')} · ${e(data.event.start_date)} to ${e(data.event.end_date)} · times in ${e(data.event.time_zone)} · generated ${e(data.generatedAt)}</p>
 <div class="bar"><span><b id="sentCount">0</b> of <b>${msgs.length}</b> sent</span>
 <span>${counts.coordinate || 0} held for a colleague · ${counts.suppressed || 0} left alone (do-not-contact, opted out, a lost deal) · ${counts.not_drafted || 0} not drafted (they don't fit, have no address, or wait on your call)</span>

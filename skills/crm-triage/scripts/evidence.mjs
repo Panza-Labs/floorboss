@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { readJson } from '../../../lib/jsonio.mjs';
 import { nowFrom } from '../../../lib/event.mjs';
 import { home } from '../../../lib/paths.mjs';
-import { readLedger, fold, lastSent } from '../../../lib/ledger.mjs';
+import { lentBy } from '../../../lib/lent.mjs';
 import {
   normPersonName,
   nameMatchKey,
@@ -24,6 +24,7 @@ import {
 } from '../../../lib/normalize.mjs';
 import { CONSTANTS } from '../../../lib/config.mjs';
 import { isActive } from './dnc.mjs';
+import { ownerSaid } from '../../../lib/names.mjs';
 
 const profileKey = (url) => {
   const m = /linkedin\.com\/in\/([^/?#\s]+)/i.exec(String(url || ''));
@@ -313,7 +314,7 @@ export function accountsFromCrm(rows, { ownerIsUser = () => false, left = new Se
           domain,
           owner: mineLost[0].owner.trim(),
           mine: true,
-          status: `${mineLost[0].status || 'lost'} on your record; ${top.owner}'s record there says "${top.rows[0].status || 'lost'}"`,
+          status: `${mineLost[0].status || 'lost'} on your record; ${ownerSaid(top.owner)}'s record there says "${top.rows[0].status || 'lost'}"`,
           deal: null,
           off: false,
           from: 'crm',
@@ -442,7 +443,9 @@ export function knownMatches(contact, known) {
   return out;
 }
 
-// People messaged at the user's other events (from their ledgers), with what happened.
+// People messaged at the user's other events (from their ledgers), with what happened, and anyone who said stop there
+// whether or not they were messaged there (a stop at the booth, or in a reply logged at that event): read through
+// lib/lent.mjs, the one reading of what an event lends the others.
 // The mock event and the user's real events never see each other: a real person "in touch" at a real event is
 // not held in the mock, and a stop at the mock never holds anyone at a real event (mock ledgers are skipped).
 export function earlierEvents(currentSlug) {
@@ -454,33 +457,29 @@ export function earlierEvents(currentSlug) {
   for (const slug of readdirSync(dir)) {
     if (slug === currentSlug) continue;
     try {
-      const ev = readJson(join(dir, slug, 'event.json'), null);
-      if (!ev || ev.mock || !existsSync(join(dir, slug, 'ledger.jsonl'))) continue;
-      const { entries, damaged } = readLedger(join(dir, slug, 'ledger.jsonl'));
-      const st = fold(entries, damaged);
-      for (const [id, p] of Object.entries(st.people)) {
-        if (p.merged_into) continue;
-        const sent = lastSent(p);
-        const approved = Object.values(p.touches).some((t) => t.approved && !t.sent);
-        if (!sent && !approved) continue;
-        const date = sent ? p.touches[sent].sent.date : String(Object.values(p.touches).find((t) => t.approved)?.approved.at || '').slice(0, 10);
+      const ev = lentBy(join(dir, slug));
+      if (!ev) continue;
+      for (const r of ev.people) {
+        const date = r.sent ?? r.approved ?? '';
         // A meeting still to come is booked, not met: "(booked 11 Nov)".
-        const ahead = p.booked && p.booked_start && Date.parse(p.booked_start) > nowFrom({}).getTime();
+        const ahead = r.booked && r.booked_start && Date.parse(r.booked_start) > nowFrom({}).getTime();
         const bookedWord = ahead
-          ? `booked ${new Date(p.booked_start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: ev.time_zone || 'UTC' })}`
+          ? `booked ${new Date(r.booked_start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: ev.time_zone || 'UTC' })}`
           : 'met';
+        const outcome = r.stopped ? 'said stop' : r.booked ? bookedWord : r.replied ? 'replied' : r.sent != null ? 'no reply' : 'approved, maybe sent';
         people.push({
-          name: p.name,
-          email: p.email,
+          name: r.name,
+          email: r.email,
           emails_seen: [],
-          company: p.company,
-          company_key: p.company ? companyKey(p.company) : null,
+          company: r.company,
+          company_key: r.company ? companyKey(r.company) : null,
           date,
           source: `your event ${ev.name}`,
-          stopped: p.stopped,
-          outcome: p.stopped ? 'said stop' : p.booked ? bookedWord : p.replied ? 'replied' : sent ? 'no reply' : 'approved, maybe sent',
-          says: `messaged at ${ev.name} on ${date} (${p.stopped ? 'said stop' : p.booked ? bookedWord : p.replied ? 'replied' : sent ? 'no reply' : 'approved, maybe sent'})`,
-          id,
+          stopped: r.stopped,
+          outcome,
+          // Never messaged there: only the stop is theirs to say.
+          says: r.messaged ? `messaged at ${ev.name} on ${date} (${outcome})` : `said stop at ${ev.name}`,
+          id: r.id,
           slug
         });
       }

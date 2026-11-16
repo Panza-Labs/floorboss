@@ -14,7 +14,7 @@ import { inOneGo } from '../../../../lib/ledger.mjs';
 import { toOf, sendRoute, whereAt } from './routes.mjs';
 import { ctxOf, sameSlots, sendingOn, isOut, led } from './context.mjs';
 import { readTodo, savedDraft, ledgerTouch, staleFor, savedBeforeIt } from './saved-drafts.mjs';
-import { renderFile, allOutboxCards } from './cards.mjs';
+import { rebuildOutbox } from './cards.mjs';
 
 // A refusal ends with a hint for Claude (can_interpret, and the people by ID): it may work out what the user meant and
 // send that back as an interpreted answer, which is always shown to the user for a yes.
@@ -455,8 +455,8 @@ function gateAnswer(opts) {
   // The entries are written. A failure from here on is said as that: saved, but the page could not be rebuilt.
   let outbox;
   try {
-    const c2 = ctxOf(opts.event, opts);
-    outbox = renderFile(c2, allOutboxCards(c2));
+    // Through the page's lock, from the ledger as it is now (the first page, or a rebuild).
+    outbox = rebuildOutbox(opts.event, opts, { force: true }).rebuilt;
   } catch (e) {
     e.written = true;
     e.message = `The answer was saved, but the outbox page could not be rebuilt: ${e.message} The approvals stand; "event-outreach open --event ${c.event.slug} --no-open" rebuilds the page.`;

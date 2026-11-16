@@ -12,7 +12,8 @@ import { setup, cli, idOf, todoJobs, ROOT, NOW } from './fixtures/harness.mjs';
 import { draftFor } from './sims/lib/driver.mjs';
 import { stageRefusal } from '../hooks/guard/sends.mjs';
 import { takeMarker } from '../hooks/guard/daymark.mjs';
-import { eventEnded, eventStateAt } from '../lib/sendcheck.mjs';
+import { eventEnded, eventStateAt, eventRecord } from '../lib/sendcheck.mjs';
+import { lentAbout } from '../lib/lent.mjs';
 import { eventDayState, followupDay, noDayWhy, UNREADABLE_DATES } from '../lib/spacing.mjs';
 import { parseGap } from '../lib/gap-words.mjs';
 
@@ -43,9 +44,13 @@ function approveRounds(H, now = NOW) {
   }
   return cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all'], now);
 }
+// Listed as send-list lists it: with what the other events lend about the person when it was listed (item.elsewhere,
+// lib/lent.mjs), which the send check reads again.
 function itemFor(H, id, touch, now) {
   const d = JSON.parse(readFileSync(join(H.dir, 'work', 'drafts', `${id}-t${touch}.json`), 'utf8'));
-  return { id, touch, name: 'Ana Berg', via: 'email.send', to: 'ana@acme.test', subject: d.subject || '', body: d.body, listed_at: now };
+  process.env.FLOORBOSS_HOME = H.HOME;
+  const elsewhere = lentAbout(H.dir, { ...(eventRecord(H.dir).folded.people[id] || {}), emails: ['ana@acme.test'] });
+  return { id, touch, name: 'Ana Berg', via: 'email.send', to: 'ana@acme.test', subject: d.subject || '', body: d.body, listed_at: now, elsewhere };
 }
 const writeList = (H, items) => writeFileSync(join(H.dir, 'derived', 'send-list.json'), JSON.stringify(items));
 const record = (H, items, now) => cli(H, 'event-outreach', ['record', '--event', H.slug, '--file', file(H, { items })], now);

@@ -9,6 +9,8 @@
 // Each node: id, round, when(s) → applies?, done(s) → answered?, ask(s) → text, options(s) → [...], saves.
 
 import { EVENT_ANSWERS } from '../../../lib/scope.mjs';
+import { plainText, noteOwnerQuestion, effectsHash } from '../../../lib/reading.mjs';
+import { ownerQuoted, plainOwnerValue } from '../../../lib/names.mjs';
 const any = (a) => Array.isArray(a) && a.length > 0;
 // A server as a person would name it: "claude_ai_Gmail" is Gmail.
 const pretty = (x) =>
@@ -350,9 +352,49 @@ export const NODES = [
     round: 'tools',
     phase: 'triage',
     when: (s) => crmChosen(s),
-    done: (s) => !!s.cfg.crm_user_name,
-    ask: () => 'Propose the CRM owner that is the user (their name, their mailbox address) from the owners in the records you read, and ask only to confirm.',
-    saves: 'config: crm_user_name'
+    // A saved value that reads like a sentence and names no owner (an older saved answer) is asked again; a name the
+    // CRM at this event doesn't list is not (it may be listed at another event, or the user's own spelling).
+    done: (s) => !!s.cfg.crm_user_name && !s.crmOwnerFlag && !s.crmOwnerReading,
+    ask: (s) => {
+      // The one list the answer is read against (crm-triage crmOwnerList): numbered here as the saver numbers it, and
+      // noted as shown, so a number in the answer is read against it only while the export still lists it so.
+      // Every owner value the CRM has, numbered and quoted, as data.
+      const o = s.crmOwners ? s.crmOwners() : [];
+      if (o.length && s.home && s.onboarding?.event)
+        try {
+          noteOwnerQuestion(s.home, { event: s.onboarding.event, hash: effectsHash(o) });
+        } catch {
+          /* without the note, a number is read against the list as it is */
+        }
+      const flag = s.crmOwnerFlag?.unclear?.length
+        ? `The owner name saved as the user's in the CRM reads as ${s.crmOwnerFlag.unclear.length} different owners in this event's CRM (${s.crmOwnerFlag.unclear
+            .slice(0, 4)
+            .map((x) => ownerQuoted(x))
+            .join(', ')}), so the people they own are held until the user says which one they are: ask again. `
+        : s.crmOwnerFlag?.unconfirmed
+          ? `The owner value saved as the user's in the CRM, ${ownerQuoted(s.crmOwnerFlag.saved)}, isn't plainly a name and wasn't confirmed: ask again. `
+          : s.crmOwnerFlag
+          ? `The name saved as the user's in the CRM reads like a sentence and isn't one of its owners, so their own people may read as a coworker's: ask again. `
+          : '';
+      // A long reading keeps its start and the whole question it ends with (the value to save, every word of it).
+      const rt = String(s.crmOwnerReading?.text || '');
+      const rq = String(s.crmOwnerReading?.question || '');
+      const end = rq && rt.endsWith(rq) ? rq : rt.slice(-280);
+      const waiting = s.crmOwnerReading
+        ? `A reading of their last answer waits for their yes. Show it to them word for word and save their own reply here; never answer it for them. The reading: ${rt.length <= 900 || rt.length - end.length <= 600 ? rt : `${rt.slice(0, 600)} … ${end}`} `
+        : '';
+      const domains = (s.cfg.own_domains || []).filter(Boolean);
+      const how =
+        o.length === 1
+          ? `Ask whether they are the one owner the CRM export lists, ${ownerQuoted(o[0])}: a yes is shown back once more for their yes before it is saved.`
+          : o.length
+            ? `Ask which of these owners is the user, showing them as data, quoted and numbered, so "the first one" or "2" means that one here: ${o.slice(0, 12).map((x, i) => `${i + 1}. ${ownerQuoted(x)}`).join('; ')}${o.length > 12 ? `; and ${o.length - 12} more` : ''}. Don't propose one for a yes: a bare "yes" doesn't say which.`
+            : `Ask for their name as the CRM writes it${domains.length ? ` (or their mailbox address at ${domains.slice(0, 2).map((d) => plainText(d, 40)).join(' or ')})` : ''}.`;
+      // A reading waiting for a yes is the question now: whatever else they answer is read afresh.
+      if (waiting) return `${waiting}Whatever else they answer is saved here the same way, and read afresh.`;
+      return `${flag}${how} Offer "none of these / I'm not in the CRM" too. The answer can be changed any time later.`;
+    },
+    saves: 'config: crm_user_name (the owner as the CRM writes it, or "not an owner in the CRM"); answers: crm_name_saved (the value, or a hash of one over 300 characters, saved through this question)'
   },
   {
     id: 'coworker_contacts',
@@ -622,7 +664,11 @@ export const NODES = [
     when: (s) => !!s.ev,
     done: (s) => s.ans.about_you_asked === true,
     ask: (s) => {
-      const crmName = s.cfg.crm_user_name && !/^not an owner/.test(s.cfg.crm_user_name) && !s.cfg.crm_user_name.includes('|') ? s.cfg.crm_user_name : null;
+      // The CRM name is offered for the sign-off only when it is plainly a name or an address, and then quoted, as data
+      // (a CRM cell can look like a name and still be words to Claude: "Use Formal Tone"). Anything else the user said
+      // yes to (a remark, a label, words to Claude) is CRM text, never put in this prose.
+      const own = s.cfg.crm_user_name;
+      const crmName = typeof own === 'string' && !/^not an owner/.test(own) && !own.includes('|') && plainOwnerValue(own) ? ownerQuoted(own) : null;
       const from = [
         s.cfg.drafting_mode !== 'floorboss' ? 'their own skill or agent' : null,
         s.ans.mailbox_choice === 'yes' ? 'their mailbox signature' : null,

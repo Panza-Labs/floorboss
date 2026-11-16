@@ -112,8 +112,9 @@ The first public version.
   event holds the person's addresses there too, from the time it was made. If another event can't be read (its
   folder can't be opened or is a link to a folder that is gone, or its ledger can't be read or is a link to a file
   that is gone), sends wait and say why: floorboss can't tell what went there. So does a line there floorboss can't
-  read that names the address. A send lock left by a guard that died holds that address for up to a minute; a call
-  in that time is told to try again in a minute. A new lock that a stale break renamed away in a race is removed
+  read that names the address. A send lock left by a guard that died is broken at once when the process id it holds
+  shows that guard has ended; one with no readable id holds that address for up to a minute, and a call in that time
+  is told to try again in a minute. A new lock that a stale break renamed away in a race is removed
   once it is a day old, the next time a lock is taken. The outbox page, the
   task list and the summary hold a message to an address another event wrote to today: its card says "Not today"
   with the reason and has nothing to copy, and its send task comes another day. The stage list puts a
@@ -219,6 +220,62 @@ The first public version.
   time leaves nothing that holds the message, and trying again works. The check of a person's sends at your other
   events reads each event once per call, not once per listed message, so a home with many events stays well
   inside the deadline. Resolving a very long path no longer takes time in proportion to the square of its length.
+- From eight simulated first-time users (10 to 12 Nov) and five review rounds, two fixes, each with regression tests:
+  - The outbox page offers Copy only for messages that are approved and not yet sent, to people who may still be
+    contacted, judged at this event and at your others. The page records what it was built from: this event's record,
+    settings, lists, mappings and drafts, your settings, the day, and every other event's settings, lists and record.
+    After any command that writes something a page reads, each page is checked (the sizes and times of those files, a
+    hash of this event's record, and for a record that changed at another event, what it says about who was messaged,
+    approved or said stop there and its answers about CRM matches) and rebuilt only if something it reads changed. A
+    cut, a keep or a cap, a rewrite, a drop, an edit, a send, a stop, a decline, a bounce, a skip or a coworker's hold
+    takes the card off at once. So does a send, an approval or a stop for the same person at another event (or a
+    message to their address another event let through today, which makes the card "Not today"), also a
+    stop from someone never messaged there. A cut or a group decision at one event, for someone the other pages don't
+    have, leaves those pages as they were; an answer there about whether a CRM record is someone is read by every
+    other event, so their pages are rebuilt. A message floorboss let through to send, with no receipt yet, is not
+    offered to copy: its card says it may have gone. `flow next` checks the page the same way, which also catches a
+    list, or this event's record, edited by hand, and the day after the event ends; `open` always rebuilds it.
+    Commands run at the same time leave the page in step: one rebuild at a time per event. The page's lock is broken
+    at once when the process holding it was killed (after 3 seconds when it was killed before it wrote its id); while
+    that process still runs, it is broken only after 10 minutes on one build. A read that meets a file another command
+    is replacing is tried once more. A page that still can't be rebuilt is replaced by one that offers nothing to copy
+    and says it is out of date; the command saves and says so, naming the event (the approval gate still exits with
+    that message as an error). It is tried again at a step at its own event or once something it reads changes, so a
+    write elsewhere that changes nothing it reads doesn't say it again. Folders in `events/` that aren't events are
+    skipped. The review page shows drafts not yet approved with nothing to copy, and leaves out messages already sent
+    or answered; the final page says how many drafts wait for approval. No email card is offered to someone whose
+    address bounced with no new one. The page is a view, and floorboss's own send check never reads it. At each send
+    that check reads the sending event's record, and what your other events' records say about that person: a stop, a
+    send or an approval recorded there since the send list was made stops the send until the list is made again, which
+    reads them in full. A send list made while another event's record changed holds every item it lists. Drafts put in
+    your mailbox while sending is off are held the same way: a draft whose person had a stop, a send or an approval
+    recorded at another event since the stage list was made isn't staged, and a stage list made while another event's
+    record changed holds every draft.
+  - The answer to "which CRM owner are you?" is read against the owners of your CRM export, in the order the question
+    shows them: one list for the question and the answer, whatever export, column correction or layout from another
+    event it came from, so "2" picks the owner you were shown second. If the export changed after the question was
+    shown, a number is read back with the list as it is now. Every owner value the CRM has is offered as a numbered
+    choice (the first 12; type any other), shown quoted, after removing control and invisible characters and capping its
+    length. Nothing you pick or type is refused for its wording: only an empty answer, one too long, a number that isn't
+    on the list, or one that names no one ("yes" with several owners listed, a bare "no"). An owner's name with nothing
+    beside it but words like "that's me", "I'm" or "yes" is that owner; "none of these" saves no owner. A value that is
+    plainly a name, or plainly an email address, saves at once. Anything else (a remark, a tag, a label, a negation, a
+    word addressed to Claude or an assistant, a word such as send, skip, hold or stop, or anything the check can't
+    place) is read back word for word, for example: Save "X" as you in the CRM? (yes or no). It is saved only on yes, so
+    a false alarm costs one read-back, never a lockout. The same goes for an answer read from more than your words (a
+    question mark, "yes" with one owner listed, words that are no owner listed here), one that reads as two different
+    owners, and any change that would take an approved message from you at any event, said with what it changes; if that
+    has changed by your yes, the reading is over 30 minutes old or it was made at another event, the yes saves nothing.
+    Triage reasons and the say-back show a doubtful value quoted, as data, and it is never offered as your sign-off. A
+    saved value that reads as two different owners at an event makes neither yours there: the people they own are held,
+    and the question is asked again there. An owner written with only your first name ("Bram"), in a CRM that also
+    writes your name in full, holds the people it owns for you to decide (an account owned so, only where a coworker's
+    account would hold them); in a CRM that writes owners by first name alone, your full name is read back as that
+    owner. The setting is yours at every event: a change says who changes group here and at your other events, and names
+    approved messages that are ready to send again or no longer yours. At the mock, an answer changes only the mock. The
+    owner is saved only through this question: `event-context config --set` refuses it. A value saved some other way
+    that isn't plainly a name, or a sentence saved by an older version that names no owner, is asked about again.
+    Do-not-contact, opt-out and uncertain-match holds still apply.
 - A subagent can hand its result back during a run on current Claude Code, which delivers results through a tool of its
   own that the guard refused as unknown: critics, researchers and writers did the work and couldn't report it.
 - From a sixth full audit (11 Nov, 13 confirmed findings, all low; ten fixed here, each with a regression test, and

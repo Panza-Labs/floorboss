@@ -19,6 +19,8 @@ import { setup, cli, idOf, todoJobs, ROOT, NOW } from './fixtures/harness.mjs';
 import { draftFor } from './sims/lib/driver.mjs';
 import { addressBusyToday, homeSends, homeSendsReads, sentOrGoingToday, eventRecord, MARKER_LIVE_MS, busyWhy, inboxKey } from '../lib/sendcheck.mjs';
 import { SHARED_INBOX } from '../lib/normalize.mjs';
+import { lentAbout } from '../lib/lent.mjs';
+import { pageCurrent } from '../skills/event-outreach/scripts/commands/page-inputs.mjs';
 import { mergeRows } from '../skills/crm-triage/scripts/merge.mjs';
 import { withLock, withLocks, STALE_KEEP_MS } from '../lib/lock.mjs';
 import { stageRefusal } from '../hooks/guard/sends.mjs';
@@ -68,9 +70,14 @@ function approveRounds(H, now = NOW) {
   }
   return cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all'], now);
 }
+// Listed as send-list lists it: with what the other events lend about the person when it was listed (item.elsewhere,
+// lib/lent.mjs), which the send check reads again.
 function itemFor(H, id, touch, now, to = 'ana@acme.test') {
   const d = JSON.parse(readFileSync(join(H.dir, 'work', 'drafts', `${id}-t${touch}.json`), 'utf8'));
-  return { id, touch, name: 'Ana Berg', via: 'email.send', to, subject: d.subject || '', body: d.body, listed_at: now };
+  process.env.FLOORBOSS_HOME = H.HOME;
+  const person = eventRecord(H.dir).folded.people[id] || {};
+  const elsewhere = lentAbout(H.dir, { ...person, emails: [to].filter((x) => /@/.test(String(x || ''))) });
+  return { id, touch, name: 'Ana Berg', via: 'email.send', to, subject: d.subject || '', body: d.body, listed_at: now, elsewhere };
 }
 const writeList = (H, items) => writeFileSync(join(H.dir, 'derived', 'send-list.json'), JSON.stringify(items));
 // The real hook on one approved step, listed as a session could list it.
@@ -714,6 +721,26 @@ test('the outbox page, the task list and the summary hold a message another even
     const next = cli(B, 'event-outreach', ['task-list', '--event', B.slug], at('2026-10-13', '09:00'));
     assert.ok(JSON.parse(readFileSync(next.file, 'utf8')).some((x) => x.kind === 'send' && x.id === ana), 'its task comes the next day');
   }
+});
+
+// The merge of the outbox rebuild (page-inputs.mjs: a page is rebuilt only when something it reads changed) with the
+// one-a-day rule across events (a card says "Not today"): a message another event let through, with no send recorded
+// there yet, changes nothing that event lends (lib/lent.mjs), but it is something the page reads, so the page is out of
+// date and the next check rebuilds it with the card held.
+test('the outbox page is out of date once another event lets a message to that address through, and the next check rebuilds it "Not today"', () => {
+  const { A, B, ana } = sendingAndStaging();
+  const t = at('2026-10-12', '10:00');
+  cli(B, 'event-outreach', ['open', '--event', B.slug, '--no-open'], at('2026-10-12', '08:30'));
+  assert.match(readFileSync(join(B.dir, 'outbox.html'), 'utf8'), new RegExp(`data-copy="${ana}-t1-body"`), 'offered before the send at A');
+  process.env.FLOORBOSS_HOME = B.HOME;
+  const paths = { outbox: join(B.dir, 'outbox.html'), derived: join(B.dir, 'derived') };
+  assert.equal(pageCurrent(paths, new Date(at('2026-10-12', '08:30'))).current, true, 'current before');
+  assert.equal(hook(A, ana, 1, at('2026-10-12', '09:00')).status, 0);
+  assert.equal(pageCurrent(paths, new Date(at('2026-10-12', '08:30'))).current, false, 'out of date once A let her message through');
+  cli(B, 'flow', ['next', '--event', B.slug], t);
+  const html = readFileSync(join(B.dir, 'outbox.html'), 'utf8');
+  assert.match(html, /Not today: another message to Ana Berg \(ana@acme.test\) already went or is going today, for ev\b/);
+  assert.doesNotMatch(html, new RegExp(`data-copy="${ana}-t1-body"`), 'nothing to copy');
 });
 
 test('a send whose check crosses the deadline inside the send lock is refused and leaves nothing behind: trying again works', () => {

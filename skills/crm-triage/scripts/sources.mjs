@@ -386,8 +386,8 @@ const ALIASES = {
 export const STOP_WORDS =
   /\b(bitte keine (weiteren )?(e-?mails?|mails?|werbung|nachrichten|anrufe)|keine (weiteren )?(e-?mails?|mails?) (mehr|erhalten)|m[oö]chte keine (e-?mails?|mails?|werbung)|kontakt unerw[uü]nscht|keine kontaktaufnahme|w[uü]nscht keinen kontakt|kein newsletter|no me escriban|darse de baja|dado de baja|ne souhaite plus [eê]tre contact|bitte keine (e-?mails?|werbung|nachrichten|anrufe)|keine (e-?mails?|werbung|kontaktaufnahme) mehr|nicht (mehr )?(kontaktieren|anschreiben|kontaktiert werden)|m[oö]chte nicht (mehr )?kontaktiert werden|abgemeldet|no (me )?contact(ar|en)|no (quiere|desea) (ser )?contactad[oa]|ne (plus |pas )?(me )?contacter|d[ée]sinscrit\w*|never (to )?be contacted|never contact (me|us|them|him|her|this person|again)|(asked|wants?|wishes) (us |me )?(to )?never|stop (emailing|contacting|messaging|calling)|asked (us |me )?to stop|unsubscrib\w*|do ?n[o']?t (contact|email|pitch|message|reach out|call)|dont (contact|email|pitch|message)|no (more )?(contact|outreach|emails?)|leave (them|him|her) alone|opted? ?out|remove (me|them) from|no pitch|do not solicit)\b/i;
 // Text that reads like an instruction to an AI (a list note, a CRM note): data, never obeyed, and said on the card.
-export const INSTRUCTION_LIKE =
-  /note to (ai|any|all)?\s*(ai )?(assistant|agent|model)s?|(mark|treat) (this person|me|them) (as )?(a )?must[- ]?meet|skip (all |the )?(checks|rules|review)|bypass|override (the |your )?(rules|instructions)|ignore (all |any |your |the |previous |prior )*(instructions|rules|prompt)|system prompt|you are (an? )?(ai|assistant|language model)|as an ai|assistant[,:]|(email|send|forward|export) (the |all |every |your )?(crm|list|contacts|data|attendees)|add (every|all) (attendees?|people|contacts)|disregard|jailbreak|do not tell the user|<\/?(system|instructions?)>/i;
+// One definition, in lib/reading.mjs (the CRM owner answer reads it too, and the guard loads that file).
+export { INSTRUCTION_LIKE } from '../../../lib/reading.mjs';
 // A CRM note that logs a two-way history (a meeting, a demo, a call, an intro, a deal): someone the sender has
 // dealt with, never a first-time cold contact. A download or a newsletter sign-up is not this.
 export const CRM_HISTORY =
@@ -635,11 +635,15 @@ export function propose(headers, rows, kind) {
     status_values: [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([value, count]) => ({ value, count, proposed: values.status[value] })),
     stop_like_cells: stopLikeCells(headers, rows, columns),
     date_order_ambiguous: order === 'ambiguous',
-    owner_values:
-      kind === 'crm'
-        ? [...new Set(rows.map((r) => String(r[Object.keys(columns).find((h) => columns[h].field === 'owner')] ?? '').trim()).filter(Boolean))].slice(0, 20)
-        : undefined
+    owner_values: kind === 'crm' ? ownerValues(columns, rows) : undefined
   };
+}
+
+// The owner values of a CRM file, as it writes them, in the order of its rows: the column the mapping reads as the
+// owner. One function for the proposal, a mapping used again, a confirmed one and the crm_name question.
+export function ownerValues(columns, rows) {
+  const col = Object.keys(columns || {}).find((h) => columns[h]?.field === 'owner');
+  return col ? [...new Set(rows.map((r) => String(r[col] ?? '').trim()).filter(Boolean))].slice(0, 2000) : [];
 }
 
 // Columns the mapping ignores whose cells say stop or caution. Shown always; stop cells are read as notes.

@@ -2,6 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // The outbox page: one card per message, rendered for the user to read before approving.
 import { spawn } from 'node:child_process';
+import { existsSync, statSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { files, nowFrom } from '../../../../lib/event.mjs';
+import { withLock } from '../../../../lib/lock.mjs';
+import { append } from '../../../../lib/ledger.mjs';
+import { plainText } from '../../../../lib/reading.mjs';
+import { pageCurrent, savePageInputs, sealPageInputs, buildIdOf, pageInputs } from './page-inputs.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeText } from '../../../../lib/jsonio.mjs';
 import { slotLabel } from '../../../slot-finder/scripts/slots.mjs';
@@ -11,7 +18,7 @@ import { MODES } from '../leadtime.mjs';
 import { gapFor, noDayWhy, stateOf } from '../../../../lib/spacing.mjs';
 import { INSTRUCTION_LIKE } from '../../../crm-triage/scripts/view.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { renderOutbox } from '../outbox.mjs';
+import { renderOutbox, renderOutOfDate } from '../outbox.mjs';
 import { hashOf, pickAt, whereAt } from './routes.mjs';
 import { isOut, labelOf, ctxOf, colleagueTold, takenTest } from './context.mjs';
 import { savedDraft, readTodo, draftFiles, ledgerTouch, followupDayOf, laterSent } from './saved-drafts.mjs';
@@ -29,10 +36,17 @@ function cardsFrom(c, jobs, { pendingOnly }) {
     // Every card, the review page's included, is for someone who may still be contacted.
     if (c.blocked(j.id, d.kind === 'coordinate' ? 'coordinate' : 'message')) continue;
     const st = c.state[j.id]?.touches?.[j.touch]?.status;
-    if (pendingOnly === false && (!isOut(st) || c.state[j.id]?.touches?.[j.touch]?.approved?.hash !== hashOf(c, d))) continue;
+    // Approved, for the text saved now: the only card the page offers to copy.
+    const ready = isOut(st) && c.state[j.id]?.touches?.[j.touch]?.approved?.hash === hashOf(c, d);
+    if (pendingOnly === false && !ready) continue;
     // The review page is what's offered for a yes: a draft that failed the critic twice isn't on it (todo and
-    // the gate list it as held for the user).
+    // the gate list it as held for the user). Nor is a message already sent, or one to someone who replied or booked
+    // (a drafting list older than those).
     if (pendingOnly && j.critic_held && !isOut(st)) continue;
+    const p = c.state[j.id] || {};
+    if (pendingOnly && (p.sent?.[j.touch] || (j.kind !== 'confirmation' && j.kind !== 'coordinate' && (p.replied || p.booked)))) continue;
+    // An email to someone whose address bounced, with no new one: nothing to send it to.
+    if (j.kind !== 'coordinate' && j.channel === 'email' && c.folded?.people?.[j.id]?.bounced) continue;
     const ct = c.byId[j.id];
     const due = dueOf(c, j, d);
     // Can't go any more, and why: the event is over (any message), or this follow-up has no day left.
@@ -49,6 +63,10 @@ function cardsFrom(c, jobs, { pendingOnly }) {
         if (busy) notToday = busyWhy(busy, ct.name || j.id, to);
       }
     }
+    // floorboss let this message through to send and no receipt says what happened (the call may have timed out,
+    // failed, or the session ended): it may have gone, so it is never offered to copy (the send check refuses it too).
+    const tc = c.state[j.id]?.touches?.[j.touch];
+    const mayHaveGone = j.kind !== 'coordinate' && tc?.released && !c.state[j.id]?.sent?.[j.touch] ? tc.released_at || true : null;
     cards.push({
       kind: j.kind,
       id: j.id,
@@ -74,6 +92,7 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       not_going: notGoing,
       // Not today, and why: another event wrote to that address today.
       not_today: notToday,
+      may_have_gone: mayHaveGone ? (typeof mayHaveGone === 'string' ? mayHaveGone : 'yes') : undefined,
       // An event-app note whose times live in the app's request: the card says which time to pick.
       pick_in_app:
         (j.kind === 'message' || j.kind === 'confirmation') &&
@@ -90,7 +109,7 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       earliest: j.earliest || d.earliest,
       followup_note: dueNote(j.followup_note || d.followup_note, due, c, j),
       slots: (j.slot_ids || d.slot_ids || []).map((id) => ({ id, label: labelOf(c, id) })),
-      pending: !isOut(st),
+      pending: !ready,
       staged: c.state[j.id]?.touches?.[j.touch]?.staged ? true : undefined,
       // Still failing floorboss's own checks after three rewrites: said on the card, never passed on in silence.
       checks_stuck: j.kind === 'message' && d.checks?.length && (d.attempts || 0) >= 3 ? d.checks : undefined
@@ -118,7 +137,11 @@ function dueNote(note, due, c, j) {
   return note.replace(/planned for \d{4}-\d{2}-\d{2}/, when);
 }
 
+// cards: what the page offers. A final page (no pending card on it) says how many drafts wait for the user's yes.
+// Written with what it was built from (c.inputsAt, taken before ctxOf read anything): first that, then the page, both
+// carrying one build id, so a later check (pageCurrent) knows whether the page is still current.
 export function renderFile(c, cards) {
+  const build = c.inputsAt ? buildIdOf(c.inputsAt) : null;
   const offered = new Set(cards.filter((x) => x.kind === 'message').map((x) => x.id));
   const holders = holdersBySlot(Object.fromEntries(Object.entries(c.short.assignments).filter(([id]) => offered.has(id))));
   const nameOf = (id) => c.byId[id]?.name || id;
@@ -132,19 +155,23 @@ export function renderFile(c, cards) {
     slots: c.slots
       .filter((s) => holders[s.id])
       .map((s) => ({ id: s.id, label: slotLabel(s, c.event.time_zone, null, c.event.city), holders: holders[s.id].map(nameOf) })),
-    visit: c.store.visit
+    visit: c.store.visit,
+    waiting: cards.some((x) => x.pending) ? 0 : cardsFrom(c, readTodo(c, { jobs: [] }).jobs, { pendingOnly: true }).filter((x) => x.pending).length,
+    ledgerAt: c.ledgerAt,
+    build
   });
+  if (c.inputsAt) savePageInputs(c.paths, sealPageInputs(c.inputsAt), build);
   writeText(c.paths.outbox, html);
   return c.paths.outbox;
 }
 
+// The review page (drafts waiting for a yes, nothing to copy) or the final one, written through the page's lock like
+// every rebuild, so a page read before a change can never land after that change's rebuild.
 export function render(opts) {
   need(opts, 'event');
-  const c = ctxOf(opts.event, opts);
-  const t = readTodo(c, { jobs: [] });
   const review = !!opts.review;
-  const cards = review ? cardsFrom(c, t.jobs, { pendingOnly: true }) : allOutboxCards(c);
-  return { outbox: renderFile(c, cards), cards: cards.length, review };
+  const r = rebuildOutbox(opts.event, opts, { force: true, review });
+  return { outbox: r.rebuilt, cards: r.cards, review };
 }
 
 // Final outbox: every approved or outboxed message across runs, newest touch per contact.
@@ -211,13 +238,144 @@ export function allOutboxCards(c) {
   );
 }
 
+// Out of date: anything the page was built from has changed since (page-inputs.mjs), a send, an approval or a stop
+// at another event included. Nothing is loaded. now: the command's clock (the page reads the day). retryFailed: a page
+// that could not be built counts as out of date.
+export function outboxStale(paths, { now = nowFrom({}), retryFailed = false } = {}) {
+  if (!existsSync(paths.outbox)) return false;
+  return !pageCurrent({ derived: join(dirname(paths.outbox), 'derived'), ...paths }, now, { retryFailed }).current;
+}
+
+// A read that failed because another command swapped the file at that moment: tried once more.
+const passing = (e) => e?.code === 'ENOENT' || /changed while floorboss read it/.test(String(e?.message || ''));
+// floorboss's own tests only (FLOORBOSS_TEST=1): the first n builds of this process meet a file swapped while it was
+// read (FLOORBOSS_PAGE_SWAP=n), or fail outright (FLOORBOSS_FAIL_PAGE=n).
+let builds = 0;
+function testFault() {
+  if (process.env.FLOORBOSS_TEST !== '1') return;
+  builds++;
+  if (builds <= Number(process.env.FLOORBOSS_PAGE_SWAP || 0)) throw new Error('(test) derived/todo.json changed while floorboss read it.');
+  if (builds <= Number(process.env.FLOORBOSS_FAIL_PAGE || 0)) throw new Error('(test) the page could not be built.');
+}
+// floorboss's own tests only: a record line (FLOORBOSS_PAGE_APPEND, its JSON) written once, after the event was read
+// for a build and before the page is written, as another command's write landing during the build.
+function testWriteDuring(paths, opts) {
+  if (process.env.FLOORBOSS_TEST !== '1' || !process.env.FLOORBOSS_PAGE_APPEND) return;
+  const line = JSON.parse(process.env.FLOORBOSS_PAGE_APPEND);
+  delete process.env.FLOORBOSS_PAGE_APPEND;
+  append(paths.ledger, line, nowFrom(opts));
+}
+
+// The page's name for the user: the event's name, else its slug.
+const nameOf = (paths, slug) => {
+  try {
+    return readJson(paths.event, {})?.name || slug;
+  } catch {
+    return slug;
+  }
+};
+
+// Rebuilds an event's outbox page when it is out of date (or always, with force), from the ledger and inputs as they
+// are now: the one way the page is written (the gate, staging, open and render go through it too). One process at a
+// time per event, each checking after taking the lock, and again after it rendered (another command may have written
+// meanwhile), so commands run at once leave the page in step. Throws when the page can't be built. Returns { rebuilt,
+// cards } or null (current, or no page yet and not forced). review: the review page (drafts waiting for a yes, nothing to
+// copy) instead of the final one. markFailed: a page that can't be built is replaced, under the same lock, by one that
+// offers nothing to copy and says it is out of date; when the cause isn't a file another command was replacing at that
+// moment, what it was built from is recorded with it, so it is tried again only once one of those changes (or at a
+// step at its own event: retryFailed).
+export function rebuildOutbox(slug, opts = {}, { force = false, review = false, markFailed = false, retryFailed = false } = {}) {
+  const paths = files(slug);
+  if (!force && !existsSync(paths.outbox)) return null;
+  return withLock(
+    `outbox-${slug}`,
+    ({ beat } = {}) => {
+      let out = null;
+      for (let i = 0; i < 3; i++) {
+        if (!force && pageCurrent(paths, nowFrom(opts), { advance: true, retryFailed: retryFailed && i === 0 }).current) break;
+        // A build can take a while at a large event: the lock is kept young, so a waiter never takes it for stale.
+        beat?.();
+        let n;
+        for (let tries = 0; ; tries++) {
+          // What this attempt reads, taken first: recorded with a page that can't be built from it.
+          const before = markFailed ? pageInputs(paths.dir, nowFrom(opts)) : null;
+          try {
+            testFault();
+            const c = ctxOf(slug, opts);
+            const cards = review ? cardsFrom(c, readTodo(c, { jobs: [] }).jobs, { pendingOnly: true }) : allOutboxCards(c);
+            testWriteDuring(paths, opts);
+            renderFile(c, cards);
+            n = cards.length;
+            break;
+          } catch (e) {
+            if (tries < 1 && passing(e)) {
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+              continue;
+            }
+            if (markFailed) markOutOfDate(paths, slug, e, passing(e) ? null : before);
+            throw e;
+          }
+        }
+        out = { rebuilt: paths.outbox, cards: n };
+        force = false;
+      }
+      return out;
+    },
+    PAGE_LOCK
+  );
+}
+// The page's lock: one whose holder is gone is broken at once, and one left with no holder's id (or an empty one) after
+// 3 seconds (lib/lock.mjs); a live holder is waited for, longer than a lock takes to count as stale, and is never taken
+// for stale while it keeps the lock young (only after 10 minutes without a beat).
+export const PAGE_LOCK = Object.freeze({ waitMs: 75000, staleMs: 60000, orphanMs: 3000, liveMs: 600000 });
+
+// The page replaced by one that offers nothing to copy and says it is out of date. inputs: what the failed build read
+// (then the page and that record carry one build id, so the page counts as current until one of them changes); null: a
+// passing cause, so the next check tries again.
+function markOutOfDate(paths, slug, e, inputs) {
+  try {
+    if (!existsSync(paths.outbox) || !statSync(paths.outbox).isFile()) return false;
+    const build = inputs ? buildIdOf({ ...inputs, failed: String(e.message) }) : null;
+    if (inputs) savePageInputs(paths, sealPageInputs(inputs), build, { failed: e.message });
+    writeText(paths.outbox, renderOutOfDate({ name: nameOf(paths, slug), why: e.message, slug, build }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The same, for after a command: never throws (the command did its work, so a page that can't be rebuilt is said, not
+// an error), and a page that can't be rebuilt is replaced by one that offers nothing to copy and says it is out of
+// date. Returns null (nothing to do), { rebuilt } or { not_rebuilt: <what to tell the user> }. retryFailed: a page that
+// could not be built is tried again though nothing it reads changed (flow next at its own event).
+export function refreshOutbox(slug, opts = {}, { force = false, retryFailed = false } = {}) {
+  try {
+    return rebuildOutbox(slug, opts, { force, markFailed: true, retryFailed });
+  } catch (e) {
+    const paths = files(slug);
+    let marked = false;
+    try {
+      // Marked under the lock above; a lock that couldn't be taken leaves it to here.
+      marked = existsSync(paths.outbox) && /This outbox page is out of date/.test(readFileSync(paths.outbox, 'utf8').slice(0, 2000));
+      if (!marked) marked = markOutOfDate(paths, slug, e, null);
+    } catch {
+      /* best effort: the message below still goes */
+    }
+    return {
+      not_rebuilt: `Saved, but the outbox page of ${plainText(nameOf(paths, slug), 60)} (${slug}) could not be rebuilt: ${String(e.message).replace(/[\s.]*$/, '.')} ${
+        marked ? 'The page now says it is out of date and offers nothing to copy.' : "Don't copy from the page: it may still offer a message that was cut, dropped or sent back."
+      } "event-outreach open --event ${slug} --no-open" rebuilds it.`
+    };
+  }
+}
+
 // Opens this event's outbox in the browser. Only this file: the command needs no general "open" permission.
 export function openOutbox(opts) {
   need(opts, 'event');
-  // Rendered again right before opening: whatever sat at outbox.html is replaced by floorboss's own page.
-  const c = ctxOf(opts.event, opts);
-  const paths = c.paths;
-  renderFile(c, opts.review ? cardsFrom(c, readTodo(c, { jobs: [] }).jobs, { pendingOnly: true }) : allOutboxCards(c));
+  // Rendered again right before opening, through the page's lock: whatever sat at outbox.html is replaced by
+  // floorboss's own page.
+  const paths = files(opts.event);
+  rebuildOutbox(opts.event, opts, { force: true, review: !!opts.review });
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
   if (!opts['dry-run'] && !opts['no-open']) spawn(cmd, [paths.outbox], { stdio: 'ignore', detached: true }).unref();
   return opts['dry-run'] || opts['no-open'] ? { written: paths.outbox, opened: false } : { opened: paths.outbox, with: cmd };

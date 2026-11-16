@@ -11,6 +11,7 @@ import { daysBetween } from '../../../lib/tz.mjs';
 import { stripAccents, companyKey, emailDomain, sameName, normPersonName, companyRelated } from '../../../lib/normalize.mjs';
 import { STOP_WORDS, noteHistory, CAUTION_WORDS, INSTRUCTION_LIKE } from './sources.mjs';
 import { INACTIVE_OWNER } from './evidence.mjs';
+import { ownerSaid, ownerQuoted } from '../../../lib/names.mjs';
 
 // The CRM may spell the user's name differently; crm_user_name may list several spellings with "|".
 function nameParts(s) {
@@ -82,12 +83,36 @@ export function ownerIsUserFor(settings = {}, knownOwners = []) {
     const x = nameParts(n);
     return x.length > 1 && x[x.length - 1] === myParts[myParts.length - 1] && x[0][0] === myFirst?.[0];
   });
-  return (n) => {
-    if (sameHolder(n, me, { domains, initials: false })) return true;
-    if (!initialClash && sameHolder(n, me, { domains })) return true;
+  // The user by their first name alone ("Bram" for "Bram Janssens"), and by nothing more.
+  const firstAlone = (n) => {
+    if (sameHolder(n, me, { domains, initials: false }) || (!initialClash && sameHolder(n, me, { domains }))) return false;
     const x = nameParts(n);
     return x.length === 1 && x[0] === myFirst && !clash;
   };
+  const read = (n) => {
+    if (sameHolder(n, me, { domains, initials: false })) return true;
+    if (!initialClash && sameHolder(n, me, { domains })) return true;
+    return firstAlone(n);
+  };
+  const listed = [...new Set(knownOwners.filter(Boolean))];
+  // A CRM that also writes the user's name in more than a first name: an owner written with that first name alone may be
+  // someone else. It is no owner the user is, and not a second one for the rule below: the records it holds are held for
+  // the user to decide (firstOnly).
+  const fuller = listed.some((n) => read(n) && !firstAlone(n));
+  // The saved value read as two different owners here ("B. Janssens" with Bram and Bas Janssens in the CRM, or "Bram
+  // Janssens|Sanne de Vries"): none of them is the user until they say which one they are. Every owner it reads as is
+  // unclear (held to check, and the crm_name question asked again at this event: onboarding-state.mjs).
+  const mine = listed.filter((n) => read(n) && !(fuller && firstAlone(n)));
+  const two = mine.some((a, i) => mine.slice(i + 1).some((b) => !sameHolder(a, b, { domains }) && !sameHolder(b, a, { domains })));
+  const unclear = new Set(two ? mine : []);
+  const isUser = (n) => !two && read(n) && !(fuller && firstAlone(n));
+  isUser.unclear = unclear;
+  // Any owner value the saved one reads as, listed or not (an account's owner), while it reads as two people here.
+  isUser.isUnclear = (n) => two && !!n && read(n) && !(fuller && firstAlone(n));
+  // An owner written with the user's first name alone, in a CRM that writes the user's name more fully elsewhere.
+  isUser.isFirstOnly = (n) => fuller && !!n && firstAlone(n);
+  isUser.firstOnly = new Set(listed.filter((n) => fuller && firstAlone(n)));
+  return isUser;
 }
 
 // contact: a merged contact. evidence: from gatherEvidence. ctx: { decision (the user's decide entry for
@@ -102,7 +127,7 @@ function recordWouldBe(r) {
   const mi = (r.meanings || []).findIndex((m) => ['hold', 'lost'].includes(m));
   if (mi >= 0)
     return `skip: "${(r.statuses || [])[mi] || r.meanings[mi]}" means ${r.meanings[mi] === 'hold' ? 'hold (leave alone)' : 'a lost deal'} in your mapping, so they'd be left alone`;
-  if (r.owner) return `depends on the owner (${r.owner})`;
+  if (r.owner) return `depends on the owner (${ownerSaid(r.owner)})`;
   return 'depends on the record';
 }
 
@@ -152,6 +177,15 @@ export function resolve(contact, evidence, ctx) {
   const matches = [...(ctx.matches || []), ...(isMatch(ctx.decision) ? [ctx.decision] : [])];
   const decision = isMatch(ctx.decision) ? null : ctx.decision || null;
   const ownerIsUser = ctx.ownerIsUser || ownerIsUserFor(settings);
+  const ownerUnclear = ownerIsUser.isUnclear || (() => false);
+  const ownerFirstOnly = ownerIsUser.isFirstOnly || (() => false);
+  // An owner named in a reason: as the CRM writes it when it is plainly a name or an address, else quoted, as data.
+  const who = (owner) => ownerSaid(owner);
+  // Held to check: the record's owner is one the user's saved owner value reads as, among others.
+  const unclearSays = (owner) =>
+    `${who(owner)} holds this record, and the owner name saved as yours (${ownerQuoted(settings.crm_user_name || '')}) reads as more than one owner in this CRM: say which owner you are (crm_name)`;
+  // Held to check: the record's owner is the user's first name alone, in a CRM that writes the user's name in full too.
+  const firstOnlySays = (owner, what = 'this record') => `${what === 'this record' ? 'owned' : `the ${what} account is owned`} by ${ownerQuoted(owner)} in your CRM; floorboss can't tell if that's you`;
   const exact = evidence.filter((e) => e.sure === 'exact');
   const fuzzy = evidence.filter((e) => e.sure !== 'exact');
   const crm = exact.filter((e) => e.record).map((e) => e.record);
@@ -303,7 +337,7 @@ export function resolve(contact, evidence, ctx) {
   };
   const coworker = (says, holder) => {
     const mode = coworkerMode(holder);
-    if (mode === 'ask') return fire('colleague', 'check', `${says}: write to them yourself, or leave them to ${holder || 'the owner'}?`, { holder });
+    if (mode === 'ask') return fire('colleague', 'check', `${says}: write to them yourself, or leave them to ${holder ? who(holder) : 'the owner'}?`, { holder });
     if (mode === 'warn' || mode === 'mine')
       return fire('colleague', 'reach', `${says} (you chose to write to coworkers' contacts${mode === 'warn' ? ', with a warning before sending' : ''})`, {
         note_only: true,
@@ -314,13 +348,21 @@ export function resolve(contact, evidence, ctx) {
   };
   const ownPartner = (r, ci) => !!(r.owner && ownerIsUser(r.owner) && /^\s*partners?\s*$/i.test(r.statuses[ci] || ''));
   for (const r of crm) {
+    if (r.owner && ownerUnclear(r.owner)) {
+      fire('owner_unclear', 'check', unclearSays(r.owner));
+      continue;
+    }
+    if (r.owner && ownerFirstOnly(r.owner)) {
+      fire('owner_first_name', 'check', firstOnlySays(r.owner));
+      continue;
+    }
     const ci = (r.meanings || []).indexOf('coordinate');
     // A bare "Partner" label on a record the user holds is their own partner, not a colleague's contact: it is
     // read with the relationship rungs below. Any other colleague status holds, whoever the record's owner is
     // (owner fields often name whoever imported the records).
     if (ci >= 0 && !ownPartner(r, ci)) coworker(`CRM status "${r.statuses[ci]}"`, r.owner && !ownerIsUser(r.owner) ? r.owner : null);
     if (r.owner && !INACTIVE_OWNER.test(r.owner) && !ownerIsUser(r.owner))
-      coworker(settings.crm_user_name ? `${r.owner} holds this relationship` : `${r.owner} holds this record (set crm_user_name if that's you)`, r.owner);
+      coworker(settings.crm_user_name ? `${who(r.owner)} holds this relationship` : `${who(r.owner)} holds this record (set crm_user_name if that's you)`, r.owner);
   }
   const ownDeal = crm.some(
     (r) =>
@@ -330,7 +372,17 @@ export function resolve(contact, evidence, ctx) {
       (r.won_at || r.on_won_deal === true || ['won', 'open'].includes(r.deal_state) || (r.meanings || []).some((m) => ['customer', 'warm'].includes(m)))
   );
   const crmAccountsOff = (a) => a && !a.off && a.from === 'crm' && settings.crm_accounts === 'off';
-  for (const e of exact.filter((x) => x.account && !x.account.off && x.account.owner && !x.account.mine && !ownerIsUser(x.account.owner))) {
+  for (const e of exact.filter((x) => x.account && !x.account.off && x.account.owner && ownerUnclear(x.account.owner)))
+    fire('owner_unclear', 'check', unclearSays(e.account.owner).replace('holds this record', `holds the ${e.account.label} account`));
+  // An account owned by the user's first name alone, in a CRM that writes their name in full too: held to check only
+  // where a coworker's account would hold this person (below: their own record isn't the user's, or a deal there that
+  // their own record has none of to set against it), and not under crm_accounts "off". Elsewhere either answer leaves
+  // them as they are, so it is a note.
+  for (const e of exact.filter((x) => x.account && !x.account.off && x.account.owner && !x.account.mine && ownerFirstOnly(x.account.owner))) {
+    if (ownRecord && (!e.account.deal || ownDeal)) fire('owner_first_name', 'reach', `${firstOnlySays(e.account.owner, e.account.label)}, but this person's own record is yours`, { note_only: true });
+    else if (!crmAccountsOff(e.account)) fire('owner_first_name', 'check', firstOnlySays(e.account.owner, e.account.label));
+  }
+  for (const e of exact.filter((x) => x.account && !x.account.off && x.account.owner && !x.account.mine && !ownerIsUser(x.account.owner) && !ownerUnclear(x.account.owner) && !ownerFirstOnly(x.account.owner))) {
     // This person's own record is the user's: the coworker's account is a note, unless the coworker has an open
     // or won deal there (a coworker's won deal holds everyone at that company, the user's own contacts included).
     // A deal on this person's own record (the user's customer, or an open deal with them) keeps them the user's,
@@ -340,7 +392,7 @@ export function resolve(contact, evidence, ctx) {
       fire(
         'colleague',
         'reach',
-        `${e.account.owner} also works the ${e.account.label} account${e.account.deal ? ` (their record there says "${e.account.deal}")` : ''}, but this person's own record is yours${ownDeal ? ', with a deal' : ''}`,
+        `${who(e.account.owner)} also works the ${e.account.label} account${e.account.deal ? ` (their record there says "${e.account.deal}")` : ''}, but this person's own record is yours${ownDeal ? ', with a deal' : ''}`,
         { note_only: true, coworker_also: e.account.owner }
       );
     // crm_accounts "off": the user said a colleague's records at a company don't cover everyone else there.
@@ -350,7 +402,7 @@ export function resolve(contact, evidence, ctx) {
       fire(
         'colleague',
         'check',
-        `${e.account.owner} owns the ${e.account.label} account in the CRM (${e.account.records} records). Account rules from the CRM wait for your OK (crm_accounts: apply)`,
+        `${who(e.account.owner)} owns the ${e.account.label} account in the CRM (${e.account.records} records). Account rules from the CRM wait for your OK (crm_accounts: apply)`,
         { holder: e.account.owner }
       );
     else {
@@ -380,14 +432,14 @@ export function resolve(contact, evidence, ctx) {
             : ' in the CRM'
           : ` on your ${e.account.from}${status ? `, which says "${status}"` : ''}`;
       coworker(
-        `${e.account.owner} owns the ${e.account.label} account${where}${lost ? `, ${lostWhen}; the lost-deal rule holds only the person on that record, the account holds everyone else there` : ''}${INACTIVE_OWNER.test(e.account.owner) ? '; that owner looks inactive, so check who holds it now' : ''}`,
+        `${who(e.account.owner)} owns the ${e.account.label} account${where}${lost ? `, ${lostWhen}; the lost-deal rule holds only the person on that record, the account holds everyone else there` : ''}${INACTIVE_OWNER.test(e.account.owner) ? '; that owner looks inactive, so check who holds it now' : ''}`,
         e.account.owner
       );
       // On the person's card and in any draft written to them anyway: whose account it is, and what it says.
       const detail = [status, e.account.owner_note].filter(Boolean).join(', ');
-      fire('account', 'reach', `at ${e.account.owner}'s account ${e.account.label}`, {
+      fire('account', 'reach', `at ${who(e.account.owner)}'s account ${e.account.label}`, {
         note_only: true,
-        account_note: `at ${e.account.owner}'s account ${e.account.label}${detail ? ` (${detail})` : ''}`
+        account_note: `at ${who(e.account.owner)}'s account ${e.account.label}${detail ? ` (${detail})` : ''}`
       });
     }
   }
@@ -665,7 +717,7 @@ export function resolve(contact, evidence, ctx) {
     alternatives: decided.slice(1).map(({ rung, group, says, holder }) => ({ rung, would_be: group, says, holder })),
     account_note:
       (accountNote && !(crmStale && accountNote.toLowerCase().includes(String(crm[0].company).toLowerCase())) ? accountNote : null) ||
-      (overridden ? `at ${overridden.holder}'s account ${contact?.company || ''}`.trim() : null),
+      (overridden ? `at ${ownerSaid(overridden.holder)}'s account ${contact?.company || ''}`.trim() : null),
     crm_stale: crmStale || undefined,
     email_old_company: crmStale && rowDomain && emailDomain(contact?.email) === rowDomain ? crm[0].company : undefined,
     // A coworker's contact the user chose to write to: who holds them, and whether to warn before sending.

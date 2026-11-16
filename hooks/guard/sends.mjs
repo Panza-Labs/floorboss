@@ -5,7 +5,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { home } from '../../lib/paths.mjs';
-import { verifySend, eventRecord, eventDay, approvalHash, eventStateAt, followupNotToday, addressBusyToday, busyWhy, homeSends } from '../../lib/sendcheck.mjs';
+import { verifySend, eventRecord, eventDay, approvalHash, eventStateAt, followupNotToday, addressBusyToday, busyWhy, homeSends, lentChanged } from '../../lib/sendcheck.mjs';
 import { touchBefore } from '../../lib/route.mjs';
 import { contactable } from '../../lib/ledger.mjs';
 import { loadEvent, isMockSlug } from '../../lib/event.mjs';
@@ -81,7 +81,8 @@ export function listed(file, nowMs = Date.now()) {
 }
 
 // Why an approved draft can't be put in the mailbox now: the same record checks a send has (a stop, a reply
-// or booking, removed or dropped, a damaged ledger line), and listed in the last 30 minutes. Null: it can.
+// or booking, removed or dropped, a damaged ledger line), listed in the last 30 minutes, and what the other events lend
+// about the person unchanged since the list. Null: it can.
 export function stageRefusal(evDir, item, nowMs = Date.now()) {
   const { state, folded } = eventRecord(evDir);
   const touch = item.touch ?? 1;
@@ -95,6 +96,10 @@ export function stageRefusal(evDir, item, nowMs = Date.now()) {
   if (!recent(item.listed_at, nowMs, 30 * 60 * 1000)) return 'it wasn\'t listed in the last 30 minutes: run "outreach stage-list" again';
   // A step recorded as sent gets no draft (stage-list never lists one either).
   if (st.sent?.[touch] || folded.people[item.id]?.touches?.[touch]?.sent) return 'it was already sent';
+  // What the user's other events lend about this person, as the send check reads it (lib/sendcheck.mjs lentChanged): a
+  // stop, a send or an approval recorded at another event since the list was made holds the draft.
+  const elsewhere = lentChanged(evDir, item, folded.people[item.id]);
+  if (elsewhere) return `${elsewhere}: run "outreach stage-list" again, which reads it in full`;
   // Nothing is put in the mailbox once the event is over, and a follow-up only on its day (the same rule as a send).
   const es = eventStateAt(evDir, nowMs);
   if (es.state !== 'ok') return es.why;

@@ -12,6 +12,15 @@ import { capFor } from '../../../skills/crm-triage/scripts/shortlist.mjs';
 
 const lower = (s) => String(s || '').trim().toLowerCase();
 
+// The persona's answer to the crm_name question: their name; and "yes" to a reading floorboss shows back for their yes
+// only when what it would save is their own name (a full name for an owner the CRM writes by first name alone), as a
+// user who reads it would say. Any other reading gets their name again, so a run that reads them wrong never finishes
+// on a yes.
+export function simCrmNameAnswer(question, user) {
+  const m = /Save ("(?:[^"\\]|\\.)*") as you in the CRM\? \(yes or no\)/.exec(question);
+  return /A reading of their last answer waits for their yes/.test(question) && m && lower(JSON.parse(m[1])) === lower(user) ? 'yes' : user;
+}
+
 // One call to a stand-in server, as Claude would make it. { ok, data } or { ok: false, error }.
 export function mcp(H, server, tool, args) {
   const r = spawnSync('node', [join(ROOT, 'examples/standins/call.mjs'), server, 'call', tool, JSON.stringify(args)], { env: { ...H.env, FLOORBOSS_NOW: H.now, STANDIN_DATA: H.standin, STANDIN_FAULTS: H.faults, STANDIN_LOG: `${H.standin}.log` }, encoding: 'utf8' });
@@ -99,7 +108,7 @@ function makePersona(spec, H, g, data, friction) {
     accounts: existsSync(join(data, 'accounts.csv')) ? join(data, 'accounts.csv') : 'none',
     company: { own_company: spec.own.company, own_domains: [spec.own.domain] },
     colleagues: { colleagues: spec.own.colleagues || [] },
-    crm_name: spec.own.user,
+    crm_name: (s) => simCrmNameAnswer(s.ask?.question || '', spec.own.user),
     team: (spec.own.colleagues || []).length ? 'my team too' : 'just me',
     coworker_contacts: spec.coworkers || 'leave them alone (recommended)',
     // The specs' expected groups were written for a 12-month lost-deal window.

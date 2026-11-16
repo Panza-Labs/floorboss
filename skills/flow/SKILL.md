@@ -42,7 +42,9 @@ checks after three tries). Say it in one or two plain lines before doing the ste
 `say_to_user`, in an answer: what a gate saved (by ID and name) or, with `pending: true`, the reading it is holding
 for the user's yes. Show it to the user word for word every time, before anything else. A pending reading saves
 nothing: wait for the user's own reply and save it with `flow answer` like any answer ("yes", "ok" or "sure" on its own
-applies that reading exactly; anything else is read afresh). Never answer "yes" for them, and never treat a pending reading as approved.
+applies that reading exactly; anything else is read afresh). A reading of the CRM owner answer can come back at any
+step: save the user's reply to it with `--ask crm_name`, as its `next` says. Never answer "yes" for them, and never
+treat a pending reading as approved.
 
 When a gate answer comes back unclear (its error ends `can_interpret: true` and lists the people by ID), don't make
 the user say it again if their meaning is plain to you: work out the IDs they meant from that list, write the gate's own

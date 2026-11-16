@@ -14,6 +14,7 @@ import { loadEvent, contextFor, nowFrom } from '../../../lib/event.mjs';
 import { saveConfig } from '../../../lib/config.mjs';
 import { todayKeyIn, daysBetween } from '../../../lib/tz.mjs';
 import { readLedger, fold, append } from '../../../lib/ledger.mjs';
+import { lentBy } from '../../../lib/lent.mjs';
 import { companyKey, companyRelated, normPersonName, sameName, noteText, clean } from '../../../lib/normalize.mjs';
 import {
   propose,
@@ -27,7 +28,8 @@ import {
   dealStateOf,
   STOP_WORDS,
   INSTRUCTION_LIKE,
-  listSources
+  listSources,
+  ownerValues
 } from './sources.mjs';
 import { mergeRows, assignIds, mergeCrmRows } from './merge.mjs';
 import { gatherEvidence, indexCrm, readAccounts, accountsFromCrm, earlierEvents } from './evidence.mjs';
@@ -96,7 +98,18 @@ export function tableFor(c, kind) {
 export function mappingFor(c, kind, table) {
   const fp = fingerprint(table.headers);
   const have = readSource(c.paths.dir, fp);
-  if (have) return have;
+  if (have) {
+    // The owners as the file holds them now (a newer export with the same columns), read with this mapping's own owner
+    // column, in the file's order.
+    if (kind === 'crm') {
+      const now = ownerValues(have.columns, table.records);
+      if (JSON.stringify(now) !== JSON.stringify(have.owner_values || [])) {
+        have.owner_values = now;
+        writeSource(c.paths.dir, have);
+      }
+    }
+    return have;
+  }
   const p = propose(table.headers, table.records, kind);
   // A status map saved in settings (older events, the mock) decides meanings the proposal only guessed.
   if (kind === 'crm' && c.settings.status_map)
@@ -114,7 +127,8 @@ export function mappingFor(c, kind, table) {
       file: basename(table.path),
       values: { ...(earlier.m.values || {}), status },
       stop_like_cells: p.stop_like_cells,
-      owner_values: p.owner_values,
+      // Read with the owner column of the layout used again, not the proposal's.
+      owner_values: kind === 'crm' ? ownerValues(earlier.m.columns, table.records) : p.owner_values,
       confirmed: known,
       reused_from: earlier.slug,
       ...(known ? { confirmed_at: c.now.toISOString() } : { proposed_at: c.now.toISOString(), new_statuses: fresh })
@@ -160,6 +174,25 @@ function confirmedElsewhere(c, kind, fp) {
     if (m?.confirmed && m.kind === kind && m.fingerprint === fp) found.push({ slug, name: ev.name, m });
   }
   return found.sort((a, b) => String(b.m.confirmed_at || '').localeCompare(String(a.m.confirmed_at || '')))[0] || null;
+}
+
+// The owners of this event's CRM export, as the CRM writes them, in the order of its rows: the owner column of the
+// mapping for the export as it is now (confirmed, proposed, or the one a reading would propose before any is saved).
+// The one list the crm_name question shows and its answer is read against, so a number picks what the user was shown.
+// When the export can't be read now, what its mappings recorded (newest first). c: { paths, event }.
+export function crmOwnerList(c) {
+  const metas = listSources(c.paths.dir).filter((m) => m.kind === 'crm');
+  try {
+    const t = tableFor(c, 'crm');
+    if (t) {
+      const m = metas.find((x) => x.fingerprint === fingerprint(t.headers));
+      return m ? ownerValues(m.columns, t.records) : propose(t.headers, t.records, 'crm').owner_values || [];
+    }
+  } catch {
+    /* the export can't be read now: what its mappings recorded */
+  }
+  const at = (m) => String(m.confirmed_at || m.proposed_at || '');
+  return [...new Set(metas.sort((a, b) => at(b).localeCompare(at(a)) || String(a.fingerprint).localeCompare(String(b.fingerprint))).flatMap((m) => m.owner_values || []).map((x) => String(x).trim()).filter(Boolean))];
 }
 
 // ---------- reading everything about everyone ----------
@@ -381,19 +414,19 @@ function earlierMatches(c) {
     if (slug === c.slug) continue;
     try {
       const ev = readJson(join(root, slug, 'event.json'), null);
-      const led = join(root, slug, 'ledger.jsonl');
-      if (!ev || ev.mock || !existsSync(led)) continue;
-      const people = Object.entries(fold(readLedger(led).entries).people)
-        .map(([id, p]) => ({ ...p, id }))
-        .filter((p) => p.name && !p.merged_into && p.matches.some((m) => /^crm:\d+$/.test(m.ref || '')));
-      // Their titles, as that event's list gave them (the ledger keeps no title): for an attendee with no address.
-      const titles = Object.fromEntries(
-        (readJson(join(root, slug, 'derived', 'contacts.json'), []) || []).filter((x) => x && x.id).map((x) => [x.id, x.title || null])
-      );
+      // The match answers given there, read as lib/lent.mjs reads what an event lends the others.
+      const lent = lentBy(join(root, slug));
+      if (!ev || !lent) continue;
+      const people = lent.matches;
       // Its CRM export: the copy taken in, or (older events) the path the event names.
       const file = [join(root, slug, 'inputs', 'crm.csv'), ev.crm?.path].find((f) => f && existsSync(f));
       if (file) allowedPath(file, { list: true });
       if (!people.length || !file) continue;
+      // Their titles, as that event's list gave them (the ledger keeps no title): for an attendee with no address.
+      // Read only when there is a match answer to carry (the outbox page of this event doesn't watch that file).
+      const titles = Object.fromEntries(
+        (readJson(join(root, slug, 'derived', 'contacts.json'), []) || []).filter((x) => x && x.id).map((x) => [x.id, x.title || null])
+      );
       const t = readCsv(file);
       const m = listSources(join(root, slug)).find((x) => x.kind === 'crm' && x.fingerprint === fingerprint(t.headers));
       if (!m) continue;

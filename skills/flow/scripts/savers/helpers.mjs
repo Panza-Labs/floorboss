@@ -10,7 +10,7 @@ import { contextDir, expandHome } from '../../../../lib/paths.mjs';
 import { readJson, writeJson, writeText } from '../../../../lib/jsonio.mjs';
 import { ROOT, script, askedChannels } from '../steps.mjs';
 import { append } from '../../../../lib/ledger.mjs';
-import { listSources } from '../../../crm-triage/scripts/sources.mjs';
+import { crmOwnerList } from '../../../crm-triage/scripts/view.mjs';
 import { DEFAULTS } from '../../../../lib/config.mjs';
 import { clearVoicePlaceholders } from '../profile-write.mjs';
 
@@ -116,19 +116,11 @@ export function noReplySaid(c, s, ids, said) {
 // The event an answer or setting is for, named every time: on the mock it goes to the mock's own files, never
 // the user's setup; on a real event the run's session (which may still name the mock) is never consulted.
 export const forMock = (c) => (c.event?.event?.slug ? ['--for-event', c.event.event.slug] : []);
-// The owner values the CRM read holds (every CRM file read for this event), as the CRM writes them.
+// The owner values of this event's CRM export, as the CRM writes them, in the order the crm_name question shows them:
+// one function for the question and its answer (crm-triage view.mjs crmOwnerList).
 export function crmOwners(c) {
-  const dir = c.event?.paths?.dir;
-  if (!dir) return [];
-  return [
-    ...new Set(
-      listSources(dir)
-        .filter((m) => m.kind === 'crm')
-        .flatMap((m) => m.owner_values || [])
-        .map((x) => String(x).trim())
-        .filter(Boolean)
-    )
-  ];
+  if (!c.event?.paths?.dir) return [];
+  return crmOwnerList({ paths: c.event.paths, event: c.event.event });
 }
 export function answers(c, obj) {
   const f = writeWork(c, 'answer.json', obj);

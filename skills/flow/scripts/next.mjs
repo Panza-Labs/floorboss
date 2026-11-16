@@ -11,6 +11,7 @@ import { sessionEvent, touchSession, listEvents, isMockEvent } from '../../../li
 import { configPath } from '../../../lib/paths.mjs';
 import { nowFrom } from '../../../lib/event.mjs';
 import { dirname } from 'node:path';
+import { refreshOutbox } from '../../event-outreach/scripts/commands/cards.mjs';
 
 // Steps that only run one of floorboss's own commands (no judgement, no question, no send): next runs them
 // itself and moves on, so Claude gets a turn only where it has something to do. What each reported comes back
@@ -69,7 +70,13 @@ function nextStepOut(opts) {
     if (sess) opts = { ...opts, event: sess.slug || null };
   }
   if (opts.event) makeCurrent(opts.event);
+  // The outbox page, checked at every step and rebuilt when anything it is built from changed since (the ledger, a list
+  // or a setting edited by hand, what another event's record lends this one, the day): the page a user copies from is
+  // current. The check reads file sizes and times (page-inputs.mjs); the event is loaded only to rebuild. A page that
+  // could not be built last time is tried again here, at its own event's step.
+  const page = opts.event ? refreshOutbox(opts.event, opts, { retryFailed: true }) : null;
   const out = finishNext(opts, ran);
+  if (page?.not_rebuilt && out && typeof out === 'object') out.outbox_not_rebuilt = page.not_rebuilt;
   // The run's event, kept for the next step: the one this step was about (an error keeps the one chosen).
   touchSession(out?.event ?? opts.event ?? null, nowMs);
   return out;

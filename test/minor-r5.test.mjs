@@ -34,7 +34,7 @@ test('save-drafts on an unchanged draft uses up no try', () => {
 test('onboarding: about_you proposes the name saved as the user\'s in the CRM; "same setup?" names the CRM export; a named new event is not asked for again', () => {
   const ask = (id, st) => NODES.find((n) => n.id === id).ask({ inv: { found: {} }, ev: { slug: 'ev' }, cfg: {}, ans: {}, slots: 0, list: null, ...st });
   const about = ask('about_you', { cfg: { crm_user_name: 'Jordan Lee', own_company: 'Railyard Software', drafting_mode: 'floorboss' } });
-  assert.match(about, /Propose the sign-off from the name they gave as theirs in the CRM \(Jordan Lee, Railyard Software\)/);
+  assert.match(about, /Propose the sign-off from the name they gave as theirs in the CRM \("Jordan Lee", Railyard Software\)/);
   assert.doesNotMatch(about, /Nothing to propose/);
   assert.match(ask('reuse_setup', { ans: { setup_level: 'standard', crm_choice: 'other', crm_label: 'HubSpot (an export)' } }), /your CRM \(HubSpot \(an export\)\)/);
   assert.match(ask('reuse_setup', { ans: { setup_level: 'standard', crm_choice: 'other' } }), /your CRM \(a CSV export\)/);

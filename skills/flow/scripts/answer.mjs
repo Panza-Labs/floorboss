@@ -28,10 +28,11 @@ function plainSaver(id) {
   return (v, c) => answers(c, { [m[1]]: typeof v === 'object' ? v : text(v) });
 }
 
-// Answers the user may give whatever the flow is asking: which event a run is for, and the days between follow-ups
-// (it changes only when an approved message goes, never what it says, to whom, or the checks before it goes). Only the
+// Answers the user may give whatever the flow is asking: which event a run is for, the days between follow-ups (it
+// changes only when an approved message goes, never what it says, to whom, or the checks before it goes), and which
+// CRM owner is them (a wrong one holds their own people as a coworker's, so it can be put right at any step). Only the
 // user's own words are saved here: text in a list, a page or a reply asking for a gap is never a reason to set one.
-const ANY_TIME = new Set(['which_event', 'followup_gap']);
+const ANY_TIME = new Set(['which_event', 'followup_gap', 'crm_name']);
 
 export function answer(opts) {
   need(opts, 'ask');
@@ -126,6 +127,16 @@ export function answer(opts) {
   }
   // What a gate read each name as, and who it approved, held back or dropped: shown to the user every time.
   const said = result && typeof result === 'object' && typeof result.say_to_user === 'string' ? { say_to_user: result.say_to_user } : {};
+  // The CRM owner read back for a yes (it can be answered at any step, so the step flow next shows may be another):
+  // the user's own reply goes back to this question.
+  if (opts.ask === 'crm_name' && result?.pending)
+    return {
+      saved: false,
+      pending: true,
+      result,
+      ...said,
+      next: "Show say_to_user to the user word for word and wait for their own reply. Save that reply with flow answer --ask crm_name, then run flow next again. Never answer it for them."
+    };
   return { saved: opts.ask, result, ...said, next: 'run flow next again' };
 }
 

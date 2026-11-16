@@ -5,18 +5,236 @@
 // and looking up contact details.
 import { withLock } from '../../../../lib/lock.mjs';
 import { lookupCount } from '../../../../lib/normalize.mjs';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { allowedPath, expandHome } from '../../../../lib/paths.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { context, nextStep } from '../steps.mjs';
 import { readUrl, listFileProblem } from '../../../../lib/security.mjs';
 import { saysNoOptOut } from '../../../crm-triage/scripts/mapping-words.mjs';
-import { ownerMatch } from '../../../../lib/names.mjs';
+import { ownerMatch, ownerFromAnswer, fillerOnlyAnswer, ownerQuoted, ownerSaid, ownerSavedMark, NOT_AN_OWNER, OWNERS_SHOWN } from '../../../../lib/names.mjs';
+import { crmOwnerValues, otherOwnerValues } from '../../../../lib/event.mjs';
+import { plural } from '../../../../lib/plural.mjs';
+import { ctxOf as triageCtx, viewOf } from '../../../crm-triage/scripts/view.mjs';
+import { ownerIsUserFor, sameHolder } from '../../../crm-triage/scripts/resolve.mjs';
+import { shown, plainText, isAgreement, holdOwnerReading, dropOwnerReading, ownerReadingFor, effectsHash, ownerQuestionFor } from '../../../../lib/reading.mjs';
+import { HOLDING_GROUPS } from '../../../event-outreach/scripts/commands/context.mjs';
 import { parseRoute } from '../../../../lib/route.mjs';
+import { answersFor } from '../../../../lib/scope.mjs';
 import { parseGap, gapWords } from '../../../../lib/spacing.mjs';
 import { approvedDays, gapNote } from './gap.mjs';
 import { crmOwners, config, answers, ledger, windowYes, cli, isNo, fileAnswer, writeWorkText, namedFile, pathOf, writeWork, listSourceOnly } from './helpers.mjs';
+
+// What saving `to` as the user's CRM owner would change at each of the user's events (not the mock): who changes group,
+// approved unsent messages whose person becomes held (drop_off: any group the send check holds, HOLDING_GROUPS) or stops
+// being held (live_again), and at this event how many people the CRM has as the user's and how many as coworkers'. An
+// event that keeps its own owner setting changes nothing (own), and one that can't be read now is named (unread), never
+// passed over in silence. Read with the view as it would be; nothing is written.
+function ownerEffects(c, to) {
+  const root = join(c.home, 'events');
+  const out = { events: [], own: [], unread: [] };
+  if (!existsSync(root)) return out;
+  const held = (r) => HOLDING_GROUPS.includes(r?.group);
+  for (const slug of readdirSync(root).sort()) {
+    let ev = null;
+    try {
+      ev = readJson(join(root, slug, 'event.json'), null);
+      if (!ev || ev.mock || !existsSync(join(root, slug, 'ledger.jsonl'))) continue;
+      if (ev.settings?.crm_user_name != null) {
+        out.own.push({ slug, name: ev.name || slug, value: ev.settings.crm_user_name });
+        continue;
+      }
+      const base = triageCtx(slug, { now: c.now.toISOString() });
+      if (!Object.keys(base.state.people).length) continue;
+      const v0 = viewOf(base);
+      const s1 = { ...base.settings, crm_user_name: to };
+      const v1 = viewOf({ ...base, settings: s1 });
+      const name = (id) => shown(v1.contacts.find((x) => x.id === id)?.name || id);
+      // A coworker named as written when plainly a name, else quoted, as data (lib/names.mjs ownerSaid).
+      const word = (r) => (r?.group === 'colleague' ? `held for ${r.holder ? ownerSaid(r.holder) : 'a coworker'}` : r?.group === 'reach' ? 'to reach' : r?.group === 'skip' ? 'left alone' : r?.group || 'not on the list');
+      // Approved for the text saved now, and not gone: what the outbox page offers.
+      const approved = (id) =>
+        Object.values(base.state.people[id]?.touches || {}).some((x) => x.approved && x.approved.hash === x.hash && !x.sent && !x.revising && !x.dropped && !x.skipped);
+      const ids = Object.keys(v1.resolved).filter((id) => /^c\d+$/.test(id));
+      const changed = ids.filter((id) => v0.resolved[id]?.group !== v1.resolved[id]?.group).map((id) => ({ id, name: name(id), from: word(v0.resolved[id]), to: word(v1.resolved[id]) }));
+      const drop_off = ids.filter((id) => approved(id) && !held(v0.resolved[id]) && held(v1.resolved[id])).map((id) => ({ id, name: name(id) }));
+      const live_again = ids.filter((id) => approved(id) && held(v0.resolved[id]) && !held(v1.resolved[id])).map((id) => ({ id, name: name(id) }));
+      const holderOf = (id) => v1.resolved[id]?.crm?.holder || null;
+      // Read as triage reads it, against every owner in the CRM (crm-triage view.mjs readInputs), not only the owners of
+      // the people on this list: a CRM that writes the user in full only on someone else's record still makes a bare
+      // first name one to check.
+      const mine = v1.inputs?.ownerIsUser || ownerIsUserFor(s1, [...new Set(ids.map(holderOf).filter(Boolean))]);
+      const yours = ids.filter((id) => holderOf(id) && mine(holderOf(id))).length;
+      // Owners written with the user's first name alone, where the CRM writes their name in full too: held to check.
+      const firstOnly = [...(mine.firstOnly || [])];
+      out.events.push({
+        slug,
+        name: ev.name || slug,
+        changed,
+        drop_off,
+        live_again,
+        yours,
+        held: ids.filter((id) => v1.resolved[id]?.group === 'colleague').length,
+        first_only: firstOnly,
+        first_only_people: ids.filter((id) => holderOf(id) && firstOnly.includes(holderOf(id))).length
+      });
+    } catch (e) {
+      out.unread.push({ slug, name: ev?.name || slug, why: String(e.message || e).slice(0, 160) });
+    }
+  }
+  return out;
+}
+// What a read-back's hash covers: the value, the owners it was read against, and everything saving it would change.
+const effectsKey = (value, owners, fx) => ({
+  value,
+  owners,
+  events: fx.events.map((x) => [x.slug, x.changed.map((y) => [y.id, y.from, y.to]), x.drop_off.map((y) => y.id), x.live_again.map((y) => y.id)]),
+  own: fx.own.map((x) => [x.slug, x.value]),
+  unread: fx.unread.map((x) => x.slug)
+});
+// Two owner values are one person as triage reads names (either way round).
+const samePerson = (a, b, domains) => sameHolder(a, b, { domains }) || sameHolder(b, a, { domains });
+
+// A yes to the reading shown: the whole answer is a word of agreement ("yes", "ok", "confirm"), or one with the
+// reading's own value beside it ("yes, Sanne de Vries", "confirm: none of these", "yes, that's me").
+const LEADING_YES = /^\s*(yes|y|yep|yeah|yup|ok|okay|sure|correct|confirm(?:ed)?)(?![\p{L}\p{N}])[\s,:;.!-]*(.*)$/isu;
+function agrees(said, read, target) {
+  if (isAgreement(said)) return true;
+  const m = LEADING_YES.exec(said);
+  if (!m || target == null) return false;
+  const rest = m[2].trim();
+  if (!rest || isAgreement(rest) || fillerOnlyAnswer(rest)) return true;
+  const r = read(rest);
+  return (r.owner != null && r.owner === target && r.read_back !== 'question') || (!!r.none && target === NOT_AN_OWNER && r.read_back !== 'question');
+}
+// An owner value as it is said back: word for word, in quotes, as data (lib/names.mjs ownerQuoted).
+const ownerShown = ownerQuoted;
+// The question a read-back ends with: the value whole, however long, so the yes covers every word saved.
+const saveIt = (value) =>
+  value === NOT_AN_OWNER ? 'Save that you are no owner in the CRM (every owner there reads as a coworker)? (yes or no)' : `Save ${ownerQuoted(value, Infinity)} as you in the CRM? (yes or no)`;
+const eventLine = (x) =>
+  `${plural(x.changed.length, 'person', 'people')} at ${plainText(x.name, 60)}${x.drop_off.length ? ` (${plural(x.drop_off.length, 'approved message')} there would no longer be yours)` : ''}${x.live_again.length ? ` (${plural(x.live_again.length, 'approved message')} there would be ready to send again)` : ''}`;
+// The people at this event whose CRM owner is the user's first name alone (resolve.mjs ownerIsUserFor firstOnly): held
+// for the user to decide, said plainly.
+const firstOnlyLine = (here) =>
+  here?.first_only?.length && here.first_only_people
+    ? `${plural(here.first_only_people, 'person', 'people')} owned by ${here.first_only
+        .slice(0, 3)
+        .map((o) => ownerShown(o))
+        .join(' or ')} in your CRM ${here.first_only_people === 1 ? 'is' : 'are'} held for you to decide in triage: floorboss can't tell if that's you.`
+    : null;
+// The user's answer as it is said back, with its question mark when it asked one (the reading says so).
+const echo = (said) => {
+  const q = shown(said, 120, { keepIds: false });
+  return /[?？¿]/.test(String(said)) ? q.replace(/"$/, '?"') : q;
+};
+// The reading shown back, waiting on disk for the user's own yes.
+function readBack(c, value, fx, all, said, { why = null, lead = '', owners = [], of = null, two = [] } = {}) {
+  const here = fx.events.find((x) => x.slug === c.slug) || null;
+  const elsewhere = fx.events.filter((x) => x.slug !== c.slug && x.changed.length);
+  const reason =
+    why === 'question'
+      ? `Your answer asks a question, so it isn't saved as it stands. `
+      : why === 'only_one'
+        ? `Your CRM lists one owner, ${ownerShown(owners[0] ?? value)}, and your answer names nobody, so it is taken as that owner. `
+        : why === 'phrase'
+          ? `${ownerShown(value)} is the name of an owner in your CRM, written like an answer. If you meant you're not in the CRM, answer "I'm not in the CRM". `
+          : why === 'first_name' && of
+            ? `Your CRM writes the owner ${ownerShown(of)} with a first name only, and no other owner there has that first name, so your answer is taken as that owner and saved as you wrote it. `
+          : why === 'taken_out'
+            ? `Your answer holds more than a name, so the name was taken out of it. `
+            : why === 'doubtful'
+              ? `It isn't plainly a name or an address, so it is shown back before it is saved. `
+              : why === 'not_listed'
+                ? `It isn't one of the owners your CRM export lists. `
+                : why === 'several'
+                  ? `It could be more than one owner in your CRM. `
+                  : why === 'two_owners'
+                    ? `In this CRM it reads as ${two.map((o) => ownerShown(o)).join(' and ')}, different owners, so the people they own would be held for you to decide. `
+                    : why === 'list_changed'
+                      ? `The owners in your CRM export aren't the ones the question showed (the export changed since), so the number is read against the list as it is now: ${owners
+                          .slice(0, OWNERS_SHOWN)
+                          .map((o, i) => `${i + 1}. ${ownerShown(o)}`)
+                          .join('; ')}. `
+                      : '';
+  const changes = [here && here.changed.length ? eventLine({ ...here, name: 'this event' }) : null, ...elsewhere.map(eventLine)].filter(Boolean);
+  const text = [
+    `${lead}You said: ${echo(said)}. ${reason}`.trim(),
+    changes.length ? `This changes ${changes.join(', and ')}.` : null,
+    here?.drop_off.length ? `At this event, ${here.drop_off.map((x) => `${x.id} ${x.name}`).join(', ')} would no longer be yours, and off the outbox page.` : null,
+    firstOnlyLine(here),
+    fx.unread.length ? `${fx.unread.map((x) => plainText(x.name, 60)).join(' and ')} can't be read now, so what it changes there isn't known.` : null,
+    saveIt(value)
+  ]
+    .filter(Boolean)
+    .join(' ');
+  holdOwnerReading(c.home, { event: c.slug || null, target: value, hash: effectsHash(effectsKey(value, all, fx)), created_at: c.now.toISOString(), text, question: saveIt(value), answer: String(said).slice(0, 300) });
+  return {
+    saved: false,
+    pending: true,
+    read_as: value,
+    say_to_user: text,
+    next: 'Show say_to_user to the user word for word and wait for their own reply; save it with flow answer --ask crm_name. Never answer it for them.'
+  };
+}
+// Saves the owner value, then says what it changed: who changes group here (by name) and at the other events (counts),
+// approved messages that are ready to send again or no longer the user's, and events that keep their own setting.
+function saveOwner(c, value, fx, { none = false, owners = [], elsewhere = [], elsewhereHit = false, prior = null } = {}) {
+  const here = fx.events.find((x) => x.slug === c.slug) || null;
+  const others = fx.events.filter((x) => x.slug !== c.slug && x.changed.length);
+  // This event keeps its own owner setting (its event.json): the change is the user's setting, for the other events.
+  const ownHere = !c.event?.event?.mock && c.event?.event?.settings?.crm_user_name != null ? c.event.event.settings.crm_user_name : null;
+  const keepsOwn = ownHere != null ? { value: ownHere } : null;
+  const saved = config(c, { crm_user_name: value });
+  // Saved through this question: a value saved here is never asked about again because it reads like a sentence
+  // (onboarding-state flags only a value saved some other way, by an older version or by hand).
+  try {
+    answers(c, { crm_name_saved: ownerSavedMark(value) });
+  } catch {
+    /* the setting is saved; the mark only spares a question */
+  }
+  // A change: this event's derived files (the shortlist, who holds whom) read again with the new value. (A first
+  // answer leaves that to the load that comes next.)
+  if (prior && here && c.slug)
+    try {
+      cli('crm-triage', ['view', '--event', c.slug], c);
+    } catch {
+      /* read again at the next step */
+    }
+  const you = none ? 'no owner' : ownerShown(value);
+  const listedAt = elsewhereHit ? elsewhere.find((x) => x.value === value)?.event : null;
+  const lines = [
+    here ? `Saved: you are ${you} in the CRM; ${plural(here.yours, 'person', 'people')} on this list ${here.yours === 1 ? 'is' : 'are'} yours there and ${here.held} ${here.held === 1 ? 'is' : 'are'} held for coworkers.` : `Saved: you are ${you} in the CRM.`,
+    ...(listedAt ? [`That owner is listed at ${plainText(listedAt, 60)}; this event's CRM export doesn't list them, so nobody on this list is yours here.`] : []),
+    ...(keepsOwn ? [`This event keeps its own owner setting (${ownerShown(keepsOwn.value)}), so nothing changes here.`] : []),
+    ...(here?.changed.length
+      ? [
+          `${here.changed.length} ${here.changed.length === 1 ? 'person changes' : 'people change'} group here: ${here.changed
+            .slice(0, 20)
+            .map((x) => `${x.id} ${x.name} (${x.from}, now ${x.to})`)
+            .join('; ')}${here.changed.length > 20 ? `; and ${here.changed.length - 20} more` : ''}.`
+        ]
+      : []),
+    ...(here?.live_again.length ? [`${here.live_again.map((x) => `${x.id} ${x.name}`).join(', ')}: their approved message is ready to send again.`] : []),
+    ...(here?.drop_off.length ? [`${here.drop_off.map((x) => `${x.id} ${x.name}`).join(', ')}: their approved message is no longer yours to send, and is off the outbox page.`] : []),
+    ...(firstOnlyLine(here) ? [firstOnlyLine(here)] : []),
+    ...(others.length ? [`At your other events: ${others.map(eventLine).join('; ')}.`] : []),
+    ...(fx.own.filter((x) => x.slug !== c.slug).length ? [`${fx.own.filter((x) => x.slug !== c.slug).map((x) => plainText(x.name, 60)).join(' and ')} keep${fx.own.filter((x) => x.slug !== c.slug).length === 1 ? 's' : ''} its own owner setting, so nothing changes there.`] : []),
+    ...(fx.events.some((x) => x.changed.length) ? ['Your own answers about people stand, and do-not-contact, opt-out and uncertain-match holds still apply.'] : [])
+  ];
+  // What was saved, as it goes back to Claude: a value that isn't plainly a name or an address is quoted, its control
+  // and invisible characters out (ownerSaid), so a cell said yes to is data here too, never words to act on.
+  const asData = (v) => (typeof v === 'string' && v !== NOT_AN_OWNER ? ownerSaid(v) : v);
+  return {
+    saved_settings: { ...saved.saved_settings, crm_user_name: asData(value) },
+    crm_user_name: asData(value),
+    ...(here ? { changed_group: here.changed, ready_again: here.live_again, no_longer_yours: here.drop_off } : {}),
+    ...(others.length ? { other_events: others.map((x) => ({ event: x.slug, changed: x.changed.length, no_longer_yours: x.drop_off.length, ready_again: x.live_again.length })) } : {}),
+    ...(keepsOwn ? { this_event_keeps_its_own: asData(keepsOwn.value) } : {}),
+    ...(none && owners.length ? { note: `No owner in your CRM is you: every owner there reads as a coworker.` } : {}),
+    say_to_user: lines.join(' ')
+  };
+}
 
 export const TOOLS_SAVERS = {
   // "leave them alone" | "ask me each time" | "write…but warn me" | "treat them as mine", optionally with
@@ -280,29 +498,93 @@ export const TOOLS_SAVERS = {
     // ask it again.
     return fileAnswer(c, typeof v === 'object' && v ? { ...v, path: p } : p, 'crm', saysNoOptOut(said) ? { crm_opt_out_none: true } : {});
   },
-  // Matched against the owners the CRM read holds ("Maya Okafor, that's me" is Maya Okafor): the owner value is
-  // saved as the CRM writes it, or the user's own customers would read as a coworker's.
+  // Matched against every owner of the CRM export, the one list the question showed, numbered and quoted (view.mjs
+  // crmOwnerList): an answer that is one owner's name and nothing else but "that's me", "I'm", "yep" and the like
+  // (lib/names.mjs OWNER_FILLERS), or its number, is that owner as the CRM writes it; "none of these" saves no owner
+  // name. Nothing is refused for its wording: only an empty answer, one too long, a number not on the list, or one that
+  // names no one ("yes" with several owners, a bare "no"). A value that is plainly a name or an address saves at once;
+  // anything else (an owner cell with a label, a tag or a remark, words that are no owner, a negation, a word to Claude,
+  // an order), an answer read from more than the user's words (a question mark, "yes" with one owner listed, an owner
+  // named like an answer), one that reads as two owners, and any change that would take an approved message from the
+  // user at any event, is shown back word for word ("Save "X" as you in the CRM? (yes or no)") and saved only on the
+  // user's own yes to it (lib/reading.mjs holdOwnerReading: the value and a hash of everything saving it would change;
+  // if any of that changes, the yes saves nothing). Answerable any time (answer.mjs ANY_TIME); do-not-contact, opt-out
+  // and uncertain-match holds keep applying.
   crm_name: (v, c) => {
     const said = String(typeof v === 'object' && v ? v.name || v.crm_user_name || v.said || '' : v).trim();
-    const owners = crmOwners(c);
-    if (!owners.length) return config(c, { crm_user_name: said });
-    // Someone who holds no records in it says so: no owner there is them, so every owner reads as a coworker.
-    const none = /^(none of (these|them)|not (an owner|in (it|there))|i own nothing|nobody)\b/i.exec(said);
-    if (none) {
-      const me = 'not an owner in the CRM';
-      return {
-        ...config(c, { crm_user_name: me }),
-        crm_user_name: me,
-        note: `No owner in your CRM is you: every owner there (${owners.slice(0, 6).join(', ')}) reads as a coworker.`
-      };
+    const all = crmOwners(c);
+    const owners = all;
+    const listed = owners.length > 0;
+    const savedName = readJson(join(c.home, 'config.json'), {}).crm_user_name || null;
+    // The value this answer replaces where it is saved: the user's own setting (config.json), or at the mock its own
+    // (the mock keeps every setting in its event.json, and nothing it saves reaches the user's other events).
+    const mock = !!c.event?.event?.mock;
+    const prior = mock ? c.event.event.settings?.crm_user_name ?? null : savedName;
+    const effectsOf = (to) => (to === prior ? { events: [], own: [], unread: [] } : mock ? { events: [], own: [], unread: [] } : ownerEffects(c, to));
+    const ownDomains = c.cfg?.own_domains || [];
+    // Owners at the user's other events, and in older exports read for this one: answers by name, never by number.
+    const elsewhere = otherOwnerValues(c.slug || '');
+    const older = c.event ? crmOwnerValues(c.event.paths.dir).filter((x) => !all.includes(x)) : [];
+    const known = [...new Set([...elsewhere.map((x) => x.value), ...older])];
+    // The value saved now, when it was saved through this question (crm_name_saved): given again, it isn't read back again.
+    const lastSaved = answersFor(readJson(join(c.home, 'onboarding.json'), {}), c.slug || null, { mock })?.crm_name_saved ?? null;
+    const confirmed = lastSaved != null && prior != null && lastSaved === ownerSavedMark(prior) ? prior : null;
+    const opts = { listed, saved: savedName, confirmed, known, ownDomains };
+    const list = `${owners.slice(0, OWNERS_SHOWN).map((o, i) => `${i + 1}. ${ownerShown(o)}`).join('; ')}${owners.length > OWNERS_SHOWN ? `; and ${owners.length - OWNERS_SHOWN} more (type the name)` : ''}`;
+    const offer = owners.length
+      ? `The owners: ${list}. Say which of these is you (the name, or its number), or "none of these" if you're not in the CRM (you own no records in it). Show the user this question and the owners, and save only their own answer.`
+      : `Your CRM export lists no owners: say your name as your CRM writes it, or "I'm not in the CRM".`;
+    // A reading shown before, waiting for the user's yes: a yes to it saves exactly it, once what it changes is checked
+    // again; any other answer drops it and is read afresh.
+    const waiting = ownerReadingFor(c.home, { event: c.slug || null, nowMs: c.now.getTime() });
+    let dropped = false;
+    if (!waiting.none) {
+      const target = waiting.reading?.target;
+      const yes = agrees(said, (t) => ownerFromAnswer(t, owners, opts), target);
+      if (yes) {
+        dropOwnerReading(c.home);
+        if (waiting.stale) throw new Error(`The reading shown before can't be used: ${waiting.stale}. Nothing was saved: answer again with the name, its number, or "none of these".`);
+        const fx = effectsOf(target);
+        if (effectsHash(effectsKey(target, all, fx)) !== waiting.reading.hash)
+          return readBack(c, target, fx, all, waiting.reading.answer, { lead: `What saving it would change has changed since it was shown, so nothing was saved yet. ` });
+        return saveOwner(c, target, fx, { none: target === NOT_AN_OWNER, owners, elsewhere, prior });
+      }
+      dropped = dropOwnerReading(c.home);
     }
-    // Several spellings ("Maya Okafor|M. Okafor") are kept as given when one of them is an owner.
-    const hit = said.includes('|') ? (said.split('|').some((x) => ownerMatch(x, owners)) ? said : null) : ownerMatch(said, owners, { first: true });
-    if (!hit)
+    const r = ownerFromAnswer(said, owners, opts);
+    const lead = dropped ? 'The reading shown before was dropped, since this is a new answer. ' : '';
+    // Refused only for being empty, too long, a number not on the list, or naming no one.
+    if (r.ask)
       throw new Error(
-        `"${said}" isn't an owner in your CRM: ${owners.slice(0, 12).join(', ')}? Say which of these is you, or "none of these" if you own no records in it.`
+        lead +
+          (r.ask === 'empty'
+            ? `The answer is empty. Nothing was saved. ${offer}`
+            : r.ask === 'too_long'
+              ? `The answer is longer than 200 characters. Nothing was saved. ${offer}`
+              : r.ask === 'not_on_list'
+                ? `${ownerShown(said)} isn't a number on the list${owners.length ? '' : ' (there is no list)'}. Nothing was saved. ${offer}`
+                : `${ownerShown(said)} names no one${owners.length > 1 ? `, and your CRM lists ${plural(owners.length, 'owner')}` : ''}. Nothing was saved. ${offer}`)
       );
-    return { ...config(c, { crm_user_name: hit }), crm_user_name: hit, ...(hit !== said ? { note: `Saved as "${hit}", as your CRM writes it.` } : {}) };
+    const value = r.none ? NOT_AN_OWNER : r.owner;
+    // Several spellings, or a name triage would also read as another owner: at most one person may be the user (triage
+    // holds them all, unclear, when it is more: resolve.mjs ownerIsUserFor), so such a value is read back, saying so.
+    let two = [];
+    if (!r.none) {
+      const mine = ownerIsUserFor({ crm_user_name: value, own_domains: ownDomains, colleagues: c.cfg?.colleagues || [] }, owners);
+      const hits = mine.unclear?.size ? [...mine.unclear] : owners.filter((o) => mine(o));
+      const people = [];
+      for (const h of hits) if (!people.some((p) => samePerson(p[0], h, ownDomains))) people.push([h]);
+      if (people.length > 1) two = people.map((p) => p[0]);
+    }
+    const fx = effectsOf(value);
+    const dropping = fx.events.reduce((n, x) => n + x.drop_off.length, 0);
+    // A number read against a list other than the one the question showed at this event (the export changed in
+    // between: the question notes the list it numbered, onboarding-tree.mjs): read back with the list as it is now.
+    const shownQ = ownerQuestionFor(c.home);
+    const listChanged = !!r.by_number && !!shownQ && (shownQ.event || null) === (c.slug || null) && shownQ.hash !== effectsHash(owners);
+    const why = listChanged ? 'list_changed' : two.length ? 'two_owners' : r.read_back || null;
+    if (why || dropping || fx.unread.length) return readBack(c, value, fx, all, said, { why, lead, owners, of: r.first_of || null, two });
+    return { ...saveOwner(c, value, fx, { none: !!r.none, owners, elsewhere, elsewhereHit: r.elsewhere, prior }), ...(dropped ? { dropped_reading: true } : {}) };
   },
   customers: (v, c) => {
     const s = String(typeof v === 'object' ? '' : v).toLowerCase();

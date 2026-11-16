@@ -3,6 +3,8 @@
 // What every command starts from: the event as loaded (ctxOf), writing to the ledger (led), and small
 // helpers about people, ids and settings that several commands share.
 import { companyKey } from '../../../../lib/normalize.mjs';
+import { eventDir } from '../../../../lib/paths.mjs';
+import { pageInputs } from './page-inputs.mjs';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { loadEvent, contextFor, nowFrom } from '../../../../lib/event.mjs';
 import { todayKeyIn } from '../../../../lib/tz.mjs';
@@ -49,13 +51,17 @@ export function signoffOf(voice) {
 }
 
 export function ctxOf(slug, opts) {
-  const loaded = loadEvent(slug);
   const now = nowFrom(opts);
+  // What the outbox page would be built from, taken before anything is read (page-inputs.mjs): a page built from this
+  // read is known as out of date as soon as any of it changes.
+  const inputsAt = pageInputs(eventDir(slug), now);
+  const loaded = loadEvent(slug);
   // Where the event stands (lib/spacing.mjs eventDayState), read from event.json as it is. An event whose dates or zone
   // can't be read sends nothing and says so (dayState); its times are drawn in UTC only so the page and the summary can
   // still be made, never a thrown "Invalid time zone".
   const dayState = eventDayState(loaded.event, now.getTime());
   const base = dayState.state === 'unreadable' && !zoneReadable(loaded.event?.time_zone) ? { ...loaded, event: { ...loaded.event, time_zone: 'UTC' } } : loaded;
+  const ledgerAt = inputsAt.ledgers[base.paths.ledger]?.[0] ?? 0;
   const { entries, damaged } = readLedger(base.paths.ledger);
   const folded = fold(entries, damaged);
   if (!Object.keys(folded.people).length) throw new Error(`${base.event.name} has no loaded list yet. Run /floorboss:start first.`);
@@ -98,7 +104,9 @@ export function ctxOf(slug, opts) {
     entries,
     byId,
     logBlocked: folded.damaged_anyone?.line || null,
-    view
+    view,
+    ledgerAt,
+    inputsAt
   };
   c.blocked = (id, kind = 'message') => blockReason(c, id, kind);
   return c;
@@ -185,6 +193,16 @@ export function led(c, e) {
   return written;
 }
 
+// The groups whose people get no message, and what blockReason says for each: one list, also read by whatever counts
+// the approved messages an answer would take away (the crm_name saver).
+const GROUP_HOLDS = {
+  skip: (r) => r.says || 'left alone',
+  check: (r) => `to check first (${r.says}); decide at the triage gate`,
+  colleague: (r) => `a colleague holds this relationship (${r.says})`,
+  in_touch: (r) => `already in touch (${r.says}); decide warm at the triage gate for a warm note`
+};
+export const HOLDING_GROUPS = Object.freeze(Object.keys(GROUP_HOLDS));
+
 // One answer to "may we contact this person?", asked again at every exit (todo, gate, outbox, summary,
 // staging): the inputs, the decisions and the outcomes can all change after the gate. Null means yes.
 // A coordinate note goes to a colleague, not the person, so only removals and drops block it.
@@ -201,10 +219,7 @@ export function blockReason(c, id, kind) {
   const ct = c.byId[id];
   const r = c.view.resolved[id];
   if (!ct || !r) return 'no longer on the attendee list';
-  if (r.group === 'skip') return r.says || 'left alone';
-  if (r.group === 'check') return `to check first (${r.says}); decide at the triage gate`;
-  if (r.group === 'colleague') return `a colleague holds this relationship (${r.says})`;
-  if (r.group === 'in_touch') return `already in touch (${r.says}); decide warm at the triage gate for a warm note`;
+  if (Object.hasOwn(GROUP_HOLDS, r.group)) return GROUP_HOLDS[r.group](r);
   // Cut from the shortlist since (keep <n>, a cap, a re-run of the gate): an unsent message must not go.
   // (Someone who booked keeps their confirmation even if the shortlist was cut since.)
   if (!(c.short.approved || []).includes(id) && !(c.short.coordinate || []).includes(id) && !(kind === 'confirmation' || st.booked))

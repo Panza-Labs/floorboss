@@ -76,7 +76,10 @@ function config(opts) {
       drafting_mode: ['drafting_mode', 'drafter'],
       // Opening the user's LinkedIn or event-app inbox is their answer too: the guard opens one only on it.
       inbox_read: ['inbox_read'],
-      log_replies: ['inbox_read']
+      log_replies: ['inbox_read'],
+      // Which CRM owner the user is decides whose people are theirs at every event, and a change can take approved
+      // messages from them: saved only through the crm_name question, which reads it back first when it would.
+      crm_user_name: ['crm_name']
     };
     for (const [k, asks] of Object.entries(ANSWERED_ONLY))
       if (k in patch && !asks.includes(savedBy))

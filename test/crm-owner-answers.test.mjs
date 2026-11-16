@@ -2,7 +2,7 @@
 // CRM writes them: "Maya Okafor, that's me" is Maya Okafor, so her own customers stay hers.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { setup, cli, triage, idOf, ROOT, NOW } from './fixtures/harness.mjs';
@@ -29,15 +29,18 @@ test('ownerMatch: the same value, then any case, then first and last name in the
   assert.equal(ownerMatch('Priya Raman', owners), null);
 });
 
-test('crm_name: free text with the owner in it saves the owner value; a name that owns nothing is asked again with the owners; Sofia stays the user\'s', () => {
+test('crm_name: free text with the owner in it saves the owner value; a name that owns nothing is read back, saved only on a yes; Sofia stays the user\'s', () => {
   const H = setup({ attendees: PEOPLE, crm: CRM });
   const ev = JSON.parse(readFileSync(join(H.dir, 'event.json'), 'utf8'));
   delete ev.settings.crm_user_name;
   writeFileSync(join(H.dir, 'event.json'), JSON.stringify(ev));
   const load = cli(H, 'crm-triage', ['load', '--event', H.slug]);
   assert.ok(!load.ERROR, load.ERROR);
+  // No owner here: never refused for it, read back word for word, and nothing saved before a yes.
   const bad = answer(H, 'crm_name', 'Priya Raman');
-  assert.match(bad.ERROR, /"Priya Raman" isn't an owner in your CRM: Maya Okafor, Ben Hartley\?/);
+  assert.equal(bad.result?.pending, true, JSON.stringify(bad).slice(0, 300));
+  assert.match(bad.say_to_user, /It isn't one of the owners your CRM export lists\. .*Save "Priya Raman" as you in the CRM\? \(yes or no\)$/);
+  assert.ok(!existsSync(join(H.HOME, 'config.json')) || settingsOf(H).crm_user_name === undefined);
   const r = answer(H, 'crm_name', "Maya Okafor, that's me");
   assert.ok(!r.ERROR, r.ERROR);
   assert.equal(settingsOf(H).crm_user_name, 'Maya Okafor');

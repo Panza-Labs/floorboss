@@ -7,15 +7,28 @@ import { allowedPath, home } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { noDayWhy, stateOf } from '../../../../lib/spacing.mjs';
-import { readLedger } from '../../../../lib/ledger.mjs';
+import { readLedger, append } from '../../../../lib/ledger.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { approvalHash, verifySend, readersOf, withFallbacks, userWordCounts, sentOrGoingToday, addressBusyToday, busyWhy, markerOnly, homeSends, IN_FLIGHT } from '../../../../lib/sendcheck.mjs';
+import { approvalHash, verifySend, readersOf, withFallbacks, userWordCounts, sentOrGoingToday, addressBusyToday, busyWhy, markerOnly, homeSends, IN_FLIGHT, CHANGED_ELSEWHERE } from '../../../../lib/sendcheck.mjs';
 import { validateReceipts } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig, saveConfig } from '../../../../lib/config.mjs';
 import { earlierWith, writtenInApp, toOf, sendRoute, appLimitReached, whereAt } from './routes.mjs';
 import { crmPending, lastSentTouch, ctxOf, led, sendingOn, idList, takenTest } from './context.mjs';
 import { draftFiles, savedDraft, readTodo, staleFor, followupDayOf } from './saved-drafts.mjs';
-import { allOutboxCards, renderFile } from './cards.mjs';
+import { rebuildOutbox, allOutboxCards } from './cards.mjs';
+import { othersMoved } from './page-inputs.mjs';
+import { lentAbout } from '../../../../lib/lent.mjs';
+
+// floorboss's own tests only (FLOORBOSS_TEST=1): a record line (FLOORBOSS_LIST_APPEND: {"event": "<another event's
+// slug>", "line": {...}}) written once to that event's record right after a list's first check of the other events'
+// records, as a command there landing while the list is made.
+function testWriteDuringList(c) {
+  if (process.env.FLOORBOSS_TEST !== '1' || !process.env.FLOORBOSS_LIST_APPEND) return;
+  const { event, line } = JSON.parse(process.env.FLOORBOSS_LIST_APPEND);
+  delete process.env.FLOORBOSS_LIST_APPEND;
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(event)) || event === c.event.slug || !line || typeof line !== 'object') return;
+  append(join(home(), 'events', event, 'ledger.jsonl'), line, c.now);
+}
 
 // Approved emails not yet staged and not sent: exactly what to put in the mailbox, from floorboss's files.
 // Approved, not sent, not staged, and still allowed: removed, dropped and suppressed people are checked
@@ -76,17 +89,33 @@ export function stageList(opts) {
   need(opts, 'event');
   const c = ctxOf(opts.event, opts);
   const recipe = loadConfig().connectors?.stage_draft || null;
+  // The other events' records as the view read them (ctxOf), checked before and after the items are listed, as
+  // send-list does: each item records what the other events lend about its person (lib/lent.mjs), and the guard reads
+  // it again when the draft is staged (hooks/guard/sends.mjs stageRefusal), so a stop or a send recorded at another
+  // event since the list was made holds the draft. A record that changed while the list was made holds every item.
+  const othersChanged = othersMoved(c.paths.dir, c.inputsAt);
+  testWriteDuringList(c);
   // listed_at: the guard stages an item only within 30 minutes of its listing (a stop or reply after that
   // can't be missed by a list made before it).
   const held = [];
-  const list = stageable(c, held).map((x) => ({ ...x, listed_at: c.now.toISOString() }));
+  const listed = stageable(c, held).map((x) => ({
+    ...x,
+    listed_at: c.now.toISOString(),
+    elsewhere: othersChanged ? CHANGED_ELSEWHERE : lentAbout(c.paths.dir, { ...(c.folded.people[x.id] || {}), emails: [x.to].filter((y) => /@/.test(String(y || ''))) })
+  }));
+  // Changed while the list was made: every item is marked so and kept in the file (so a later list still knows it was
+  // listed), and the guard holds each one (lib/sendcheck.mjs lentChanged). None is to stage.
+  const moved = othersChanged || (listed.length > 0 && othersMoved(c.paths.dir, c.inputsAt));
+  const list = moved ? listed.map((x) => ({ ...x, elsewhere: CHANGED_ELSEWHERE })) : listed;
+  const waiting = moved ? list.map((x) => ({ id: x.id, touch: x.touch, why: 'another of your events changed while this list was made: run stage-list again' })) : [];
   const file = join(c.paths.dir, 'stage-list.json');
   // Items listed before with no receipt may already be in the mailbox (a run that stopped halfway).
   const before = new Set(readJson(file, []).map((x) => `${x.id}:${x.touch}`));
   const again = list.filter((x) => before.has(`${x.id}:${x.touch}`)).map((x) => x.id);
   writeJson(file, list);
   return {
-    to_stage: list.length,
+    to_stage: moved ? 0 : list.length,
+    ...(waiting.length ? { waiting } : {}),
     file,
     connected: recipe ? `${recipe.server} · ${recipe.tool}` : null,
     listed_before: again.length ? again : undefined,
@@ -110,8 +139,7 @@ export function staged(opts) {
   const tool = loadConfig().connectors?.stage_draft?.tool || null;
   for (const x of r.receipts)
     led(c, { type: 'staged', id: x.id, touch: x.touch, draft_id: x.draft_id, thread_id: x.thread_id, message_id: x.message_id, tool });
-  const fresh = ctxOf(opts.event, opts);
-  return { saved: true, staged: r.receipts.length, missing: wanted.length - r.receipts.length, outbox: renderFile(fresh, allOutboxCards(fresh)) };
+  return { saved: true, staged: r.receipts.length, missing: wanted.length - r.receipts.length, outbox: rebuildOutbox(opts.event, opts, { force: true }).rebuilt };
 }
 
 // Why a step isn't an unclear send (null: it is one). An unclear send was let through with no outcome recorded since:
@@ -155,6 +183,11 @@ export function sendList(opts) {
   const opened = win && !win.closed && win.event === c.event.slug && c.entries.filter((e) => e.type === 'browser_send_opened' && e.until === win.until && e.said).pop();
   const windowIds = opened && c.now.getTime() - Date.parse(opened.at) <= 20 * 60000 && Date.parse(win.until) > c.now.getTime() ? new Set(win.ids || []) : null;
   const only = opts.ids ? new Set(idList(opts.ids)) : null;
+  // The other events' records as this command read them (the view, in ctxOf): unchanged since, or every item waits.
+  // Checked again once every item is listed (below): a record written there in between is in the items' "elsewhere"
+  // but not in the view they were judged by.
+  const othersChanged = othersMoved(c.paths.dir, c.inputsAt);
+  testWriteDuringList(c);
   // Every event's sends, looked at once for all the messages listed (lib/sendcheck.mjs addressBusyToday).
   const sends = homeSends();
   // --resend id:touch --said "<the user's words>": the user checked that a message let through earlier never
@@ -309,7 +342,10 @@ export function sendList(opts) {
       body: d.body,
       thread_id: prevMsg?.thread_id || null,
       reply_to_message_id: prevMsg?.message_id || null,
-      listed_at: c.now.toISOString()
+      listed_at: c.now.toISOString(),
+      // What the user's other events lend about this person, as this list read them (lib/lent.mjs): the send check reads
+      // it again at the send. Changed while this command read them: the send waits until the list is made again.
+      elsewhere: othersChanged ? CHANGED_ELSEWHERE : lentAbout(c.paths.dir, { ...(c.folded.people[id] || {}), emails: [route.to].filter((x) => /@/.test(String(x || ''))) })
     };
     const inWindow = item.via === 'browser' && !!windowIds?.has(`${id}:${t}`);
     const v = verifySend(item, { evDir: c.paths.dir, settings: c.settings, state: c.state, entries: c.entries, folded: c.folded, nowMs: c.now.getTime(), replyCheck: !inWindow, sends });
@@ -320,6 +356,15 @@ export function sendList(opts) {
     if (item.via === 'browser' && item.where !== 'LinkedIn' && t !== 0) appUsed.add(id);
     items.push(item);
   }
+  // Another event's record written while the items were listed (after the check above, before their "elsewhere" was
+  // taken): what an item lends may already hold it, while the view that judged the item didn't. Every item is marked so,
+  // as a page built meanwhile is (page-inputs.mjs sealPageInputs), and waits: the send check refuses a marked item.
+  if (!othersChanged && items.length && othersMoved(c.paths.dir, c.inputsAt))
+    for (const x of items.splice(0)) {
+      x.elsewhere = CHANGED_ELSEWHERE;
+      const v = verifySend(x, { evDir: c.paths.dir, settings: c.settings, state: c.state, entries: c.entries, folded: c.folded, nowMs: c.now.getTime(), replyCheck: false });
+      waiting.push({ id: x.id, touch: x.touch, via: x.via, where: x.where || null, why: v.ok ? 'another of your events changed while this list was made: make the list again' : v.why });
+    }
   // One message a day to one person: the earliest step listed goes today; any other waits for another day.
   items.sort((a, b) => String(a.id).localeCompare(String(b.id)) || a.touch - b.touch);
   for (let i = items.length - 1; i >= 0; i--)

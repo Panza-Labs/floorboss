@@ -309,7 +309,8 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
   address the person has alone at the sending event, and each inbox address of theirs together with their name (in
   one sorted order, so two calls can never each hold a lock the other is waiting for), checks every event's ledger
   for those addresses under them, then writes the release.
-  A lock left by a guard that died holds that address for up to a minute. A lock broken as stale is never given
+  Each lock holds the process id of the guard that took it: a lock whose guard has ended is broken at once, and
+  one with no readable id (a guard killed before it wrote it) holds that address for up to a minute. A lock broken as stale is never given
   back, and a send checks that its locks are still its own just before its release, so two calls can't both hold
   one. A new lock that a stale break renamed away in a race is left under another name, and removed once it is a
   day old, the next time a lock is taken. A guard's mark for a message with no release counts as a send that may
@@ -393,4 +394,15 @@ floorboss can't tell a faithful relay from a made-up one:
 - **Your context files.** What you bring, your voice and who you want to meet live in `~/.floorboss/` and
   can be edited without a prompt. The critic checks a draft's claims against them.
 - **Sending off, the default.** There is no prompt, because you send each message yourself. The outbox's
-  "passed" and "approved" labels rest on the points above, so read each message as you paste it.
+  "passed" and "approved" labels rest on the points above, so read each message as you paste it. The page is a
+  view of the ledgers: checked after every floorboss command that writes something it reads and at every flow step,
+  and rebuilt when something it reads changed (`skills/event-outreach/scripts/commands/page-inputs.mjs`,
+  `test/outbox-inputs.test.mjs`, `test/outbox-round4.test.mjs`). floorboss's own sending never reads it. Each send is
+  checked when it is made against the sending event's ledger, and against what your other events' ledgers say about
+  that person (`lib/lent.mjs`): a stop, a send or an approval recorded there since the send list was made refuses it
+  until the list is made again, which reads them in full, and a list made while one of those ledgers changed holds
+  every item. A draft put in your mailbox while sending is off gets the same check against your other events when it
+  is staged (`hooks/guard/sends.mjs`). The CRM owner setting, which decides whose people are yours, is saved only
+  through its question (`event-context config --set` refuses it), which reads back first any change that would take
+  an approved message from you, and any owner value that isn't plainly a name or an email address (it is shown
+  quoted, as data, and saved only on your yes).

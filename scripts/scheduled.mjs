@@ -20,7 +20,7 @@
 // "07:00" is the machine's clock, because launchd has no other, and it is the user's morning where they are.
 //
 // Running it twice does no harm: the same event, day and records on the same date build and open nothing again.
-import { readdirSync, existsSync, lstatSync, unlinkSync, rmdirSync, rmSync } from 'node:fs';
+import { readdirSync, existsSync, lstatSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { Worker } from 'node:worker_threads';
@@ -29,7 +29,7 @@ import { nowMs } from '../lib/clock.mjs';
 import { todayKeyIn, addDays, wallParts, isValidZone } from '../lib/tz.mjs';
 import { readJson, writeJson, writeText } from '../lib/jsonio.mjs';
 import { readLedger, fold } from '../lib/ledger.mjs';
-import { withLock } from '../lib/lock.mjs';
+import { withLock, removeLock } from '../lib/lock.mjs';
 import { isMain } from '../lib/main.mjs';
 import { isOff, logLine, readBriefState, briefStateFile, todayPage, openerFor, privateDir } from '../lib/unattended.mjs';
 import { buildFactsBrief } from '../skills/event-outreach/scripts/commands/calendar.mjs';
@@ -265,7 +265,7 @@ function clearDeadRun() {
     } catch (e) {
       if (e.code !== 'ESRCH') return;
     }
-    rmdirSync(lockDir);
+    removeLock(lockDir);
   } catch {
     /* no mark, no lock, or not ours to remove */
   }

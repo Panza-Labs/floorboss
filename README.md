@@ -546,10 +546,18 @@ Each event is a folder in `events/`:
   `agenda.ics`).
 - **Derived and working files** in `derived/` and `work/` (the shortlist, the list of what to draft, the
   rating set, the critic's batches), rebuilt from the others on every run and safe to delete. The pages
-  are rebuilt the same way.
+  are rebuilt the same way. `outbox.html` records what it was built from (this event's files, your
+  settings and the other events' records) and is rebuilt whenever one of those changes what it shows: after a
+  cut, a rewrite, a drop, an edit, a hold, a setting, or a send, an approval or a stop for the same person at
+  this event or another, a message to their address that another event let through, and when a step finds a file
+  edited by hand or a new day. It offers Copy only for
+  messages you approved that haven't gone, to people who may still be contacted; a message floorboss let through
+  to send, with no receipt yet, isn't offered (it may have gone). A page that can't be rebuilt is replaced by
+  one that says it is out of date and offers nothing to copy.
 
 Delete an event's folder to delete its data. A "stop" at one event is honoured at your other events by
-reading their ledgers, so deleting a folder also forgets the stops recorded in it.
+reading their ledgers, also for someone never messaged there, so deleting a folder also forgets the stops
+recorded in it.
 
 Some of it leaves your machine, and only for what you use: the attendee data Claude reads goes to the model
 like anything else in a Claude session; research sends people's names and companies to web search; an

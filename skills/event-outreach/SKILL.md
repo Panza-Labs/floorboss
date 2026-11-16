@@ -417,3 +417,16 @@ Write the user's report to a file in `~/.floorboss/work/` (floorboss's data fold
 Read back the `recorded` lines in plain words, and any `notes`. Never tell the user something is recorded
 until `record` says `applied: true`.
 
+The outbox page records what it was built from, and every command that writes something it reads checks it and
+rebuilds `outbox.html` when that changed: this one, a rewrite, a drop, an edit, a send, a shortlist change, a
+setting, and a send, an approval or a stop for the same person at another event. `flow next` checks it too, and
+`open` rebuilds it. The page offers Copy only for messages approved and not yet sent, to people who may still be
+contacted. A message floorboss let through to send with no receipt yet has no Copy and says it may have gone: ask
+the user to look in their sent mail, then record it as sent, or resend it with their words. If the output has
+`outbox_not_rebuilt`, what was recorded stands; the page now says it is out of date and offers nothing to copy.
+Tell the user, in its words, and rebuild it with `event-outreach open --event <slug> --no-open` once the cause is
+fixed. The page is only a view: sending is checked against the ledgers, never the page. A send refused because
+something was recorded for that person at another event since the send list was made goes again only from a new
+list (`flow next`). The same holds for staging: a draft refused because of something recorded at another event since
+`stage-list` ran, and every item a `stage-list` lists under `waiting`, goes in only from a new `stage-list`.
+

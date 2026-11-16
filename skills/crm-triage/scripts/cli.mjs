@@ -22,7 +22,7 @@ import { saveConfig } from '../../../lib/config.mjs';
 import { routeLength } from '../../../lib/route.mjs';
 import { parseGate, TRIAGE_ANSWERS, friendlyAnswer } from '../../../lib/gate.mjs';
 import { directReading, interpretedReading, interpretHint, signature, sameReading, isYes, isAgreement, bareOk, rowsHash, savePending, dropPending, clearPending, peekPending, person, shown, plainText } from '../../../lib/reading.mjs';
-import { validateMapping, writeSource, sourcePath, optOutSays, defaultStatusMeaning } from './sources.mjs';
+import { validateMapping, writeSource, sourcePath, optOutSays, defaultStatusMeaning, ownerValues } from './sources.mjs';
 import { readMappingWords } from './mapping-words.mjs';
 import { mustMeetHits } from './shortlist.mjs';
 import { parseDecisionLines, matchGroups, DECISION_FORMS } from './decisions.mjs';
@@ -33,6 +33,7 @@ import { validateCrmRecords, validateMailHistory, validateEnriched } from '../..
 import { modeFor, daysUntilEvent } from '../../event-outreach/scripts/leadtime.mjs';
 import { plannedDays, followupDay, spacingWords } from '../../../lib/spacing.mjs';
 import { HARD_HOLDS } from './resolve.mjs';
+import { plainOwnerValue, ownerQuoted, ownerSaid } from '../../../lib/names.mjs';
 import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
 
 // A list file named on the command line: in a folder floorboss reads from, not a key place, a list's kind of
@@ -237,6 +238,8 @@ function confirmMapping(opts) {
     throw new Error(`The mapping isn't complete: ${errors.join('; ')}.${words ? ` It did read: ${words.read.join('; ')}. Nothing was saved.` : ''}`);
   m.confirmed = true;
   m.confirmed_at = c.now.toISOString();
+  // The owners as this mapping reads them (a corrected owner column reads another column).
+  if (opts.kind === 'crm') m.owner_values = ownerValues(m.columns, table.records);
   writeSource(c.paths.dir, m);
   // The view the user was shown, as it stands now: it no longer asks them to say anything.
   writeText(join(c.paths.derived, `mapping-${opts.kind}.md`), mappingView(m));
@@ -493,6 +496,19 @@ const heldAs = (v, id) => v.resolved[id]?.base || v.resolved[id];
 // Row, CRM and list text in a message the user is shown: letters, digits and spaces only, no ID shapes, capped, so a
 // name, a company, an owner or a CRM note can never read as a command or an instruction.
 const safe = (x, n = 120) => plainText(x, n);
+// A CRM owner in such a message: as written when it is plainly a name or an address, else made safe as above and put
+// in quotes, as data (lib/names.mjs plainOwnerValue). A reason naming that owner (resolve.mjs quotes it) names it so too.
+const holderSaid = (h) => (plainOwnerValue(h) ? safe(h, 60) : `"${safe(h, 60)}"`);
+const safeWhy = (says, holder, n = 120) => {
+  const q = holder && !plainOwnerValue(holder) ? ownerQuoted(holder) : null;
+  if (!q || !String(says || '').includes(q)) return safe(plainWhy(says), n);
+  return String(says)
+    .split(q)
+    .map((x) => safe(plainWhy(x), n))
+    .join(` ${holderSaid(holder)} `)
+    .replace(/\s+/g, ' ')
+    .trim();
+};
 // Every rung of that resolution, not only the one that won: a coworker's record behind a lost deal, or a do-not-contact
 // entry behind "doesn't fit", still holds. When the user's own reach or warm wins, the holds behind it are the ones it
 // was given over (resolve puts any newer one first), so none of them is asked again.
@@ -508,8 +524,8 @@ function coworkerHold(v, id, verb, { check = false } = {}) {
   const r = rungsOf(heldAs(v, id)).find((x) => x.group === 'colleague' && x.holder);
   if (!r) return null;
   const name = safe(v.contacts.find((x) => x.id === id)?.name || id, 60);
-  const holder = safe(r.holder, 60);
-  const where = /\baccount\b/.test(r.says || '') ? `at ${holder}'s account (${safe(plainWhy(r.says))})` : `held by ${holder} (${safe(plainWhy(r.says))})`;
+  const holder = holderSaid(r.holder);
+  const where = /\baccount\b/.test(r.says || '') ? `at ${holder}'s account (${safeWhy(r.says, r.holder)})` : `held by ${holder} (${safeWhy(r.says, r.holder)})`;
   const w = verb === 'rescue' ? 'reach' : verb;
   return check
     ? `${name} (${id}) is ${where}. Say "${id} ${w} anyway because <why>" (you write to them too, and any note to ${holder} says so), or leave them with ${holder} (nothing to say).`
@@ -844,7 +860,7 @@ function view(opts) {
         ? `left alone: ${safe(plainWhy(r.says.replace(/\([^()]*\)/g, '')))}`
         : r.group === 'colleague'
           ? v.coordinate.includes(x.id)
-            ? `a colleague holds them (${r.holder ? safe(r.holder, 60) : 'owner unknown'}): ${c.settings.colleague_notes || c.state.people[x.id]?.colleague_note ? 'a note goes to the colleague' : `left to them, and no note is drafted (colleague notes are off: say "note <name>" for a note to ${r.holder ? safe(r.holder, 60) : 'the colleague'} about one of them, or "notes on" for everyone a colleague holds)`}`
+            ? `a colleague holds them (${r.holder ? holderSaid(r.holder) : 'owner unknown'}): ${c.settings.colleague_notes || c.state.people[x.id]?.colleague_note ? 'a note goes to the colleague' : `left to them, and no note is drafted (colleague notes are off: say "note <name>" for a note to ${r.holder ? holderSaid(r.holder) : 'the colleague'} about one of them, or "notes on" for everyone a colleague holds)`}`
             : fitOf
               ? 'a colleague holds them; fit unsure, so no note'
               : 'not judged yet'
@@ -996,7 +1012,7 @@ function view(opts) {
         ? {
             count: ids.length,
             line: `${ids.length} of YOUR OWN CRM contacts are held, because a coworker has a deal at their company. Say "reach <name>" for any that are yours to write to.`,
-            people: ids.slice(0, 20).map((id) => `${id} ${safe(byId[id].name, 60)} (${safe(byId[id].company, 60)}): ${safe(v.resolved[id].says)}`)
+            people: ids.slice(0, 20).map((id) => `${id} ${safe(byId[id].name, 60)} (${safe(byId[id].company, 60)}): ${safeWhy(v.resolved[id].says, v.resolved[id].holder)}`)
           }
         : undefined;
     })(),
@@ -1068,7 +1084,7 @@ function holdOn(v, a) {
     for (const id of a.ids) {
       const r = heldAs(v, id);
       const cw = rungsOf(r).find((x) => x.group === 'colleague' && x.holder);
-      const held = hardHold(v, id) || (cw ? `${name(id)} is held by ${safe(cw.holder, 60)} (${safe(plainWhy(cw.says))})` : null);
+      const held = hardHold(v, id) || (cw ? `${name(id)} is held by ${holderSaid(cw.holder)} (${safeWhy(cw.says, cw.holder)})` : null);
       if (held) return `${id} is held, and "separate" would lift that: ${held.replace(/ If you really mean to reach them.*$/, '')}. If they really are someone else, settle it in your own words at the check, or with decide.`;
     }
   return null;
@@ -1275,7 +1291,7 @@ function gateAnswer(opts) {
       for (const id of a.ids) log(c, { type: 'decide', who: 'user', id, group: 'skip', because: `on hold until ${a.until} says yes`.slice(0, 300), said });
     // Left with the coworker who holds them: nothing changes for them, and the user's words are kept.
     else if (a.verb === 'leave')
-      for (const id of a.ids) log(c, { type: 'decide', who: 'user', id, group: 'colleague', because: `left with ${holderOfId(v, id)}`.slice(0, 300), said });
+      for (const id of a.ids) log(c, { type: 'decide', who: 'user', id, group: 'colleague', because: `left with ${holderOfId(v, id) ? ownerSaid(holderOfId(v, id)) : 'their coworker'}`.slice(0, 300), said });
     else if (a.verb === 'rescue')
       for (const id of a.ids) {
         const r = heldAs(v, id);

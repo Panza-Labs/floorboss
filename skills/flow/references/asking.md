@@ -131,7 +131,7 @@ and ask only to confirm. Every repeated question, and every "you could have look
    shortlist they can change it: "notes on" (or "notes off") for everyone, or "note <name>" for one person.
 4. **dnc**: anyone or any company that must never be contacted: a file of people, a file of companies, or
    none. CRM opt-outs and stop notes apply without asking.
-5. Triage phase, with the CRM read: **crm_name** (propose the owner that is them), **coworker_contacts** (say
+5. Triage phase, with the CRM read: **crm_name** (show the owners, numbered, and ask which one is them; with one owner, ask whether it's them), **coworker_contacts** (say
    how many each coworker owns, by name, then ask how careful to be), **customers** (say how many; one choice
    unless the CRM has deal fields), **lost_deals** (name who on the list has a lost deal or a rejection and when
    they were last in touch, then ask how long after that contact they're fair to approach: 3, 6 or 12 months,
