@@ -8,7 +8,7 @@ import { readJson } from '../../../../lib/jsonio.mjs';
 import { parseInsights } from '../../../event-context/scripts/context-check.mjs';
 import { readDraft } from '../../../../lib/drafts.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { followupDay } from '../../../../lib/spacing.mjs';
+import { followupDay, isDateKey, stateOf } from '../../../../lib/spacing.mjs';
 import { planFor } from '../../../../lib/sendcheck.mjs';
 import { hashOf } from './routes.mjs';
 import { skillsOf, isOut } from './context.mjs';
@@ -272,6 +272,8 @@ export function jobFor(c, id, touch) {
 // the message before it (sent on its own planned day, the plan stands). prevSent: a day to count from instead of a
 // real send (the gap answer projects a follow-up from the day the one before it is due).
 export function followupDayOf(c, id, t, d = savedDraft(c, id, t), prevSent = undefined) {
+  // An event whose dates or zone can't be read has no day for anything (the guard's answer, said with its reason).
+  if (stateOf(c).state === 'unreadable') return { day: null, waits: false, planned: null, why: 'unreadable' };
   const st = c.state[id] || {};
   const b = touchBefore(st, t);
   const p = b > 1 ? savedDraft(c, id, b) : null;
@@ -294,7 +296,7 @@ export function followupDayOf(c, id, t, d = savedDraft(c, id, t), prevSent = und
 // count: a malformed one is left out of the search (its own step still fails closed at the guard).
 export const latestSend = (st) =>
   Object.values(st?.sent || {})
-    .filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .filter(isDateKey)
     .sort()
     .pop() || null;
 // Whether a step after `t` was recorded as sent.

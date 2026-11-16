@@ -1,6 +1,7 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // CRM tasks: follow-up tasks to create, the receipts for those created, and their status.
+import { stateOf } from '../../../../lib/spacing.mjs';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { allowedPath } from '../../../../lib/paths.mjs';
@@ -70,7 +71,8 @@ export function taskList(opts) {
   const cards = allOutboxCards(c).filter((card) => {
     // A follow-up not due yet (its day by the one rule, due_on, as taskItems reads it) takes no place in the limit yet.
     const day = card.due_on === undefined ? card.planned_due : card.due_on;
-    if (!inApp(card) || card.due_waits || card.due_on === null || (day && day > today) || created.has(`${card.id}:${card.touch}`)) return true;
+    // (Nor one held today because another event wrote to that address: card.not_today.)
+    if (!inApp(card) || card.due_waits || card.due_on === null || card.not_today || (day && day > today) || created.has(`${card.id}:${card.touch}`)) return true;
     if (sendingOn(c.settings) && sendRoute(c, card.id, card.channel, card.touch)) return true;
     if (appLimitReached(c, card.id, appUsed)) return false;
     appUsed.add(card.id);
@@ -85,6 +87,7 @@ export function taskList(opts) {
     byId: c.byId,
     crmOf: (id) => (crmIdOf(c, id) ? { ...(c.triage.pre?.[id]?.crm || {}), crm_id: crmIdOf(c, id) } : c.triage.pre?.[id]?.crm),
     today,
+    dayState: c.dayState,
     now: c.now.toISOString(),
     selfSends: (card) => sendingOn(c.settings) && !!sendRoute(c, card.id, card.channel, card.touch)
   });
@@ -96,6 +99,8 @@ export function taskList(opts) {
     by_kind: items.reduce((m, x) => ({ ...m, [x.kind]: (m[x.kind] || 0) + 1 }), {}),
     file,
     connected: recipe ? `${recipe.server} · ${recipe.tool}` : null,
+    // Over, or its dates can't be read: no send task is made (reviews and opt-outs still are), and it says why.
+    note: stateOf(c).state !== 'ok' ? `No task to send anything is made for ${c.event.name}: ${stateOf(c).why}.` : undefined,
     rule: 'Create one task per item with the crm.create_task recipe: title, body, due and contact_ref exactly as written. Never assign, complete, update or delete a task. Then save the ids with tasks-created.'
   };
 }

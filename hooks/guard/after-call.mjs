@@ -1,7 +1,7 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // afterCall(): what is recorded once a call has run (PostToolUse).
-import { readFileSync, readdirSync, unlinkSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, unlinkSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { home } from '../../lib/paths.mjs';
 import { sameServer } from '../../lib/security.mjs';
@@ -148,7 +148,8 @@ export function afterCall(input, nowMs = clockNow()) {
       writeText(join(evDir, 'stage-asked.json'), JSON.stringify({ batch, first: pending.first, at: new Date(nowMs).toISOString() }));
       out.stage_confirmed = batch;
     }
-    // A draft of a confirmed batch went in: it counts as that message's one for the batch.
+    // A draft of a confirmed batch went in: it counts as that message's one for the batch. Marked before the call
+    // marker's .done below, so no moment exists where a repeat call finds the call done but the draft not marked.
     const asked = readJsonStrict(join(evDir, 'stage-asked.json'), null);
     if (asked?.batch === batch) {
       const it = staged[0];
@@ -159,6 +160,19 @@ export function afterCall(input, nowMs = clockNow()) {
       } catch (e) {
         if (e.code !== 'EEXIST') throw e;
       }
+    }
+    // The call ran: the guard's latest call marker for this draft is no longer one going in now (hooks/guard.mjs).
+    {
+      const it = staged[0];
+      const callMark = (n) => join(evDir, 'released', `stage-call-${it.id}-${it.touch ?? 1}-${batch}-${n}`);
+      let n = 0;
+      while (existsSync(callMark(n + 1))) n++;
+      if (n > 0)
+        try {
+          writeFileSync(`${callMark(n)}.done`, new Date(nowMs).toISOString(), { flag: 'wx', mode: 0o600 });
+        } catch (e) {
+          if (e.code !== 'EEXIST') throw e;
+        }
     }
     if (pending)
       try {

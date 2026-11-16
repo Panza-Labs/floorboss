@@ -7,7 +7,9 @@ import { allowedPath } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { todayKeyIn, addDays } from '../../../../lib/tz.mjs';
+import { stateOf } from '../../../../lib/spacing.mjs';
 import { awayUntil } from '../../../../lib/ledger.mjs';
+import { addressBusyToday, busyWhy, homeSends } from '../../../../lib/sendcheck.mjs';
 import { parseStatus, planFromStatus, bookingConflicts } from '../status.mjs';
 import { planRecord } from '../record.mjs';
 import { planSync } from '../sync.mjs';
@@ -69,7 +71,7 @@ export function record(opts) {
   const approved = new Set(c.short.approved || []);
   const slots = c.slots.map((x) => ({ id: x.id, start: x.start, end: x.end }));
   const eventDays = [];
-  for (let d = c.event.start_date; d && d <= c.event.end_date; d = addDays(d, 1)) eventDays.push(d);
+  if (stateOf(c).state !== 'unreadable') for (let d = c.event.start_date; d && d <= (c.event.end_date || c.event.start_date); d = addDays(d, 1)) eventDays.push(d);
   // People a colleague holds, by holder: a "sent" about them is the note passed on, not a message to them.
   const coordinate = new Map((c.short.coordinate || []).map((id) => [id, c.triage.pre[id]?.holder || c.triage.pre[id]?.crm?.holder || null]));
   const plan = planRecord(report.items, {
@@ -214,8 +216,10 @@ export function summary(opts) {
   const listAway = (id) => {
     if (!away.some((a) => a.id === id)) away.push({ id, name: c.byId[id]?.name, until: awayOf(id), note: awayNote(awayOf(id)) });
   };
-  // Once the event is over (today in its time past its last day), nothing is due or waiting to go.
-  const over = c.today > c.event.end_date;
+  // Once the event is over (today in its time past its last day), or while its dates can't be read, nothing is due or
+  // waiting to go (lib/spacing.mjs stateOf: the guard's answer too).
+  const dayState = stateOf(c);
+  const over = dayState.state !== 'ok';
   for (const [id, st] of Object.entries(over ? {} : c.state)) {
     const sent = Object.keys(st.sent || {})
       .map(Number)
@@ -241,6 +245,8 @@ export function summary(opts) {
   for (const [id, st] of Object.entries(over ? {} : c.state)) {
     for (const [t, tt] of Object.entries(st.touches || {})) {
       if (!isOut(tt.status) || st.sent?.[t]) continue;
+      // Passed over: a later step already went, so this one never goes (the guard and send-list refuse it too).
+      if (Number(t) > 0 && Object.keys(st.sent || {}).some((k) => Number(k) > Number(t))) continue;
       // What the message is comes from its own draft, not from today's lists: a cold email to someone now
       // on the coordinate list is still a cold email, and must not be sent.
       const kind = tt.kind || 'message';
@@ -254,6 +260,17 @@ export function summary(opts) {
       if (Number(t) !== 0 && awayOf(id)) listAway(id);
       if (!waiting.some((w) => w.id === id && w.touch === Number(t)))
         waiting.push({ id, name: c.byId[id]?.name, touch: Number(t), coordinate_note: kind === 'coordinate' || undefined });
+    }
+  }
+  // One message a day to a person across all your events: a message whose address another event wrote to today says
+  // so (the outbox card shows it with nothing to copy, and the guard holds it).
+  if (waiting.length) {
+    const sends = homeSends();
+    for (const w of waiting) {
+      if (w.touch === 0 || w.coordinate_note) continue;
+      const to = c.state[w.id]?.touches?.[w.touch]?.approved?.to;
+      const busy = to ? addressBusyToday(c.paths.dir, to, c.now.getTime(), w.id, sends) : null;
+      if (busy) w.not_today = busyWhy(busy, w.name || w.id, to);
     }
   }
   due.sort((a, b) => a.due.localeCompare(b.due));
@@ -278,8 +295,11 @@ export function summary(opts) {
     do_not_send: blockedNow.length
       ? { note: "Approved earlier, but now blocked: don't send these. They're out of the outbox; delete any copy already in your mailbox.", people: blockedNow }
       : undefined,
+    dates_unreadable: dayState.state === 'unreadable' || undefined,
     note: over
-      ? `${c.event.name} is over: nothing more is sent for it, and no follow-up is due.`
+      ? dayState.state === 'unreadable'
+        ? `${c.event.name}: ${dayState.why}. Nothing is sent for it until then.`
+        : `${c.event.name} is over: nothing more is sent for it, and no follow-up is due.`
       : due.length
       ? `Run /floorboss:start again on or after ${due[0].due}.`
       : sendingOn(c.settings)

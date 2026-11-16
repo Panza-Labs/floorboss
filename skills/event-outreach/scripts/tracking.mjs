@@ -27,14 +27,15 @@ const OUTCOME_HELP =
 // cards: outbox cards. review: [{id, reason}] decisions for the user. stops: contacts who said stop.
 // selfSends(card): floorboss sends this message itself (sending on for its channel): no "send it" task, or it
 // could go twice.
-export function taskItems({ cards, review = [], stops = [], created, event, byId, crmOf, today, now = new Date().toISOString(), selfSends = () => false }) {
+export function taskItems({ cards, review = [], stops = [], created, event, byId, crmOf, today, now = new Date().toISOString(), selfSends = () => false, dayState = null }) {
   const items = [];
   // The CRM's own record id, or nothing: an email isn't a record id, and a task on no record still shows.
   const ref = (id) => crmOf(id)?.crm_id || null;
   for (const card of cards) {
-    // The event is over (today in its time is past its last day): no task to send anything for it. Reviews and
-    // opt-outs below still come.
-    if (event?.end_date && today > event.end_date) break;
+    // The event is over (today in its time is past its last day), or its dates can't be read (dayState: the one answer,
+    // lib/spacing.mjs eventDayState, that the guard uses too): no task to send anything for it. Reviews and opt-outs
+    // below still come.
+    if (dayState ? dayState.state !== 'ok' : event?.end_date && today > event.end_date) break;
     // A follow-up gets its task on its day, not before: due_on is the day send-list and the guard work out (the one
     // rule, lib/spacing.mjs followupDay). None while that day can't be known yet (due_waits), and none at all when
     // it has no room left before the event ends (due_on null): a dropped step is never a task for today.
@@ -43,6 +44,8 @@ export function taskItems({ cards, review = [], stops = [], created, event, byId
     if ((card.kind === 'message' || card.kind === 'confirmation') && card.channel === 'paste' && !selfSends(card)) {
       const key = `${card.id}:${card.touch}`;
       if (created.has(key)) continue;
+      // Not today: another event wrote to that address today (the card says why). Its task comes on another day.
+      if (card.not_today) continue;
       // One message a day to one person: one send task for them in a list, the earliest step first.
       if (items.some((x) => x.kind === 'send' && x.id === card.id)) continue;
       const where = card.where || whereTo(card, event);

@@ -11,8 +11,8 @@ import { slotLabel } from '../../../slot-finder/scripts/slots.mjs';
 import { parseSegments, parseInsights, insightCap, insightBudget, parseProof } from '../../../event-context/scripts/context-check.mjs';
 import { readProfile } from '../../../attendee-research/scripts/profiles.mjs';
 import { readCompanyBrief } from '../../../attendee-research/scripts/companies.mjs';
-import { modeFor, MODES, daysUntilEvent, eventOver, writtenDate } from '../leadtime.mjs';
-import { plannedDays, gapKey } from '../../../../lib/spacing.mjs';
+import { modeFor, MODES, daysUntilEvent, writtenDate } from '../leadtime.mjs';
+import { plannedDays, gapKey, stateOf } from '../../../../lib/spacing.mjs';
 import { readLedger } from '../../../../lib/ledger.mjs';
 import { drafterFor } from '../drafter.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
@@ -47,8 +47,10 @@ function rewriteNotes(touch, prior, L) {
 export function todo(opts) {
   need(opts, 'event');
   const c = ctxOf(opts.event, opts);
-  // Over: an empty todo, written down with the ledger's length, so the flow doesn't ask for it again and again.
-  if (eventOver(c.event, c.now)) {
+  // Over, or its dates can't be read (the context's day state, read from event.json as it is: the guard's answer): an
+  // empty todo, written down with the ledger's length, so the flow doesn't ask for it again and again.
+  if (stateOf(c).state !== 'ok') {
+    const unreadable = stateOf(c).state === 'unreadable';
     writeJson(join(c.paths.derived, 'todo.json'), {
       at: c.now.toISOString(),
       ledger_lines: readLedger(c.paths.ledger).entries.length,
@@ -56,9 +58,10 @@ export function todo(opts) {
       run: sessionRun(),
       event_name: c.event.name,
       over: true,
+      dates_unreadable: unreadable || undefined,
       jobs: []
     });
-    return { stop: true, note: `${c.event.name} has ended, so there's nothing left to draft.` };
+    return { stop: true, note: unreadable ? `${c.event.name}: ${stateOf(c).why}. Nothing is drafted or sent for it until then.` : `${c.event.name} has ended, so there's nothing left to draft.` };
   }
   const today = c.today;
   const days = daysUntilEvent(c.event, c.now);

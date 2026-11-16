@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { allowedPath, home } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
-import { noDayWhy } from '../../../../lib/spacing.mjs';
+import { noDayWhy, stateOf } from '../../../../lib/spacing.mjs';
 import { readLedger } from '../../../../lib/ledger.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { approvalHash, verifySend, readersOf, withFallbacks, userWordCounts, sentOrGoingToday } from '../../../../lib/sendcheck.mjs';
+import { approvalHash, verifySend, readersOf, withFallbacks, userWordCounts, sentOrGoingToday, addressBusyToday, busyWhy, markerOnly, homeSends, IN_FLIGHT } from '../../../../lib/sendcheck.mjs';
 import { validateReceipts } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig, saveConfig } from '../../../../lib/config.mjs';
 import { earlierWith, writtenInApp, toOf, sendRoute, appLimitReached, whereAt } from './routes.mjs';
@@ -20,12 +20,14 @@ import { allOutboxCards, renderFile } from './cards.mjs';
 // Approved emails not yet staged and not sent: exactly what to put in the mailbox, from floorboss's files.
 // Approved, not sent, not staged, and still allowed: removed, dropped and suppressed people are checked
 // again here, because they can change after the gate.
-function stageable(c) {
+function stageable(c, held = []) {
   const out = [];
   const today = c.today;
-  // The event is over (today in its time past its last day): nothing is put in the mailbox for it.
-  if (today > c.event.end_date) return out;
+  // The event is over (today in its time past its last day), or its dates can't be read: nothing is put in the mailbox
+  // for it (lib/spacing.mjs stateOf, the answer the guard gives too).
+  if (stateOf(c).state !== 'ok') return out;
   const listed = new Set();
+  const sends = homeSends();
   for (const card of allOutboxCards(c)) {
     if (!['message', 'confirmation'].includes(card.kind) || card.channel !== 'email' || !card.address) continue;
     // A follow-up is staged on its day, as everything else reads it (the one rule): not before, and not while it waits
@@ -40,6 +42,15 @@ function stageable(c) {
     const tt = st.touches?.[card.touch] || {};
     if (tt.staged || st.sent?.[card.touch]) continue;
     if (card.touch === 1 && crmPending(c, card.id)) continue;
+    // One message a day to a person across all your events, by address (the guard's rule for a draft too): held, and
+    // said, while another event's message to that address went or is going today.
+    if (card.touch !== 0) {
+      const busy = addressBusyToday(c.paths.dir, card.address, c.now.getTime(), card.id, sends);
+      if (busy) {
+        held.push({ id: card.id, touch: card.touch, why: busyWhy(busy, c.byId[card.id]?.name || card.id, card.address) });
+        continue;
+      }
+    }
     const lastSent = lastSentTouch(st);
     const prev = card.touch > 1 ? earlierWith(st, card.touch, 'staged') : card.touch === 0 && lastSent ? st.touches?.[lastSent]?.staged : null;
     listed.add(card.id);
@@ -67,7 +78,8 @@ export function stageList(opts) {
   const recipe = loadConfig().connectors?.stage_draft || null;
   // listed_at: the guard stages an item only within 30 minutes of its listing (a stop or reply after that
   // can't be missed by a list made before it).
-  const list = stageable(c).map((x) => ({ ...x, listed_at: c.now.toISOString() }));
+  const held = [];
+  const list = stageable(c, held).map((x) => ({ ...x, listed_at: c.now.toISOString() }));
   const file = join(c.paths.dir, 'stage-list.json');
   // Items listed before with no receipt may already be in the mailbox (a run that stopped halfway).
   const before = new Set(readJson(file, []).map((x) => `${x.id}:${x.touch}`));
@@ -82,6 +94,9 @@ export function stageList(opts) {
       ? 'These were listed in an earlier run with no receipt saved. Check the mailbox drafts for them before creating them again, and save receipts for any that exist.'
       : undefined,
     out_of_date_in_mailbox: list.filter((x) => x.replaces).map((x) => ({ id: x.id, draft_id: x.replaces.draft_id })),
+    held: held.length ? held : undefined,
+    // Over, or its dates can't be read: nothing is put in the mailbox for it, and it says why.
+    note: stateOf(c).state !== 'ok' ? `Nothing is put in your drafts for ${c.event.name}: ${stateOf(c).why}.` : undefined,
     rule: 'Create one draft per item with the stage_draft recipe, using to, subject and body exactly as written in the file. Follow-ups with reply_in_thread go in that thread when the tool allows it. Never send.'
   };
 }
@@ -97,6 +112,24 @@ export function staged(opts) {
     led(c, { type: 'staged', id: x.id, touch: x.touch, draft_id: x.draft_id, thread_id: x.thread_id, message_id: x.message_id, tool });
   const fresh = ctxOf(opts.event, opts);
   return { saved: true, staged: r.receipts.length, missing: wanted.length - r.receipts.length, outbox: renderFile(fresh, allOutboxCards(fresh)) };
+}
+
+// Why a step isn't an unclear send (null: it is one). An unclear send was let through with no outcome recorded since:
+// its release in the ledger, or the guard's marker for it with no release, once no live guard can hold it (a guard
+// stopped between the two may have let it go). A marker newer than that may be a call still going through: it isn't
+// settled yet, so nothing can let the same message go a second time. Only the user's words settle one (send-list
+// --resend, send-outcome).
+function notUnclear(c, id, touch) {
+  const x = c.folded.people[id]?.touches?.[touch];
+  if (!x) return `there is no message ${touch} for ${id}`;
+  if (x.sent || c.state[id]?.sent?.[touch]) return 'it was recorded as sent';
+  if (x.released) return null;
+  const mark = markerOnly(c.paths.dir, c.entries, id, touch);
+  if (mark?.fresh) return IN_FLIGHT;
+  if (mark) return null;
+  if (c.entries.some((e) => e.type === 'send_released' && e.id === id && e.touch === touch))
+    return 'it was already settled, by a bounce, send-outcome or an earlier resend: it is listed again on its own once it can go';
+  return 'it was never let through';
 }
 
 // Replies are checked before a follow-up goes: the last mailbox or CRM sync or CRM task read
@@ -122,14 +155,20 @@ export function sendList(opts) {
   const opened = win && !win.closed && win.event === c.event.slug && c.entries.filter((e) => e.type === 'browser_send_opened' && e.until === win.until && e.said).pop();
   const windowIds = opened && c.now.getTime() - Date.parse(opened.at) <= 20 * 60000 && Date.parse(win.until) > c.now.getTime() ? new Set(win.ids || []) : null;
   const only = opts.ids ? new Set(idList(opts.ids)) : null;
+  // Every event's sends, looked at once for all the messages listed (lib/sendcheck.mjs addressBusyToday).
+  const sends = homeSends();
   // --resend id:touch --said "<the user's words>": the user checked that a message let through earlier never
   // went, and says to send it again.
   if (opts.resend) {
     if (!opts.said || String(opts.said).trim().length < 3) throw new Error("--resend needs --said with the user's own words (they checked it didn't go).");
-    for (const k of idList(opts.resend)) {
-      const [rid, rt] = k.split(':');
-      led(c, { type: 'release_cleared', id: rid, touch: Number(rt), said: String(opts.said).slice(0, 200) });
+    // Only an unclear send can be sent again (the same check send-outcome makes): a step let through and not recorded
+    // as sent, or one the guard was stopped on before its release was written (its marker with no release).
+    const specs = idList(opts.resend).map((k) => k.split(':'));
+    for (const [rid, rt] of specs) {
+      const why = notUnclear(c, rid, Number(rt));
+      if (why) throw new Error(`${rid} message ${rt} isn't waiting on an unclear send (${why}): nothing to send again.`);
     }
+    for (const [rid, rt] of specs) led(c, { type: 'release_cleared', id: rid, touch: Number(rt), said: String(opts.said).slice(0, 200) });
     c.entries = readLedger(c.paths.ledger).entries;
   }
   for (const { file, id, t: tt } of draftFiles(c)) {
@@ -273,7 +312,7 @@ export function sendList(opts) {
       listed_at: c.now.toISOString()
     };
     const inWindow = item.via === 'browser' && !!windowIds?.has(`${id}:${t}`);
-    const v = verifySend(item, { evDir: c.paths.dir, settings: c.settings, state: c.state, entries: c.entries, folded: c.folded, nowMs: c.now.getTime(), replyCheck: !inWindow });
+    const v = verifySend(item, { evDir: c.paths.dir, settings: c.settings, state: c.state, entries: c.entries, folded: c.folded, nowMs: c.now.getTime(), replyCheck: !inWindow, sends });
     if (!v.ok) {
       waiting.push({ id, touch: t, via: item.via, where: item.where || null, why: v.why, check: v.check });
       continue;
@@ -388,14 +427,17 @@ export function sendOutcome(opts) {
   const went = String(opts.went ?? f.went).toLowerCase();
   const c = ctxOf(opts.event, opts);
   const x = c.folded.people[id]?.touches?.[touch];
-  if (!x?.released || x.sent) throw new Error(`${id} message ${touch} isn't waiting on an unclear send.`);
+  {
+    const why = notUnclear(c, id, touch);
+    if (why) throw new Error(`${id} message ${touch} isn't waiting on an unclear send (${why}).`);
+  }
   const said = String(opts.said || f.said || '').trim();
   const fromMailbox = !!(opts['message-id'] || f.message_id) || opts.from === 'mailbox' || f.source === 'mailbox';
   if (!fromMailbox && said.length < 2) throw new Error('Say what the user found, in their words (--said "it\'s in my Sent folder").');
   if (/^(yes|true|it went|went|sent)$/.test(went)) {
     // A note typed in LinkedIn or the event app went there: app-result records where, and here it would be recorded
     // as an email, so the inbox it went to would never be checked for their reply.
-    if (x.released_via === 'browser')
+    if (x.released_via === 'browser' || (!x.released && x.approved?.via === 'browser'))
       throw new Error(`${id} message ${touch} was typed in the browser: record that it went with app-result --result sent and the user's words, not send-outcome.`);
     led(c, {
       type: 'sent',

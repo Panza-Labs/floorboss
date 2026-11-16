@@ -3,7 +3,7 @@
 // The days between follow-ups, said back when the user sets them: the gap is their setting for every event, so the
 // answer names each approved follow-up whose day it moves (old day, new day) or drops, at this event and the others.
 import { routeLength, touchBefore } from '../../../../lib/route.mjs';
-import { gapWords, gapFor, modeOn, fitSummary, followupDay, eventOver, writtenDate, TABLE_WORDS } from '../../../../lib/spacing.mjs';
+import { gapWords, gapFor, modeOn, fitSummary, followupDay, eventOver, writtenDate, TABLE_WORDS, eventDayState, UNREADABLE_DATES, isDateKey } from '../../../../lib/spacing.mjs';
 import { loadEvent } from '../../../../lib/event.mjs';
 import { listEvents } from '../../../../lib/scope.mjs';
 import { eventRecord, planFor } from '../../../../lib/sendcheck.mjs';
@@ -75,7 +75,8 @@ export function approvedDays(c) {
           touch: t,
           before: b,
           gone,
-          gap: from ? (gapFor(e.settings, modeOn(e.event, from), t) ?? gapFor(e.settings, 'short', t)) : null,
+          // Counted only from a real date: a send date that isn't one leaves the step skipped with followupDay's note.
+          gap: isDateKey(from) ? (gapFor(e.settings, modeOn(e.event, from), t) ?? gapFor(e.settings, 'short', t)) : null,
           day: asToday(r.day),
           waits: r.waits,
           why: r.why
@@ -88,8 +89,15 @@ export function approvedDays(c) {
 
 // A follow-up's day in words: the day itself only once the message before it has gone; before that, its gap after
 // that message (the projected day moves with whenever that message really goes).
+// (A step whose send date before it can't be read has no day under any gap, so it is never one that moved.)
 const dayWords = (x) =>
-  !x.day ? (x.waits ? `its gap after message ${x.before} goes` : x.why === 'later' ? 'passed over (a later message already went)' : 'dropped (no room left before the event)') : x.gone ? writtenDate(x.day) : `${x.gap ?? 'its'} ${x.gap === 1 ? 'day' : 'days'} after message ${x.before} goes`;
+  !x.day
+    ? x.waits
+      ? `its gap after message ${x.before} goes`
+      : x.why === 'later'
+        ? 'passed over (a later message already went)'
+        : 'dropped (no room left before the event)'
+    : x.gone ? writtenDate(x.day) : `${x.gap ?? 'its'} ${x.gap === 1 ? 'day' : 'days'} after message ${x.before} goes`;
 
 // What the answer says back: what was saved, that it's the setting for every event, what a sequence starting today gets
 // at this event, and every approved follow-up it moves or drops, so nothing moves without the user seeing it.
@@ -97,11 +105,11 @@ export function gapNote(c, gap, before, after) {
   const lead = gap ? `Saved: follow-ups go ${gapWords(gap)} apart.` : `Saved: the default. The gap between follow-ups is ${TABLE_WORDS}.`;
   if (!c.slug || !c.event) return `${lead} This is your setting for every event.`;
   const e = loadEvent(c.slug);
-  const today = todayKeyIn(e.event.time_zone, c.now);
   const over = eventOver(e.event, c.now);
+  const today = over ? null : todayKeyIn(e.event.time_zone, c.now);
   const parts = [
     over
-      ? `${lead} ${e.event.name} is over, so this changes nothing there; it applies to your other events and the next ones.`
+      ? `${lead} ${e.event.name} ${eventDayState(e.event, c.now.getTime()).state === 'unreadable' ? `can't be planned now (${UNREADABLE_DATES})` : 'is over'}, so this changes nothing there; it applies to your other events and the next ones.`
       : `Saved: ${gap ? fitSummary(e.settings, e.event, today, routeLength(e.settings)).replace(/^F/, 'f') : `the default. ${fitSummary(e.settings, e.event, today, routeLength(e.settings))}`}`,
     c.event.event?.mock ? 'This is for the mock event only.' : `This is your setting for every event${over ? '' : `, not only ${e.event.name}`}.`
   ];

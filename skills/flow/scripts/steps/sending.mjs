@@ -1,7 +1,7 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Phase 8 of nextStep, the last.
-import { lastReplyCheck, readersOf, withFallbacks, userWordCounts, REPLY_CHECK_SECONDS } from '../../../../lib/sendcheck.mjs';
+import { lastReplyCheck, readersOf, withFallbacks, userWordCounts, REPLY_CHECK_SECONDS, markerOnly } from '../../../../lib/sendcheck.mjs';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJson } from '../../../../lib/jsonio.mjs';
@@ -54,11 +54,17 @@ export function sendSteps(x) {
   if ((e.settings.sending?.channels || []).includes('email')) {
     const list = cli('event-outreach', ['send-list', '--event', e.event.slug], c);
     const items = existsSync(list.file) ? readJson(list.file, []) : [];
-    // A send that may or may not have gone (its call failed or never answered) is settled before anything else.
+    // A send that may or may not have gone (its call failed or never answered, or its guard stopped between its marker
+    // and the release, lib/sendcheck.mjs markerOnly) is settled before anything else.
     const unclear = Object.entries(e.state.people).flatMap(([id, p]) =>
       Object.entries(p.touches)
-        .filter(([, x]) => x.released && !x.sent && !x.release_cleared && x.released_via !== 'browser')
-        .map(([t, x]) => ({ id, touch: Number(t), x, name: p.name, email: p.email_override || p.email }))
+        .map(([t, x]) => {
+          if (x.sent || x.released_via === 'browser') return null;
+          if (x.released && !x.release_cleared) return { id, touch: Number(t), x, name: p.name, email: p.email_override || p.email };
+          const mark = !x.released && x.approved?.via !== 'browser' ? markerOnly(e.paths.dir, e.entries, id, Number(t)) : null;
+          return mark && !mark.fresh ? { id, touch: Number(t), x: { ...x, released_at: new Date(mark.at).toISOString() }, name: p.name, email: p.email_override || p.email } : null;
+        })
+        .filter(Boolean)
     );
     if (unclear.length) {
       const u = unclear[0];

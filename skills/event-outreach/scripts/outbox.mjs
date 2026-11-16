@@ -46,8 +46,10 @@ function card(c, hosts = [], app = null) {
           : app
             ? `no address: paste it in ${e(app)}`
             : 'no address: paste it wherever you reach them';
-  // A message that can no longer go (c.not_going: the event is over, or no day is left for it) is never queued to send.
-  const li = !c.not_going && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
+  // A message that can no longer go (c.not_going: the event is over, or no day is left for it), or not today (c.not_today:
+  // another event wrote to that address today), is never queued to send and has nothing to copy.
+  const hold = c.not_going || c.not_today;
+  const li = !hold && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
   const channel =
     c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
@@ -75,9 +77,9 @@ function card(c, hosts = [], app = null) {
   ${c.followup_note ? `<p class="follow">${e(c.followup_note)}</p>` : ''}
   ${failed}
   ${c.checks_stuck?.length ? `<p class="failnote">Still fails floorboss's checks after three rewrites: ${e(c.checks_stuck.join('; '))}. Edit it or drop it; it isn't offered for approval as it is.</p>` : ''}
-  ${c.not_going ? `<p class="failnote">Not going: ${e(c.not_going)}. Don't send it.</p>` : ''}
-  ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject, !c.not_going) : ''}
-  ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body, !c.not_going)}
+  ${c.not_going ? `<p class="failnote">Not going: ${e(c.not_going)}. Don't send it.</p>` : c.not_today ? `<p class="failnote">Not today: ${e(c.not_today)}. Send it on another day: one message a day to a person, across all your events.</p>` : ''}
+  ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject, !hold) : ''}
+  ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body, !hold)}
   <p class="stale" hidden>The earliest time offered here has passed. Run /floorboss:event-draft again for new times before sending.</p>
   ${
     c.kind === 'coordinate'

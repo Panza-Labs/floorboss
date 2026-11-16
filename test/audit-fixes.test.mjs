@@ -165,7 +165,9 @@ test('C8: after the batch yes, the same draft goes into the drafts folder once',
   // A call that failed (no PostToolUse) marks nothing: the next item can be tried, retried, then refused once in.
   if (items[1]) {
     assert.equal(hook(H, call(items[1])).status, 0, 'first try');
-    assert.equal(hook(H, call(items[1])).status, 0, 'a retry after a failed call');
+    // A second call while the first may still be going in (under 30 seconds) is refused; a retry after that goes.
+    assert.equal(hook(H, call(items[1])).status, 2, 'a second call at once');
+    assert.equal(hook(H, call(items[1]), [], new Date(Date.parse(NOW) + 31000).toISOString()).status, 0, 'a retry after a failed call');
     hook(H, { hook_event_name: 'PostToolUse', ...call(items[1]), tool_response: {} }, ['post']);
     assert.equal(hook(H, call(items[1])).status, 2, 'and once each, after it went in');
   }

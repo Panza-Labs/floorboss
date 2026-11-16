@@ -6,6 +6,7 @@ import { companyKey } from '../../../../lib/normalize.mjs';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { loadEvent, contextFor, nowFrom } from '../../../../lib/event.mjs';
 import { todayKeyIn } from '../../../../lib/tz.mjs';
+import { eventDayState, zoneReadable } from '../../../../lib/spacing.mjs';
 import { slotLabel } from '../../../slot-finder/scripts/slots.mjs';
 import { parseSegments, parseProof } from '../../../event-context/scripts/context-check.mjs';
 import { readLedger, fold, legacyState, append } from '../../../../lib/ledger.mjs';
@@ -48,8 +49,13 @@ export function signoffOf(voice) {
 }
 
 export function ctxOf(slug, opts) {
-  const base = loadEvent(slug);
+  const loaded = loadEvent(slug);
   const now = nowFrom(opts);
+  // Where the event stands (lib/spacing.mjs eventDayState), read from event.json as it is. An event whose dates or zone
+  // can't be read sends nothing and says so (dayState); its times are drawn in UTC only so the page and the summary can
+  // still be made, never a thrown "Invalid time zone".
+  const dayState = eventDayState(loaded.event, now.getTime());
+  const base = dayState.state === 'unreadable' && !zoneReadable(loaded.event?.time_zone) ? { ...loaded, event: { ...loaded.event, time_zone: 'UTC' } } : loaded;
   const { entries, damaged } = readLedger(base.paths.ledger);
   const folded = fold(entries, damaged);
   if (!Object.keys(folded.people).length) throw new Error(`${base.event.name} has no loaded list yet. Run /floorboss:start first.`);
@@ -61,7 +67,8 @@ export function ctxOf(slug, opts) {
     settings: base.settings,
     paths: base.paths,
     now,
-    today: todayKeyIn(base.event.time_zone, now),
+    today: dayState.today || todayKeyIn(base.event.time_zone, now),
+    dayState,
     entries,
     state: folded,
     slug
@@ -77,6 +84,7 @@ export function ctxOf(slug, opts) {
     ...base,
     now,
     today: tc.today,
+    dayState: tc.dayState,
     store,
     triage: compat.triage,
     short: compat.shortlist,

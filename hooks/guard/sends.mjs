@@ -5,7 +5,8 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { home } from '../../lib/paths.mjs';
-import { verifySend, eventRecord, eventDay, approvalHash, eventEnded, followupNotToday } from '../../lib/sendcheck.mjs';
+import { verifySend, eventRecord, eventDay, approvalHash, eventStateAt, followupNotToday, addressBusyToday, busyWhy, homeSends } from '../../lib/sendcheck.mjs';
+import { touchBefore } from '../../lib/route.mjs';
 import { contactable } from '../../lib/ledger.mjs';
 import { loadEvent, isMockSlug } from '../../lib/event.mjs';
 import { createHash } from 'node:crypto';
@@ -30,9 +31,13 @@ export const notRealEvent = (slug) => {
 export function listedSends() {
   const dir = join(home(), 'events');
   if (!existsSync(dir)) return [];
+  // Every event's sends, looked at once for all the listed messages (lib/sendcheck.mjs addressBusyToday), and only
+  // when some event has messages listed.
+  let sends = null;
   return readdirSync(dir).flatMap((slug) => {
     const v = readJsonStrict(join(dir, slug, 'derived', 'send-list.json'), []);
     if (!Array.isArray(v) || !v.length) return [];
+    sends ||= homeSends(dir);
     let settings;
     try {
       // The mock event's made-up people never reach a real connector.
@@ -46,7 +51,7 @@ export function listedSends() {
     const nowMs = clockNow();
     return v
       .map((x) => {
-        const r = verifySend(x, { evDir: join(dir, slug), settings, ...rec, nowMs });
+        const r = verifySend(x, { evDir: join(dir, slug), settings, ...rec, nowMs, sends });
         // Kept to explain a refusal: "check their replies again" says more than "not listed".
         if (!r.ok && x && typeof x === 'object')
           refusedSends.push({ to: String(x.to || ''), body: String(x.body || ''), name: x.name || x.id, id: x.id, why: r.why });
@@ -88,9 +93,21 @@ export function stageRefusal(evDir, item, nowMs = Date.now()) {
   if (kind !== 'confirmation' && (st.replied || st.booked)) return 'they replied or booked';
   if (kind === 'confirmation' && !folded.people[item.id]?.booked) return 'their booking was taken back';
   if (!recent(item.listed_at, nowMs, 30 * 60 * 1000)) return 'it wasn\'t listed in the last 30 minutes: run "outreach stage-list" again';
+  // A step recorded as sent gets no draft (stage-list never lists one either).
+  if (st.sent?.[touch] || folded.people[item.id]?.touches?.[touch]?.sent) return 'it was already sent';
   // Nothing is put in the mailbox once the event is over, and a follow-up only on its day (the same rule as a send).
-  if (eventEnded(evDir, nowMs)) return 'the event is over';
+  const es = eventStateAt(evDir, nowMs);
+  if (es.state !== 'ok') return es.why;
   if (kind === 'message' && Object.keys(st.sent || {}).some((k) => Number(k) > touch)) return 'a later message already went';
+  // One message a day to a person across all your events, by address, as for a send (a confirmation aside): a draft
+  // isn't put in while another event's message to that address went or is going today.
+  if (touch !== 0) {
+    const busy = addressBusyToday(evDir, item.to, nowMs, item.id);
+    if (busy) return busyWhy(busy, folded.people[item.id]?.name || item.id, item.to);
+  }
+  // A follow-up goes in only after the message before it went, and each step's draft goes in once.
+  if (kind === 'message' && touch > 1 && !st.sent?.[touchBefore(st, touch)]) return "the message before it hasn't gone";
+  if (st.touches?.[touch]?.staged) return 'its draft is already in your drafts';
   if (kind === 'message' && touch > 1) {
     let settings = {};
     try {

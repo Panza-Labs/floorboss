@@ -79,7 +79,8 @@ test('the reply reader failed: a follow-up may go on the user\'s word, not befor
   L({ type: 'drafted', who: 'floorboss', id: 'c001', touch: 2, hash: hash2 });
   L({ type: 'critic', who: 'floorboss', id: 'c001', touch: 2, hash: hash2, verdict: 'PASS' });
   L({ type: 'approved', who: 'user', id: 'c001', touch: 2, hash: hash2, to: 'ann@acme.test', via: 'email.send', said: 'ok' });
-  L({ type: 'send_released', who: 'guard', id: 'c001', touch: 1, hash: hash1, via: 'email.send', to: 'ann@acme.test' });
+  // Let through on the day it went (a release today would count as today's message to her).
+  L({ at: '2026-10-23T08:59:00Z', type: 'send_released', who: 'guard', id: 'c001', touch: 1, hash: hash1, via: 'email.send', to: 'ann@acme.test' });
   L({ type: 'sent', who: 'floorboss', id: 'c001', touch: 1, date: '2026-10-23', via: 'floorboss', message_id: 'm1', thread_id: 't1' });
   const reader = { sending: { channels: ['email'] }, connectors: { 'email.messages': { server: 'gmail' } } };
   const item = { id: 'c001', touch: 2, via: 'email.send', to: 'ann@acme.test', subject: 'Re: Hi', body: 'One more', thread_id: 't1' };

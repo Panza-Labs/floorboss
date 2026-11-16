@@ -14,7 +14,8 @@ import {
   sameName,
   companyRelated,
   levenshtein,
-  hasSurname
+  hasSurname,
+  SHARED_INBOX
 } from '../../../lib/normalize.mjs';
 
 const profileKey = (url) => {
@@ -29,8 +30,6 @@ const profileKey = (url) => {
     ? u
     : null;
 };
-const SHARED_INBOX =
-  /^(info|hello|hi|contact|team|office|sales|press|media|tips|news|admin|support|enquiries|inquiries|jobs|careers|hr|marketing|events|partnerships|mail|post|service|kontakt|redaktion|presse|vertrieb|buero)@/i;
 
 // Rows → contacts. Each contact: name, title, company, company_key, email, emails[], phone, profile_url,
 // notes, location, booth, attendee_type, contact_opt_in, lines[], merge_why[]. Rows with a company and no

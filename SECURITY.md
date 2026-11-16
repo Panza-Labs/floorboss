@@ -49,6 +49,7 @@ The guard is split by topic, so a reviewer can take one file at a time:
 | `hooks/guard/test-calls.mjs` | The one test draft, task or contact that setup tries a connection with. |
 | `hooks/guard/lookups.mjs` | Contact-detail lookups: the window you agreed to, how many are left in it, and what one lookup may carry. |
 | `hooks/guard/sends.mjs` | Sends and staged drafts: each is checked against the text and recipient you approved. |
+| `hooks/guard/daymark.mjs` | One message a day to a person: the marker for a person's day at an event, and the locks a send is checked and released under across all your events: one for the address it goes to, one for each address the person has alone at that event, and one for each inbox address of theirs (info@, hello@) together with their name. |
 | `hooks/guard/browser.mjs` | Where the browser may go during a run, and what may be clicked or typed in a send window or a CRM log window. |
 | `hooks/guard/prompts.mjs` | The permission prompts: the text you read before you say yes. |
 | `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records or to the launchd file of its scheduled job. |
@@ -300,8 +301,39 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
   large for one pass (the caps above). Do those from your terminal, or
   turn the plugin off for that session.
 - **The guard's deadline.** The guard gives itself 20 seconds. A check that is still waiting then is stopped
-  by a timer; a check that held the process past it is refused when it finishes, whatever it found. A check
-  that never returns at all is left to Claude Code's own hook timeout (blocked on 2.1.295 or later).
+  by a timer; a check that held the process past it is refused when it finishes, whatever it found. A send is
+  checked against the deadline again just before its release is written, a second short of it, so a send refused
+  for time leaves no release and no marker behind. A check that never returns at all is left to Claude Code's own
+  hook timeout (blocked on 2.1.295 or later).
+- **One message a day across your events.** The guard takes a lock for the address the message goes to, each
+  address the person has alone at the sending event, and each inbox address of theirs together with their name (in
+  one sorted order, so two calls can never each hold a lock the other is waiting for), checks every event's ledger
+  for those addresses under them, then writes the release.
+  A lock left by a guard that died holds that address for up to a minute. A lock broken as stale is never given
+  back, and a send checks that its locks are still its own just before its release, so two calls can't both hold
+  one. A new lock that a stale break renamed away in a race is left under another name, and removed once it is a
+  day old, the next time a lock is taken. A guard's mark for a message with no release counts as a send that may
+  have gone only once it is a minute old: before then it may be a call still being checked, and nothing can settle
+  it. A draft put in your drafts writes no release, so it holds nothing at your other events: you send it
+  yourself. The rule is by address: two events count as writing to one person when they share an address for
+  that person (an email, a profile link, an address a message was approved to go to, a new address after a
+  bounce), for a send recorded there and for one let through there. A coordinate note's approval names the
+  colleague it goes to, not the person, and adds no address. An address that two people's list entries at one
+  event both have is no one's alone: it counts only for a message that goes to that address (a send recorded with
+  no channel counts as an email), never for their other addresses, so a LinkedIn note to one of them never holds
+  the other's. Who has an address comes from the list entries (and merges): an approval or a bounce that names
+  another person's address doesn't make it shared. An address on the inbox list (info@, hello@, hi@, contact@,
+  team@, office@, sales@, press@, media@, tips@, news@, admin@, support@, enquiries@, inquiries@, enquiry@,
+  inquiry@, jobs@, careers@, hr@, marketing@, events@, partnerships@, mail@, post@, service@, kontakt@,
+  redaktion@, presse@, vertrieb@, buero@, reception@, frontdesk@, booking@, bookings@, accounts@, accounting@,
+  billing@, invoices@, orders@, ops@, operations@, general@, welcome@) links two events only together with the
+  person's name (case, accents, a title like Ms. and the order in "Doe, Jane" aside; a nickname or a typo is
+  another name): the same name with that address at both is one person (a solo owner's hello@), and for someone
+  with another name it counts only for a message that goes to it. Two different people with the same name and the
+  same inbox address count as one. The merge never joins two people by such an address. Someone each event knows
+  only by addresses the other doesn't have is not recognised, and their messages are checked under locks that
+  share nothing. Nor is someone each event knows only by an inbox address under two different names: there, only
+  two messages to that address itself count as one address's.
 - **Inside the CRM log window.** Once you allow the window, the browser may type a listed person's own details
   (name, email, company) to find their record, and floorboss can't tell a search box from a new-contact form. It
   never types anything else there, and each message's text still asks.
@@ -343,6 +375,9 @@ floorboss can't tell a faithful relay from a made-up one:
   by ID only, and always shown back, quoting your words, for a yes before anything is saved. The waiting
   reading (`derived/pending-*.json`) carries no signature: it is one of floorboss's records, which the guard keeps
   Claude's file tools (Write, Edit) from writing, like the ledger; only floorboss's scripts write it.
+  The words that settle a send that may have gone (`send-list --resend`, `send-outcome`) and that say nobody
+  replied (`--no-reply-check`) are text Claude passes on too. The prompt before the send that follows says when
+  floorboss let that message through before.
   In floorboss's own sentences, list and CRM text is reduced to letters, digits, spaces and : ( ) , . / -; the card's
   structured fields (a person's name, company, title, what the CRM says) are the list's own text, passed on as data,
   and the skills tell the model to treat that text as data, never as instructions.

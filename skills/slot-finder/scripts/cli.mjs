@@ -11,6 +11,7 @@ import { loadConfig } from '../../../lib/config.mjs';
 import { slugify, assertSlug } from '../../../lib/paths.mjs';
 import { isValidZone, addDays, daysBetween, zoneFrom } from '../../../lib/tz.mjs';
 import * as tzHelpers from '../../../lib/tz.mjs';
+import { isDateKey } from '../../../lib/spacing.mjs';
 import { parseFreeTimes } from './freetimes.mjs';
 import { buildSlots, slotLabel, removeSlots } from './slots.mjs';
 import { holdersBySlot } from './assign.mjs';
@@ -25,8 +26,9 @@ function eventDays(event) {
 function create(opts) {
   need(opts, 'name', 'city', 'start', 'end', 'zone');
   if (!isValidZone(opts.zone)) throw new Error(`"${opts.zone}" isn't an IANA time zone (like Europe/Lisbon).`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.start) || !/^\d{4}-\d{2}-\d{2}$/.test(opts.end) || opts.end < opts.start) {
-    throw new Error('Dates must look like 2026-10-27, with the end on or after the start.');
+  // A day that exists, like 2026-10-27 (never 2026-02-30, 2026-13-01 or 2026-11-00), the end on or after the start.
+  if (!isDateKey(opts.start) || !isDateKey(opts.end) || opts.end < opts.start) {
+    throw new Error('Dates must be days that exist, like 2026-10-27, with the end on or after the start.');
   }
   // An event's file is never replaced: that would drop its settings, its lists and the mock's mark. A slug asked for
   // that is taken is refused; one made from the name takes the next free one ("test-expo-2"), as for a yearly event.

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { loadEvent, nowFrom } from '../../../lib/event.mjs';
 import { readLedger, fold } from '../../../lib/ledger.mjs';
 import { todayKeyIn } from '../../../lib/tz.mjs';
+import { eventDayState, zoneReadable } from '../../../lib/spacing.mjs';
 import { onboardingState } from '../../event-context/scripts/onboarding-state.mjs';
 import { INPUT_FILES, inputFile as triageInputFile } from '../../crm-triage/scripts/view.mjs';
 
@@ -28,13 +29,19 @@ export function context(slug, opts = {}) {
   const now = nowFrom(opts);
   const out = { now, ob, cfg: ob.cfg, slug: slug || ob.onboarding.event || null, home: ob.home, event: null, agendaWanted: !!opts.agenda };
   if (out.slug && ob.ev) {
-    const e = loadEvent(out.slug);
+    const loaded = loadEvent(out.slug);
+    // Where the event stands (lib/spacing.mjs eventDayState, the guard's answer). An event whose dates or zone can't be
+    // read stops the flow with the reason (steps.mjs); its zone is read as UTC only so nothing on the way there throws
+    // "Invalid time zone" (the same as the outreach commands' context).
+    const dayState = eventDayState(loaded.event, now.getTime());
+    const e = dayState.state === 'unreadable' && !zoneReadable(loaded.event?.time_zone) ? { ...loaded, event: { ...loaded.event, time_zone: 'UTC' } } : loaded;
     const { entries, damaged } = readLedger(e.paths.ledger);
     out.event = {
       ...e,
       entries,
       state: fold(entries, damaged),
-      today: todayKeyIn(e.event.time_zone, now),
+      today: dayState.today || todayKeyIn(e.event.time_zone, now),
+      dayState,
       inputs: Object.fromEntries(Object.keys(INPUT_FILES).map((k) => [k, inputFile(e, k)]))
     };
   }

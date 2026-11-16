@@ -8,16 +8,18 @@ import { slotLabel } from '../../../slot-finder/scripts/slots.mjs';
 import { holdersBySlot } from '../../../slot-finder/scripts/assign.mjs';
 import { profileMeta } from '../../../attendee-research/scripts/profiles.mjs';
 import { MODES } from '../leadtime.mjs';
-import { gapFor, noDayWhy } from '../../../../lib/spacing.mjs';
+import { gapFor, noDayWhy, stateOf } from '../../../../lib/spacing.mjs';
 import { INSTRUCTION_LIKE } from '../../../crm-triage/scripts/view.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
 import { renderOutbox } from '../outbox.mjs';
 import { hashOf, pickAt, whereAt } from './routes.mjs';
 import { isOut, labelOf, ctxOf, colleagueTold, takenTest } from './context.mjs';
 import { savedDraft, readTodo, draftFiles, ledgerTouch, followupDayOf, laterSent } from './saved-drafts.mjs';
+import { addressBusyToday, busyWhy, homeSends } from '../../../../lib/sendcheck.mjs';
 
 function cardsFrom(c, jobs, { pendingOnly }) {
   const cards = [];
+  let sends = null; // every event's sends, read once, for the first card that needs them
   for (const j of jobs) {
     // The card's text and verdict are the ledger's: the fingerprinted text of the latest save, which for the
     // outbox is the approved one. A working copy changed since (by hand) has no card: what the outbox offers
@@ -33,6 +35,20 @@ function cardsFrom(c, jobs, { pendingOnly }) {
     if (pendingOnly && j.critic_held && !isOut(st)) continue;
     const ct = c.byId[j.id];
     const due = dueOf(c, j, d);
+    // Can't go any more, and why: the event is over (any message), or this follow-up has no day left.
+    const notGoing = stateOf(c).state !== 'ok' ? stateOf(c).why : due && !due.day && !due.waits ? noDayWhy(due) : undefined;
+    // One message a day to a person across all your events (the guard's rule, lib/sendcheck.mjs addressBusyToday): an
+    // approved message that is due today, to an address another event wrote to today, waits for another day, with the
+    // reason and nothing to copy. (A meeting confirmation is the one exception.)
+    let notToday;
+    if (pendingOnly === false && !notGoing && j.kind === 'message' && j.touch > 0 && !(due && (due.waits || !due.day || due.day > c.today))) {
+      const to = c.state[j.id]?.touches?.[j.touch]?.approved?.to || (j.channel === 'email' ? ct.email : ct.profile_url);
+      if (to) {
+        sends ||= homeSends();
+        const busy = addressBusyToday(c.paths.dir, to, c.now.getTime(), j.id, sends);
+        if (busy) notToday = busyWhy(busy, ct.name || j.id, to);
+      }
+    }
     cards.push({
       kind: j.kind,
       id: j.id,
@@ -55,8 +71,9 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       // The day this follow-up goes, as send-list and the guard work it out (null: once the message before it goes).
       due_on: due?.day,
       due_waits: due?.waits || undefined,
-      // Can't go any more, and why: the event is over (any message), or this follow-up has no day left.
-      not_going: c.today > c.event.end_date ? 'the event is over' : due && !due.day && !due.waits ? noDayWhy(due) : undefined,
+      not_going: notGoing,
+      // Not today, and why: another event wrote to that address today.
+      not_today: notToday,
       // An event-app note whose times live in the app's request: the card says which time to pick.
       pick_in_app:
         (j.kind === 'message' || j.kind === 'confirmation') &&

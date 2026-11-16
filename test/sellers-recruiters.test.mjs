@@ -54,7 +54,11 @@ test('follow-up prompt says when replies were checked; a stale check is explaine
   assert.equal(stale.status, 2);
   assert.match(stale.stderr, /"Bo Li" \(c\d+\) can't go now: their replies weren't checked/);
   cli(H, 'event-outreach', ['record', '--event', H.slug, '--file', file(H, { items: [{ who: 'Bo Li', what: 'bounced' }] })], AT(8, 8));
-  const l3 = cli(H, 'event-outreach', ['send-list', '--event', H.slug, '--resend', `${idOf(H, 'Bo Li')}:1`, '--said', 'send it again', '--no-reply-check', 'nobody replied'], AT(8, 9));
+  // A resend of a message that bounced is refused: the bounce already settled its release (it went, to a bad
+  // address), so it isn't an unclear send; and nothing more is listed to a bounced address.
+  const resend = cli(H, 'event-outreach', ['send-list', '--event', H.slug, '--resend', `${idOf(H, 'Bo Li')}:1`, '--said', 'send it again', '--no-reply-check', 'nobody replied'], AT(8, 9));
+  assert.match(resend.ERROR || '', /isn't waiting on an unclear send \(it was already settled, by a bounce/);
+  const l3 = cli(H, 'event-outreach', ['send-list', '--event', H.slug, '--no-reply-check', 'nobody replied'], AT(8, 9));
   assert.ok(!JSON.parse(readFileSync(l3.file, 'utf8')).some((x) => x.name === 'Bo Li'), 'nothing more to a bounced address');
 });
 

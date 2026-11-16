@@ -134,6 +134,7 @@ windows. The other rules are in `hooks/guard/`, one topic per file, so each can 
 | `hooks/guard/test-calls.mjs` | The one test draft, task or contact that setup tries a connection with. |
 | `hooks/guard/lookups.mjs` | Contact-detail lookups: the window you agreed to, how many are left in it, and what one lookup may carry. |
 | `hooks/guard/sends.mjs` | Sends and staged drafts: each is checked against the text and recipient you approved. |
+| `hooks/guard/daymark.mjs` | One message a day to a person: the marker for a person's day at an event, and the locks a send is checked and released under across all your events: one for the address it goes to, one for each address the person has alone at that event, and one for each inbox address of theirs (info@, hello@) together with their name. |
 | `hooks/guard/browser.mjs` | Where the browser may go during a run, and what may be clicked or typed in a send window or a CRM log window. |
 | `hooks/guard/prompts.mjs` | The permission prompts: the text you read before you say yes. |
 | `hooks/guard/files.mjs` | Claude's own file tools: no read of keys or credentials, no write to floorboss's records or to the launchd file of its scheduled job. |
@@ -388,9 +389,40 @@ everything else in floorboss works on all three.
    the event's last day is dropped, never moved closer; you're told which. Change the gap after approving and the
    approved follow-ups keep their text and need no new approval: the answer names each approved follow-up at this event whose day moves or that is dropped (with its old and new day once the message before it has gone, and its gap until then), and gives counts for other events; those counts are a projection that takes a first message still waiting as going today. 
    At most one message goes to a person on any day, whatever listed it: the guard holds it to that on its own (a
-   meeting confirmation, which answers their booking, is the one exception). When
+   meeting confirmation, which answers their booking, is the one exception). That is one message a day to a person
+   across all your events, by address: a message at another event counts when the two events share an address for
+   the person (their email, another email on their list entry, their profile link however it is written, an
+   address a message was approved to go to, or a new address after a bounce), whichever of them each message goes
+   to. That holds for a message recorded as sent there and for one floorboss let through there and not yet
+   recorded. An address two people's list entries at one event both have is no one's alone: it counts only for a
+   message that goes to that address (a send you record with no channel counts as an email), never for their other
+   addresses, so a LinkedIn note to one of them never holds the other's. Who has an address comes from the list
+   entries: a message approved to go to someone else's address, or a bounce that gives it as another person's new
+   address, doesn't make it shared. A note for the colleague who holds someone names no address of theirs. An
+   address that is often a team's inbox (info@, hello@, hi@, contact@, mail@, team@, office@, sales@, support@,
+   ops@, enquiry@, reception@, bookings@, accounts@, billing@ and other team names; SECURITY.md lists them all)
+   links two events only when both give the person the same name (case, accents, a title like Ms. and the order
+   in "Doe, Jane" aside; a nickname or a typo is another name). So a solo owner
+   known by hello@ at two events is one person, and two colleagues who each give info@ at a different event are
+   two. For anyone else, that address counts only for a message that goes to it. Someone each event knows only by
+   addresses the other doesn't have, or only by such an inbox address under two different names, is not
+   recognised. If another event
+   can't be read (its folder or ledger can't be opened, or is a link to one that is gone), messages wait and say
+   why. At one event a day is a calendar day in the event's zone: 23:58
+   and 00:01 are different days. A message at another event counts as today when it falls on today's date in either
+   event's zone, so two events can't both write to a person on the same date in either zone; as at one event, two
+   sends either side of midnight in both zones can both go. A message floorboss let through holds them for no more
+   than a day. A send you record yourself counts on the date you give it. A message let through today
+   counts for today whatever is recorded about it later, so only that same message can be tried again that day. On
+   the outbox page and in the task list, a message to an address another event wrote to today says "Not today",
+   with nothing to copy and no task until another day. A draft in your mailbox holds nothing at your other events:
+   you send it yourself. When
    a later step is recorded as sent (by you, or found in your mailbox), the earlier steps that hadn't gone are passed
-   over, and the next one counts its gap from that send.
+   over, and the next one goes never sooner than its gap after that send, and not before its planned day.
+   An event whose dates floorboss can't read (an odd, missing or impossible date like 2026-13-01, a start after the
+   end, or an odd zone in event.json) sends and stages nothing, and says so on the outbox page, in the summary and the lists,
+   until its event.json is fixed: start_date and end_date as days like 2026-11-12, time_zone as a zone like
+   Europe/Amsterdam.
    floorboss's work for an event ends with it. Once its last day has passed in the event's time, nothing more is
    sent, made a send task, put in your mailbox drafts or shown as due in the summary, and the outbox page shows
    those messages as not going, with nothing to copy. Recording what happened still works, and so do opt-out and

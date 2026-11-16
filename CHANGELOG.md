@@ -71,14 +71,79 @@ The first public version.
   copy on the outbox page (cards say "not going: the event is over"): first messages, follow-ups and confirmations
   alike. Recording what happened, opt-out and review tasks, exports and the agenda still work. At most one message
   goes to a person a day: the guard enforces it on its own (a send in progress counts, and two calls at once can't
-  both pass; a meeting confirmation, which answers the person's booking, is the one exception), and the send list, task list and stage list list the earliest step and hold the other. A step
+  both pass; a meeting confirmation, which answers the person's booking, is the one exception), and the send list, task list and stage list list the earliest step and hold the other.
+  It is one message a day to a person across all your events, by address. A message at another event counts when
+  the two events share an address for the person: their email, another email on their list entry, their profile
+  link, an address a message was approved to go to, or a new address after a bounce, whichever of them each
+  message goes to. That holds for a send recorded there, for a message floorboss let through there and not yet
+  recorded, and for a guard's mark there (below). A profile link written two ways
+  ("https://www.linkedin.com/in/ana", "linkedin.com/in/ana/") is one address. An address two people's list
+  entries at one event both have is no one's alone: it counts only for a message that goes to that address (a send
+  you record with no channel counts as an email), never for their other addresses, so a LinkedIn note to one of
+  them never holds the other's. Who has an address comes from the list entries: an approval or a bounce that names
+  another person's address doesn't make it shared, and a note for the colleague who holds someone names no address
+  of theirs. An address that is often a team's inbox (info@, hello@, hi@, contact@, mail@, ops@, enquiry@,
+  reception@, bookings@, accounts@ and more; SECURITY.md lists them all) links two events only when both give the
+  person the same name: a solo owner known by hello@ at two events is one person, and two colleagues who each give
+  info@ at a different event are two. The merge never joins two people by such an address; the list now also has
+  ops@, operations@, enquiry@, inquiry@, reception@, frontdesk@, booking@, bookings@, accounts@, accounting@,
+  billing@, invoices@, orders@, general@ and welcome@. The guard checks a send under a lock for the address it goes
+  to, each address the person has alone at its event and each inbox address of theirs together with their name,
+  taken in one sorted order, so two calls at the same moment at two events that share an address for her, even
+  when each goes to a different one of her addresses, are checked one after the other and the second is held.
+  Someone each event knows only by addresses the other doesn't have, or only by an inbox address under two
+  different names, is not recognised. At one event a
+  day is a calendar day in the event's zone (23:58 and 00:01 are different days). A message to the same address at
+  another event counts as today when it falls on today's date in this event's zone or in that event's own zone. So
+  two events can't both write to a person on the same date in either zone, whether the calls come at the same moment
+  or one after the other. As at one event, two sends either side of midnight in both zones can both go, minutes
+  apart. A message floorboss let through holds the person for no more than a day. A send you record yourself counts
+  on the date you give, in its event's zone (and from the time you recorded it, when you recorded it that day or
+  when that event's zone can't be read). A message let through today counts for today whatever is recorded about it later (a hand record dating it
+  earlier, a send-outcome saying it didn't go): only that same step can go again that day. `send-list --resend`
+  takes only an unclear send, and says why when it refuses: the step was recorded as sent, it was never let through,
+  it was already settled (by a bounce, send-outcome or an earlier resend), in which case it is listed again on its
+  own once it can go, or a call for it started less than a minute ago and may still be going through. A guard
+  stopped between its first mark for a message and the release it writes leaves an unclear send too, once that mark
+  is a minute old (no guard still checking is that old): the send list and the flow ask about it, and `--resend` or
+  `send-outcome` with your words settles it. Before then, `--resend` and `send-outcome` refuse, and the guard checks
+  the message again under its locks, before its release, so a message whose first call is still going through
+  isn't let through a second time. Such a mark at another
+  event holds the person's addresses there too, from the time it was made. If another event can't be read (its
+  folder can't be opened or is a link to a folder that is gone, or its ledger can't be read or is a link to a file
+  that is gone), sends wait and say why: floorboss can't tell what went there. So does a line there floorboss can't
+  read that names the address. A send lock left by a guard that died holds that address for up to a minute; a call
+  in that time is told to try again in a minute. A new lock that a stale break renamed away in a race is removed
+  once it is a day old, the next time a lock is taken. The outbox page, the
+  task list and the summary hold a message to an address another event wrote to today: its card says "Not today"
+  with the reason and has nothing to copy, and its send task comes another day. The stage list puts a
+  follow-up in your drafts only after the message before it went, never a step already sent, and each step's draft
+  once per stage list (never again once its receipt is saved, unless you change its text and approve it again: the
+  old draft in your mailbox is then flagged). It holds a person another event wrote to today, and says why. A draft
+  call waits while a send to that person at another event is being checked under a lock they share, and is held by
+  it. A draft in your
+  drafts holds nothing at your other events: you send it yourself. A second call for the same draft within 30
+  seconds is refused, as the first may still be going in; a call that was declined or failed can be tried again
+  after that. A step
   recorded as sent out of order (by hand, or found in the mailbox) passes over the earlier steps that hadn't gone
-  (their text was written to come before it), and the next step counts its gap from that send. With the default spacing, three timings differ from before: a message sent
+  (their text was written to come before it), and the next step goes never sooner than its gap after that send, and
+  not before its planned day. An event whose dates or zone can't be read (a missing, empty or odd date, a day that
+  doesn't exist like 2026-11-31 or 2026-13-01, a start after the end, an unknown zone) sends and stages nothing, and says so ("floorboss can't read
+  this event's dates") on the outbox page, in the summary, the send list, the task list, todo, the stage list and the
+  flow, and at the guard; the gap answer says that event can't be planned now. floorboss's own setup always writes
+  both dates, so an event with no end date counts as unreadable too, and setup refuses a day that doesn't exist. A
+  send date recorded in a form floorboss can't read (2026-02-30 and 2026-13-45 included) skips the step after it with
+  a note naming it. A send recorded with no date (or a date of 0) still went: that step never goes again, and the
+  step after it waits with a note. A hand-edited ledger line stops nothing that reads the ledger: a list on a
+  person's line that isn't a list is ignored, and a line floorboss can't take at all (no id where one is needed, or
+  an id like "__proto__") holds the person it names, or everyone at that event, with a reason that names its line. With the default spacing, three timings differ from before: a message sent
   late (after its planned day) a day or less before the event starts, or during it, no longer gets a follow-up
   after it; with sending off, a last follow-up that fits before the event's last day is now offered (it used to need
   room for one more gap after it), as sending on always did; and zones at UTC+12 or further east read the lead time
   on the event's own date. Answers are read whole ("every other day", "a fortnight", "3 días, luego una semana"); one with a
-  part floorboss can't read, a negation, a comparison, an ordinal or a channel is asked again, never half saved.
+  part floorboss can't read, a negation, a comparison, an ordinal or a channel is asked again, never half saved, and
+  so is one cut off at its end ("3 days, then", "3 días, y", "3 days, every", "3 days, after that", "3 days: after
+  that", "3 days,", "3 days -", "3 days..."). "3 days, then 5 days after that" is whole, and saved.
   The lead time is read at the event's own date (it was read at midday UTC, which is the next day at UTC+12 or
   further east). With sending on and every message on time, the days there are the same as before; they differ with
   sending off, and after a late send. A follow-up planned again (written again because the message before it changed) plans the
@@ -150,7 +215,10 @@ The first public version.
   that isn't plainly a read is refused. `npm run self-check` holds the launcher to one process, the opener at
   `/usr/bin/open`, and the install script to one, `/bin/launchctl`.
 - The guard's 20-second deadline now holds for a check that kept the process busy: its answer after the deadline
-  is a refusal. Resolving a very long path no longer takes time in proportion to the square of its length.
+  is a refusal. A send is checked against it once more just before its release is written, so a send refused for
+  time leaves nothing that holds the message, and trying again works. The check of a person's sends at your other
+  events reads each event once per call, not once per listed message, so a home with many events stays well
+  inside the deadline. Resolving a very long path no longer takes time in proportion to the square of its length.
 - A subagent can hand its result back during a run on current Claude Code, which delivers results through a tool of its
   own that the guard refused as unknown: critics, researchers and writers did the work and couldn't report it.
 - From a sixth full audit (11 Nov, 13 confirmed findings, all low; ten fixed here, each with a regression test, and

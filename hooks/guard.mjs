@@ -28,14 +28,24 @@ import { join } from 'node:path';
 import { home, recordFile } from '../lib/paths.mjs';
 import { readRun, readRunAnySession, stampRun, lockPath, endSession, touchSession, ranBefore } from '../lib/runlock.mjs';
 import { bareBrowserTool, readUrl, looksLikeUrl } from '../lib/security.mjs';
-import { eventRecord, oldestReplyCheck, eventDay } from '../lib/sendcheck.mjs';
-import { withLock } from '../lib/lock.mjs';
+import { eventRecord, oldestReplyCheck, eventDay, addressBusyToday, busyWhy } from '../lib/sendcheck.mjs';
+import { readLedger } from '../lib/ledger.mjs';
+import { withLock, withLocks } from '../lib/lock.mjs';
 import { loadEvent } from '../lib/event.mjs';
 import { randomBytes } from 'node:crypto';
 import { appendLine, writeText } from '../lib/jsonio.mjs';
 import { isMain } from '../lib/main.mjs';
 import { nowMs as clockNow } from '../lib/clock.mjs';
 import { readJsonStrict, fold, leaves, squash } from './guard/shared.mjs';
+import { dayMarker, sendLocks, ownerOf, takeMarker, dropMarkers } from './guard/daymark.mjs';
+// How long a draft's call into the mailbox counts as going in now: a second call for it in that time is refused.
+const STAGE_IN_FLIGHT_MS = 30 * 1000;
+// A send's lock per address is broken as stale only past this age: well over the guard's own deadline and Claude
+// Code's hook timeout (30 seconds), so only a guard that died holding it loses it, never one still checking.
+const SEND_LOCK_STALE_MS = 60 * 1000;
+// What a call is told while another call holds a lock for one of the person's addresses (a lock left by a guard that
+// died holds it until it is a minute old).
+const SEND_BUSY = 'another call to this person, at this address or another of theirs, is being checked at this moment, or one stopped while it was: try again in a minute.';
 import { isSubagent, inheritedRun, transcriptRanFloorboss, CHECKED_TOOLS, QUIET_TOOLS } from './guard/run.mjs';
 import { ask, allow, promptId, promptPerson, promptAddr, promptLine, personName, holdHistory, letThroughBefore } from './guard/prompts.mjs';
 import { isBrowser, givenServer } from './guard/connectors.mjs';
@@ -71,25 +81,30 @@ export { recordFile };
 // deadline is a refusal whatever it would have been. A check that never returns at all relies on onFailure:
 // "block" in hooks.json (Claude Code 2.1.295 or later; older versions let a timed-out call through).
 export const GUARD_DEADLINE_MS = 20000;
+// A send is checked against the deadline again just before its release is written, this much short of it, so the
+// little left to do after the release can't carry the answer past the deadline (a refusal then would leave a release
+// for a call that never ran).
+const RELEASE_MARGIN_MS = 1000;
+const TOO_LONG = 'its guard took too long to check it. Try again; if it keeps happening, this is for you, the user, to look at.';
 
 if (isMain(import.meta.url)) {
   // A check that hangs while waiting blocks the call before Claude Code's own hook timeout (hooks.json) would.
   setTimeout(() => {
-    process.stderr.write(
-      'floorboss blocked this call: its guard took too long to check it. Try again; if it keeps happening, this is for you, the user, to look at.\n'
-    );
+    process.stderr.write(`floorboss blocked this call: ${TOO_LONG}\n`);
     process.exit(2);
   }, GUARD_DEADLINE_MS).unref();
   // (The deadline is shorter only under floorboss's own tests.)
   const startedAt = Date.now();
   const testDeadline = process.env.FLOORBOSS_TEST === '1' ? Number(process.env.FLOORBOSS_GUARD_DEADLINE_MS) : NaN;
   const deadline = Number.isFinite(testDeadline) ? testDeadline : GUARD_DEADLINE_MS;
+  // Whether a send's release would now come too close to the deadline (see RELEASE_MARGIN_MS).
+  const late = () => Date.now() - startedAt >= Math.max(0, deadline - Math.min(RELEASE_MARGIN_MS, deadline));
   // Only a call that is being judged can be blocked: not what is recorded after a call ran, nor a session's start or end.
   let judging = process.argv[2] !== 'post' && process.argv[2] !== 'start' && process.argv[2] !== 'end';
   process.on('exit', (code) => {
     if (code !== 0 || !judging || Date.now() - startedAt <= deadline) return;
     try {
-      writeSync(2, 'floorboss blocked this call: its guard took too long to check it. Try again; if it keeps happening, this is for you, the user, to look at.\n');
+      writeSync(2, `floorboss blocked this call: ${TOO_LONG}\n`);
     } catch {
       /* the exit code says it */
     }
@@ -490,11 +505,66 @@ if (isMain(import.meta.url)) {
       // rest. This hook writes only stage-pending.json (the batch it asked about), which only that hook reads.
       for (const it of staged.slice(0, 1)) {
         const evDir = join(home(), 'events', it._event);
+        // One message a day to a person across all your events, for a draft too: checked again under the send locks for
+        // the person's addresses (hooks/guard/daymark.mjs sendLocks), so a send at another event that is between its
+        // check and its release is waited for and counted. (A draft writes no release: one staged here holds nothing at
+        // another event. You send it yourself.)
+        if ((it.touch ?? 1) !== 0) {
+          let why = null;
+          try {
+            why = withLocks(
+              sendLocks(evDir, it.id, it.to),
+              () => {
+                const busy = addressBusyToday(evDir, it.to, nowMs, it.id);
+                return busy ? busyWhy(busy, promptPerson(nameOfStaged(evDir, it), it.id), it.to) : null;
+              },
+              { staleMs: SEND_LOCK_STALE_MS }
+            );
+          } catch (e) {
+            if (/^another floorboss process is busy with send-/.test(String(e?.message))) why = SEND_BUSY;
+            else throw e;
+          }
+          if (why) {
+            process.stderr.write(`floorboss blocked this call: the draft can't go into your drafts now: ${why}\n`);
+            process.exit(2);
+          }
+        }
         const batch = stageBatch(evDir);
         const marker = readJsonStrict(join(evDir, 'stage-asked.json'), null);
         const key = `${fold(it.to)}|${it.id}|${it.touch ?? 1}`;
+        // One draft per person per step in a batch, even with calls at the same moment: each call takes the next
+        // numbered marker for that draft with wx (stage-call-<id>-<touch>-<batch>-<n>), and a call is refused while the
+        // one before it is under STAGE_IN_FLIGHT_MS old (it may be going in now, or it was declined or failed: the guard
+        // can't tell). After that it can be tried again; one that went in is marked by the PostToolUse hook and refused
+        // below for the whole batch.
+        mkdirSync(join(evDir, 'released'), { recursive: true, mode: 0o700 });
+        const wentIn = marker?.batch === batch && existsSync(join(evDir, 'released', `stage-${it.id}-${it.touch ?? 1}-${batch}`));
+        const callMark = (n) => join(evDir, 'released', `stage-call-${it.id}-${it.touch ?? 1}-${batch}-${n}`);
+        let n = 0;
+        while (existsSync(callMark(n + 1))) n++;
+        let inFlight = false;
+        if (n > 0) {
+          const was = Date.parse(readFileSync(callMark(n), 'utf8'));
+          // Done once the PostToolUse hook saw that call run (it writes <marker>.done).
+          inFlight = !existsSync(`${callMark(n)}.done`) && (!Number.isFinite(was) || nowMs - was < STAGE_IN_FLIGHT_MS);
+        }
+        if (!inFlight && !wentIn) {
+          try {
+            writeFileSync(callMark(n + 1), new Date(nowMs).toISOString(), { flag: 'wx', mode: 0o600 });
+          } catch (e) {
+            if (e.code !== 'EEXIST') throw e;
+            inFlight = true;
+          }
+        }
+        if (inFlight && !wentIn) {
+          process.stderr.write(
+            `floorboss blocked this call: a call to put the draft to ${promptPerson(nameOfStaged(evDir, it), it.id)} in your drafts started under ${STAGE_IN_FLIGHT_MS / 1000} seconds ago (it may still be going in, or it was declined or failed). If the draft is there, save its receipt (outreach staged); if not, try again after ${STAGE_IN_FLIGHT_MS / 1000} seconds.\n`
+          );
+          process.exit(2);
+        }
         // The batch's yes covers each draft once: a draft that already went in (the PostToolUse hook marks it once the
-        // call ran) waits for its receipt. A call that failed or was declined marks nothing, so it can be tried again.
+        // call ran) waits for its receipt. A call that failed or was declined is never marked as gone in, so it can be
+        // tried again once STAGE_IN_FLIGHT_MS has passed since it started.
         if (marker?.batch === batch) {
           if (existsSync(join(evDir, 'released', `stage-${it.id}-${it.touch ?? 1}-${batch}`))) {
             process.stderr.write(
@@ -653,70 +723,10 @@ if (isMain(import.meta.url)) {
           );
         }
       }
-      // Each approved send goes once: an exclusive marker per message (created or refused, never both), then
-      // the release in the event's log before the call runs. Two calls at once can't both get through.
-      // A browser note goes through the same: it is released when it is typed.
-      for (const it of [...sent, ...typedNotes]) {
-        const evDir = join(home(), 'events', it._event);
-        const resets = eventRecord(evDir).entries.filter(
-          (e) => e.id === it.id && e.touch === it.touch && ['release_cleared', 'bounced'].includes(e.type)
-        ).length;
-        const mdir = join(evDir, 'released');
-        mkdirSync(mdir, { recursive: true, mode: 0o700 });
-        try {
-          closeSync(openSync(join(mdir, `${it.id}-${it.touch}-${resets}`), 'wx', 0o600));
-        } catch (e) {
-          if (e.code === 'EEXIST') {
-            process.stderr.write(
-              `floorboss blocked this call: the message to ${promptPerson(it.name, it.id)} was already let through once (it may have gone): check, then record it, or resend with the user's words.\n`
-            );
-            process.exit(2);
-          }
-          throw e;
-        }
-        // At most one message to a person a day, in the event's time: an exclusive marker per person and day, taken in
-        // the same step, so two calls at the same moment for one person can't both pass. It names the message that took
-        // it; once that message's release is cleared (it never went), the day is free again. A meeting confirmation
-        // (touch 0) answers the person's own booking and takes no day (lib/sendcheck.mjs says why).
-        const day = eventDay(evDir, nowMs) || new Date(nowMs).toISOString().slice(0, 10);
-        const dayMark = join(mdir, `${it.id}-day-${day}`);
-        try {
-          if (it.touch !== 0) writeFileSync(dayMark, `${it.touch}:${resets}`, { flag: 'wx', mode: 0o600 });
-        } catch (e) {
-          if (e.code !== 'EEXIST') throw e;
-          const [t0, r0] = String(readFileSync(dayMark, 'utf8')).split(':').map(Number);
-          const clearedSince =
-            eventRecord(evDir).entries.filter((x) => x.id === it.id && x.touch === t0 && ['release_cleared', 'bounced'].includes(x.type)).length > r0;
-          if (!clearedSince) {
-            try {
-              unlinkSync(join(mdir, `${it.id}-${it.touch}-${resets}`));
-            } catch {
-              /* gone */
-            }
-            process.stderr.write(`floorboss blocked this call: another message to ${promptPerson(it.name, it.id)} already went or is going today. One message a day to one person.\n`);
-            process.exit(2);
-          }
-          writeFileSync(dayMark, `${it.touch}:${resets}`, { mode: 0o600 });
-        }
-        // appendLine: starts on a fresh line after a torn one and syncs, so a release is never glued onto a broken line.
-        // If the release can't be written, the marker goes too: the call is blocked, and nothing is held as sent.
-        try {
-          appendLine(
-            join(evDir, 'ledger.jsonl'),
-            `${JSON.stringify({ at: new Date(nowMs).toISOString(), type: 'send_released', who: 'guard', id: it.id, touch: it.touch, hash: it.hash || null, via: it.via, to: it.to, ...(it.where ? { where: it.where } : {}) })}\n`
-          );
-        } catch (e) {
-          try {
-            unlinkSync(join(mdir, `${it.id}-${it.touch}-${resets}`));
-          } catch {
-            /* gone */
-          }
-          throw e;
-        }
-      }
       // The one check floorboss's files can't fake: Claude Code asks the user before every send, even when the
       // tool is set to "always allow". Every file the checks above read is one a session could write, so the
       // record catches mistakes and drift, and the person at the prompt is the boundary. No send skips it.
+      // (The prompt is put together before the release below, so nothing that can fail or take time comes after it.)
       const it = sent[0];
       if (it) {
         // The address shown is the one the call carries, not the list's: what the user allows is what goes.
@@ -739,16 +749,105 @@ if (isMain(import.meta.url)) {
         const history = holdHistory(eventRecord(join(home(), 'events', it._event)).entries, it.id, name);
         const held = history.length ? ` Held before: ${history.join(' ')}` : '';
         // A message floorboss already let through once (then cleared to go again, on words the session wrote) says
-        // so: the user is the one who can tell whether the first one went.
+        // so: the user is the one who can tell whether the first one went. (Its release for this call isn't written yet.)
         const releases = eventRecord(join(home(), 'events', it._event)).entries.filter((e) => e.id === it.id && e.touch === it.touch && e.type === 'send_released');
-        const again = letThroughBefore(it, releases.slice(0, -1));
+        const again = letThroughBefore(it, releases);
         ask(
           `floorboss: send ${it.touch > 1 ? `follow-up ${it.touch - 1}` : it.touch === 0 ? 'the meeting confirmation' : 'the first message'} to ${promptPerson(name, it.id, callTo)} via ${it.via}.${again}${checked}${held}\n\nThe text you approved, as it goes:\n${fullText(it.subject, it.body)}\n\nAllow only if this is the approved message to the right person.`
         );
       }
       // An allowed call to a connector floorboss was given keeps its run open, so a long research step can't
-      // outlast the lock. Blocked calls and calls to other servers don't touch it.
+      // outlast the lock. Calls blocked before this point and calls to other servers don't touch it. (Stamped before
+      // the release below, so nothing that can fail comes after a release.)
       if (run.active && givenServer(server, config, run)) stampRun({ session });
+      // Each approved send goes once: an exclusive marker per message (created or refused, never both), then the
+      // release in the event's log before the call runs. Two calls at once can't both get through. A browser note goes
+      // through the same: it is released when it is typed. The release is the last thing written before the answer.
+      for (const it of [...sent, ...typedNotes]) {
+        const evDir = join(home(), 'events', it._event);
+        const resets = eventRecord(evDir).entries.filter(
+          (e) => e.id === it.id && e.touch === it.touch && ['release_cleared', 'bounced'].includes(e.type)
+        ).length;
+        const mdir = join(evDir, 'released');
+        mkdirSync(mdir, { recursive: true, mode: 0o700 });
+        const own = join(mdir, `${it.id}-${it.touch}-${resets}`);
+        try {
+          closeSync(openSync(own, 'wx', 0o600));
+        } catch (e) {
+          if (e.code === 'EEXIST') {
+            process.stderr.write(
+              `floorboss blocked this call: the message to ${promptPerson(it.name, it.id)} was already let through once (it may have gone): check, then record it, or resend with the user's words.\n`
+            );
+            process.exit(2);
+          }
+          throw e;
+        }
+        // Every marker this call takes is given back if anything after this fails or refuses, so a call that wrote no
+        // release leaves nothing that holds this message or this person on a later day.
+        const took = [own];
+        let refusal = null;
+        try {
+          // One message a day to a person across all your events, and at this event (in its time): the check of every
+          // event's ledger is made again under a lock for the address this message goes to and each address the person
+          // has alone here (taken in one sorted order), and the person's day marker and the release are taken under them
+          // too, so two calls at the same moment can't both pass, whatever their events' zones, and whichever of the
+          // person's addresses each goes to when their two events share one (lib/sendcheck.mjs addressBusyToday;
+          // hooks/guard/daymark.mjs sendLocks). A lock is never broken while a live guard holds it: a
+          // guard answers within its deadline, far under SEND_LOCK_STALE_MS. A meeting confirmation (touch 0) answers
+          // the person's own booking and takes no day (lib/sendcheck.mjs says why).
+          refusal = withLocks(
+            sendLocks(evDir, it.id, it.to),
+            ({ owned }) => {
+              if (late()) return 'late';
+              // This step read again under the lock: when another call for the same message was let through since this
+              // call's marker was taken (a resend or "it didn't go" recorded while that call was still going), this one
+              // is refused, so that message isn't let through a second time.
+              {
+                const mineNow = readLedger(join(evDir, 'ledger.jsonl')).entries.filter(
+                  (e) => e.id === it.id && e.touch === it.touch && ['send_released', 'release_cleared', 'bounced'].includes(e.type)
+                );
+                if (mineNow[mineNow.length - 1]?.type === 'send_released')
+                  return `the message to ${promptPerson(it.name, it.id)} was let through a moment ago by another call (it may have gone): check, then record it, or resend with the user's words.`;
+              }
+              if (it.touch !== 0) {
+                const busy = addressBusyToday(evDir, it.to, nowMs, it.id);
+                if (busy) return `${busyWhy(busy, promptPerson(it.name, it.id), it.to)}. One message a day to one person, across all your events.`;
+                const day = eventDay(evDir, nowMs) || new Date(nowMs).toISOString().slice(0, 10);
+                const cleared = (o) => eventRecord(join(home(), 'events', o.slug)).entries.filter((x) => x.id === o.id && x.touch === o.touch && ['release_cleared', 'bounced'].includes(x.type)).length;
+                const got = takeMarker(dayMarker(evDir, it, day), ownerOf(it._event, it, resets), cleared);
+                if (!got) return `another message to ${promptPerson(it.name, it.id)} already went or is going today. One message a day to one person.`;
+                took.push(got);
+              }
+              // (Under floorboss's own tests only: the lock is held a moment here, between the check and the release, so a
+              // test can show that a second call at the same moment waits for it and is refused.)
+              const hold = process.env.FLOORBOSS_TEST === '1' ? Number(process.env.FLOORBOSS_SEND_HOLD_MS) : 0;
+              if (hold > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(hold, 3000));
+              // An answer after the deadline is a refusal: checked again just before the release, so a send refused for
+              // time leaves no release and no marker, and trying again works.
+              if (late()) return 'late';
+              // And every lock must still be this call's (lib/lock.mjs: a lock broken as stale under it is never given back).
+              if (!owned()) return 'busy';
+              // appendLine: starts on a fresh line after a torn one and syncs, so a release is never glued onto a
+              // broken line. If it can't be written, the markers go (below): the call is blocked, and nothing is held.
+              appendLine(
+                join(evDir, 'ledger.jsonl'),
+                `${JSON.stringify({ at: new Date(nowMs).toISOString(), type: 'send_released', who: 'guard', id: it.id, touch: it.touch, hash: it.hash || null, via: it.via, to: it.to, ...(it.where ? { where: it.where } : {}) })}\n`
+              );
+              return null;
+            },
+            { staleMs: SEND_LOCK_STALE_MS }
+          );
+        } catch (e) {
+          dropMarkers(took);
+          if (/^another floorboss process is busy with send-/.test(String(e?.message))) refusal = 'busy';
+          else throw e;
+        }
+        if (refusal) {
+          dropMarkers(took);
+          process.stderr.write(`floorboss blocked this call: ${refusal === 'late' ? TOO_LONG : refusal === 'busy' ? SEND_BUSY : refusal}\n`);
+          process.exit(2);
+        }
+      }
       allow();
     } catch (e) {
       process.stderr.write(
