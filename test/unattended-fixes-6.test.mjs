@@ -196,6 +196,9 @@ test('F5-S1-1: a new text approved and authorised again after an unattended draf
   appendFileSync(join(H0.dir, 'ledger.jsonl'), `${JSON.stringify({ at: D14, type: 'stage_cleared', who: 'user', id: H.ana, touch: 2, said: 'x' })}\n`);
   const forced = (await ticket(H0, { now: D14 })).items;
   assert.deepEqual(forced.map((x) => `${x.id}:${x.touch}:${x.hash}`), [`${H.ana}:2:${hash}`]);
+  // You deleted the old draft but haven't told floorboss yet. (With it still in the thread, the thread read holds on its
+  // own: its count is above the messages it shows, test/unattended-fixes-8.)
+  writeFileSync(join(H.HOME, 'standin.json.drafts.json'), '[]');
   const b = await grun(H, { items: forced });
   assert.ok(b.t.items.length && !b.empty);
   assert.ok(!b.allowed, 'a second draft of follow-up 1 went in');

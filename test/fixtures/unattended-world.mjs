@@ -30,8 +30,13 @@ const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).ver
 export const sha = (s) => createHash('sha256').update(String(s)).digest('hex');
 
 // The guard as Claude Code runs it, in this home, at this time. extra: more environment (the run's token).
+// The guard's deadline is read by the wall clock (Date.now), which jumps when the Mac sleeps or a loaded machine stalls
+// a process: a guard call caught in that jump is refused as late, and a world built through it is quietly missing a
+// step. Under floorboss's own tests the guard takes a longer deadline (FLOORBOSS_GUARD_DEADLINE_MS); a test of the
+// deadline itself still sets its own.
+export const TEST_DEADLINE = { FLOORBOSS_GUARD_DEADLINE_MS: String(24 * 3600 * 1000) };
 export function hook(H, input, { args = [], now = H.now || NOW, env = {} } = {}) {
-  const e = { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now, FLOORBOSS_PLATFORM: 'darwin', CLAUDE_PLUGIN_ROOT: ROOT, ...env };
+  const e = { ...process.env, ...TEST_DEADLINE, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: now, FLOORBOSS_PLATFORM: 'darwin', CLAUDE_PLUGIN_ROOT: ROOT, ...env };
   delete e.FLOORBOSS_UNATTENDED;
   if (env.FLOORBOSS_UNATTENDED) e.FLOORBOSS_UNATTENDED = env.FLOORBOSS_UNATTENDED;
   const r = spawnSync(process.execPath, [join(ROOT, 'hooks/guard.mjs'), ...args], { input: JSON.stringify(input), env: e, encoding: 'utf8' });
@@ -154,6 +159,9 @@ export function world({ crm = false, two = false, gmail = false, gserver = G } =
   H.optin = bashCall(H, scriptCmd('connectors', 'unattended-on', '--event', H.slug, '--said-file', said));
   // The authorisation: one prompt for the whole sequence, recorded by the post hook.
   H.auth = bashCall(H, scriptCmd('event-outreach', 'authorise-unattended', '--event', H.slug));
+  // A world missing a step fails here, saying which, never later as an empty ticket.
+  for (const [k, r] of [['opt-in', H.optin], ['authorisation', H.auth]])
+    if (r.pre?.decision !== 'ask' || r.post?.code !== 0) throw new Error(`the world's ${k} didn't go through: ${r.pre?.code} ${r.pre?.decision} ${r.pre?.stderr || ''} ${r.post?.stderr || ''}`);
   // Step 3's record (install-followups writes it; tested on its own).
   mkdirSync(join(H.HOME, 'unattended'), { recursive: true, mode: 0o700 });
   writeFileSync(join(H.HOME, 'unattended', 'followups-installed.json'), JSON.stringify({ label: 'com.floorboss.followups', version: VERSION, claude: '/usr/local/bin/claude', at: NOW }), { mode: 0o600 });

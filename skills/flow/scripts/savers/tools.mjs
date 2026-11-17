@@ -123,11 +123,9 @@ const firstOnlyLine = (here) =>
         .map((o) => ownerShown(o))
         .join(' or ')} in your CRM ${here.first_only_people === 1 ? 'is' : 'are'} held for you to decide in triage: floorboss can't tell if that's you.`
     : null;
-// The user's answer as it is said back, with its question mark when it asked one (the reading says so).
-const echo = (said) => {
-  const q = shown(said, 120, { keepIds: false });
-  return /[?？¿]/.test(String(said)) ? q.replace(/"$/, '?"') : q;
-};
+// The user's answer as it is said back: word for word, in quotes, as data, cleaned as the Save line cleans its value
+// (lib/names.mjs ownerQuoted), its question mark included.
+const echo = (said) => ownerShown(said, 300);
 // The reading shown back, waiting on disk for the user's own yes.
 function readBack(c, value, fx, all, said, { why = null, lead = '', owners = [], of = null, two = [] } = {}) {
   const here = fx.events.find((x) => x.slug === c.slug) || null;

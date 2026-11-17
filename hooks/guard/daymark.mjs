@@ -25,6 +25,15 @@ export const sendLock = (to) => `send-${createHash('sha256').update(lockKey(to))
 // the first.
 export const sendLocks = (evDir, id, to) => [...new Set([sendLock(to), ...personAddressKeys(evDir, id, to).map(sendLock)])].sort();
 
+// The ledger entries that clear a step's day marker (a release cleared, or a bounce): the "<resets>" a marker's owner
+// is written with, and what counts as cleared since. One rule for the attended send and the unattended draft, so
+// neither reads the other's day marker as cleared when it wasn't. (Your word that an unattended draft isn't in your
+// drafts folder, stage_cleared, makes a new once mark for that draft, hooks/guard/unattended.mjs RESETS, but frees no
+// day: that draft waits for the next day. The attended send's message marker, released/<id>-<touch>-<n>, is named by
+// the same rule, as lib/sendcheck.mjs markerOnly reads it.)
+export const DAY_RESETS = ['release_cleared', 'bounced'];
+export const dayResetsOf = (entries, id, touch) => (entries || []).filter((e) => e?.id === id && e.touch === touch && DAY_RESETS.includes(e.type)).length;
+
 // The owner written in a marker: "<event>:<id>:<touch>:<resets>" (resets: how many times that step's release was
 // cleared when it was taken). Read strictly: anything else is no owner floorboss wrote.
 export const ownerOf = (slug, it, resets) => `${slug}:${it.id}:${it.touch}:${resets}`;

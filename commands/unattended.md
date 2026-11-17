@@ -52,7 +52,8 @@ Unattended drafts for one event. Turning it on takes three steps, and each needs
    > - **A reply floorboss can't see** (to another address, in a folder it can't search, a call) won't stop the draft.
    > - **floorboss can't see replies on LinkedIn or in the event app in an unattended run.** Check those inboxes
    >   regularly and tell floorboss or your CRM when one comes in. If you installed the morning brief, the morning
-   >   page names the people you wrote to there whose draft goes in that day.
+   >   page names the people you wrote to there whose draft goes in that day (only those the launcher will put in,
+   >   by its own checks).
    > - **Plans change.** If something changed after you approved a message, the draft still says what you approved.
    > - **Claude's judgement of CRM activity can be wrong.** The summary shows each call it made, so you can check.
    >

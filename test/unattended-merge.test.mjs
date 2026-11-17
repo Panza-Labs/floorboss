@@ -9,7 +9,7 @@
 // - call_result, stage_released and stage_cleared survive the ledger merge, and only the hooks write the first two.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync, mkdtempSync, appendFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync, mkdtempSync, appendFileSync, utimesSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { world, clone, ticket, start, readMail, stageItem, stage, logOf, ledgerOf, MAIL_OK, ANA, ROOT } from './fixtures/unattended-world.mjs';
@@ -122,8 +122,11 @@ test('a send lock for her address held by a live call: the draft is refused, not
   const [name] = sendLocks(H.dir, 'c001', ANA);
   const lock = join(H.HOME, `${name}.lock`);
   mkdirSync(lock);
-  // Held by this test's own process, which is alive: never broken while it is young.
+  // Held by this test's own process, which is alive: never broken while it is young. Its time is set an hour ahead, so
+  // it stays young by the wall clock however long the machine stalls or sleeps before the guard looks.
   writeFileSync(join(lock, 'pid'), String(process.pid));
+  const ahead = new Date(Date.now() + 3600 * 1000);
+  utimesSync(lock, ahead, ahead);
   const r = stage(H, t, it, { post: false }).pre;
   refused(r, /another call to them was being checked at this moment/);
   nothingLeft(H);

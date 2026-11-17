@@ -6,10 +6,12 @@
 //   historyId, id, internalDate (epoch ms as a text), labelIds, sender (a bare address), sizeEstimate, threadId,
 //   toRecipients, viewUrl }; MINIMAL adds subject and snippet (not seen in a real call).
 // - get_thread(threadId, messageFormat): { id, messageCount, messages, viewUrl }. messageCount counts the thread's
-//   drafts; messages leaves them out.
+//   drafts; messages leaves them out (floorboss's guard holds on a count above the messages shown, a draft included:
+//   it can't tell a draft from a reply left out).
 // - search_threads(query, pageSize <= 50, pageToken, view): { resultCountEstimate (a text, "1"), threads: [{ id,
 //   messageCount (drafts counted), messages: up to five related messages, viewUrl }], nextPageToken? }, or {} for no
-//   match. Drafts are left out of messages; sent mail is in.
+//   match. Drafts are left out of messages; sent mail is in. view THREAD_VIEW_METADATA_ONLY gives each message as
+//   METADATA_ONLY (no subject or snippet); any other view, or none, as MINIMAL (subject and snippet too).
 // - get_message(messageId, messageFormat): one message, the same fields.
 // - create_draft(to[], subject, body, replyToMessageId?): threads only by replyToMessageId; answers { id (the draft's,
 //   "r" and digits), messageId, threadId, viewUrl }.
@@ -175,7 +177,7 @@ serve('gmail-real', {
         threads: page.map((tid) => ({
           id: tid,
           messageCount: countOf(tid, all),
-          messages: hit.filter((m) => m.threadId === tid).slice(0, 5).map((m) => shape(m, 'METADATA_ONLY')),
+          messages: hit.filter((m) => m.threadId === tid).slice(0, 5).map((m) => shape(m, args.view === 'THREAD_VIEW_METADATA_ONLY' ? 'METADATA_ONLY' : 'MINIMAL')),
           viewUrl: url('all', tid)
         })),
         ...(start + size < ids.length ? { nextPageToken: `p${start + size}` } : {})

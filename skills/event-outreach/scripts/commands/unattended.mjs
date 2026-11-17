@@ -41,7 +41,7 @@ export function authoriseUnattended(opts) {
 
 // draft-missing --event <slug> --id <c…> --touch <n> --said "<the user's words>": the user looked, and an unattended
 // draft the guard let through (its result never came back, or the call failed) isn't in their drafts folder. Its step
-// may go in again: on its own on a later run, if it is still in its window, or with them there. Only with them there,
+// may go in again: on its own from the next day (that day frees no day), if it is still in its window, or with them there. Only with them there,
 // and only for a step let through unattended, or with a draft of it (any of its texts) tried with them there and no
 // receipt for it, with no draft recorded, or one with a draft of an older text of it recorded (the user deleted it). This records nothing: floorboss's guard asks the
 // user in a Claude Code prompt that names the person and the step, and its PostToolUse hook writes stage_cleared to the
@@ -68,7 +68,7 @@ export function draftMissing(opts) {
   return {
     step: `${opts.id}:${touch}`,
     marker: `FLOORBOSS-DRAFT-MISSING-OK:${slug}:${opts.id}:${touch}`,
-    note: "If you allowed Claude Code's prompt, this follow-up can go into your drafts again once this call finishes: on its own on its day (or the day after), or with you there. If you declined, nothing changed."
+    note: "If you allowed Claude Code's prompt, this follow-up can go into your drafts again once this call finishes: on its own from the next day (if that is still its due day or the day after), or with you there. If you declined, nothing changed."
   };
 }
 

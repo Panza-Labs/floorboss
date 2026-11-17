@@ -46,7 +46,7 @@ drafts folder" or "tried and failed", and the user says it isn't there (they loo
 after their name), `--touch` (the step: the follow-up's number plus one, so follow-up 1 is `--touch 2`), and
 `--said` with their own words.
 Claude Code then asks the user to confirm, naming the person and the follow-up; once they allow it, that step can go
-in again. Never run it without their word that they looked, and never answer that prompt for them.
+in again (on its own from the next day). Never run it without their word that they looked, and never answer that prompt for them.
 
 `unattended_authorise`: one question, yes or "not now". On their yes, the answer's result has `run_this`: run that
 command as it is, with nothing before or after it. Claude Code then shows the user every follow-up in full, and only

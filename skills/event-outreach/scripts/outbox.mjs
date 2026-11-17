@@ -52,9 +52,9 @@ function card(c, hosts = [], app = null) {
   // page offers it to send.
   const hold = c.not_going || c.not_today;
   const li = !hold && !c.pending && !c.may_have_gone && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
-  // Nothing to copy: it can't go any more, or not today, it waits for approval, or floorboss let it through and it may
-  // have gone.
-  const copy = !hold && !c.pending && !c.may_have_gone;
+  // Nothing to copy: it can't go any more, or not today, it waits for approval, floorboss let it through and it may
+  // have gone, or it is in your drafts folder already (a copy pasted by hand would be a second message).
+  const copy = !hold && !c.pending && !c.may_have_gone && !c.staged;
   const channel =
     c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
@@ -83,6 +83,7 @@ function card(c, hosts = [], app = null) {
   ${failed}
   ${c.checks_stuck?.length ? `<p class="failnote">Still fails floorboss's checks after three rewrites: ${e(c.checks_stuck.join('; '))}. Edit it or drop it; it isn't offered for approval as it is.</p>` : ''}
   ${c.not_going ? `<p class="failnote">Not going: ${e(c.not_going)}. Don't send it.</p>` : c.not_today ? `<p class="failnote">Not today: ${e(c.not_today)}. Send it on another day: one message a day to a person, across all your events.</p>` : ''}
+  ${c.staged && !c.not_going ? `<p class="failnote">It is in your mailbox drafts${c.staged_unattended ? ', put there on its own' : ''}: send it from your drafts folder, not a copy of it.</p>` : ''}
   ${
     c.may_have_gone
       ? `<p class="failnote">floorboss let this message through to send${/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(c.may_have_gone) ? ` (${e(c.may_have_gone.slice(0, 16).replace('T', ' '))} UTC)` : ''} and nothing says what happened: it may have gone. Look in your sent mail, then record it as sent, or say to send it again. Don't copy it.</p>`

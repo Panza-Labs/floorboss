@@ -436,7 +436,7 @@ When floorboss's summary says a follow-up "may or may not be in your drafts fold
 until the user looks. If they say it isn't there, run
 `node "${CLAUDE_PLUGIN_ROOT}/skills/event-outreach/scripts/cli.mjs" draft-missing --event <slug> --id <id> --touch "<step>" --said "<their words>"`,
 with the person's id the summary names and the step: follow-up 1 is step 2, follow-up 2 is step 3. Claude Code
-asks them to confirm, naming the person and the follow-up. Once they allow it, that follow-up can go into their drafts again: on its own on its day (or the day after), or with
-them there. If they say it is there, nothing needs recording: they send it, and floorboss sees it sent the next time
+asks them to confirm, naming the person and the follow-up. Once they allow it, that follow-up can go into their drafts again: on its own from the next day (if that is still its due day or the
+day after), or with them there. If they say it is there, nothing needs recording: they send it, and floorboss sees it sent the next time
 it reads their mailbox. Never run `draft-missing` on your own, or before they looked.
 

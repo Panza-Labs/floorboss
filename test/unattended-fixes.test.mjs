@@ -302,6 +302,13 @@ test('B2: a draft call that fails, or whose result never comes back, stops the r
   const c = bashCall(H, scriptCmd('event-outreach', 'draft-missing', '--event', H.slug, '--id', H.ana, '--touch', '2', '--said', 'Ana-isnt-in-my-drafts'), { now: D13 });
   assert.equal(c.pre.decision, 'ask', c.pre.stderr);
   assert.ok(ledgerOf(H).some((e) => e.type === 'stage_cleared' && e.who === 'user'));
+  // The same day it waits: your word gives no day back (test/unattended-fixes-8.test.mjs S-F1b).
+  const { t: t1 } = await ready(H);
+  const same = stage(H, t1, stageItem(H, t1), { post: false }).pre;
+  assert.equal(same.code, 2, `${same.code} ${same.decision} ${same.stderr}`);
+  assert.match(same.stderr, /another message to them already went or is going today \(one a day\)/);
+  // The next day it goes in again.
+  H.now = D14;
   const { t: t2 } = await ready(H);
   assert.equal(stage(H, t2, stageItem(H, t2)).pre.decision, 'allow', 'it goes in again');
   // And only once more: the same step can't be taken twice on the one clear.
@@ -634,7 +641,7 @@ test('R3-4: a draft that may not be there: the summary and the next day\'s line 
   hook(H, { hook_event_name: 'PostToolUseFailure', tool_name: 'mcp__mail__create_draft', tool_input: input, tool_use_id: 's1', session_id: t.session, error: 'MCP error -32603: quota exceeded', is_interrupt: false }, { args: ['post'], env: { FLOORBOSS_UNATTENDED: t.token } });
   const day = new Date(Date.parse(D13)).toLocaleDateString('sv');
   const sum = inHome(H, () => buildSummary(logOf(H), day));
-  assert.match(sum, /Tried and failed: 1\n- .*quota exceeded\. Look in your drafts folder\. If it isn't there, tell floorboss in a session \("Ana Berg's draft isn't in my drafts"\): it runs outreach draft-missing, Claude Code asks you to confirm, and that follow-up can go in again\./);
+  assert.match(sum, /Tried and failed: 1\n- .*quota exceeded\. Look in your drafts folder\. If it isn't there, tell floorboss in a session \("Ana Berg's draft isn't in my drafts"\): it runs outreach draft-missing, Claude Code asks you to confirm, and that follow-up can go in again, on its own from the next day\./);
   // The same words for a draft whose result never came back.
   const s2 = 'a1b2c3d4-0000-4000-8000-000000000001';
   const open = inHome(H, () => buildSummary([{ at: D13, type: 'draft_allowed', session: s2, event: H.slug, id: H.ana, touch: 2, name: 'Ana Berg', to: ANA }], day));

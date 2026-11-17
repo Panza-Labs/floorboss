@@ -312,6 +312,12 @@ export function summary(opts) {
     const sends = homeSends();
     for (const w of waiting) {
       if (w.touch === 0 || w.coordinate_note) continue;
+      // Only a message due today, as the outbox card has it (commands/cards.mjs): a follow-up whose day hasn't come, or
+      // that waits for the message before it, isn't "not today" for this reason.
+      if (w.touch > 1) {
+        const due = followupDayOf(c, w.id, w.touch, savedDraft(c, w.id, w.touch));
+        if (due && (due.waits || !due.day || due.day > c.today)) continue;
+      }
       const to = c.state[w.id]?.touches?.[w.touch]?.approved?.to;
       const busy = to ? addressBusyToday(c.paths.dir, to, c.now.getTime(), w.id, sends) : null;
       if (busy) w.not_today = busyWhy(busy, w.name || w.id, to);

@@ -73,7 +73,7 @@ test('R3-14a: the claude.ai Gmail connector: message 1\'s id and thread come fro
     // Each read exactly as pinned: the whole thread, metadata only; anything from them since the day before.
     assert.ok(r.seen.includes(`get_thread ${JSON.stringify({ threadId: BASE.m1.threadId, messageFormat: 'METADATA_ONLY' })}`), r.seen.join('\n'));
     // (Every folder, from or to them, from 15 minutes before the guard let message 1 through, in epoch seconds.)
-    assert.ok(r.seen.includes(`search_threads ${JSON.stringify({ query: `in:anywhere {from:${ANA} to:${ANA}} after:${Math.floor((Date.parse(NOW) - 15 * 60000) / 1000)}`, pageSize: 50 })}`), r.seen.join('\n'));
+    assert.ok(r.seen.includes(`search_threads ${JSON.stringify({ query: `in:anywhere {from:${ANA} to:${ANA}} after:${Math.floor((Date.parse(NOW) - 15 * 60000) / 1000)}`, pageSize: 50, view: 'THREAD_VIEW_METADATA_ONLY' })}`), r.seen.join('\n'));
     const staged = ledgerOf(H).find((e) => e.type === 'staged' && e.touch === 2);
     assert.equal(staged?.thread_id, BASE.m1.threadId, JSON.stringify(style));
     const w = logOf(H).filter((e) => e.type === 'read_witnessed');

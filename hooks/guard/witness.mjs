@@ -216,13 +216,21 @@ export function mailWitness(resp, { own = [], sinceMs, thread = false }) {
   if (!r.ok) return { readable: false, why: r.why };
   const m = mailMessages(r.value);
   if (!m.ok) return { readable: false, why: m.why };
-  // A whole thread (get_thread): its messageCount counts its drafts, which messages leaves out, so a count above the
-  // messages shown is a draft (one of the follow-up's own, or yours), not part of the thread missing. A count that isn't
-  // a whole number, or is below the messages shown, isn't an answer floorboss can read.
-  if (thread && r.value && typeof r.value === 'object' && r.value.messageCount != null) {
-    const c = r.value.messageCount;
-    if (!(Number.isInteger(c) && c >= 0)) return { readable: false, why: "the thread's message count in the answer isn't a number" };
-    if (c < m.messages.length) return { readable: false, why: `the thread shows ${m.messages.length} messages but counts ${c}` };
+  // A whole thread (get_thread): only the connector's own keys (id, messageCount, messages, viewUrl). Anything beside
+  // them (omittedContent, which it gives when it filtered something out, or a key floorboss doesn't know) is unreadable.
+  // Its messageCount counts its drafts, which messages leaves out, but a count above the messages shown can't be told
+  // from a reply left out, so it holds (a draft in that thread before an unattended draft goes in costs only a held
+  // draft). A count that isn't a whole number, or is below the messages shown, isn't an answer floorboss can read.
+  if (thread) {
+    const v = isPlainObject(r.value) ? r.value : {};
+    const extra = Object.keys(v).filter((k) => !['id', 'messageCount', 'messages', 'viewUrl'].includes(k));
+    if (extra.length) return { readable: false, why: `the thread answered with "${oneLine(extra[0], 40)}" beside its messages, which isn't the connector's answer` };
+    if (v.messageCount != null) {
+      const c = v.messageCount;
+      if (!(Number.isInteger(c) && c >= 0)) return { readable: false, why: "the thread's message count in the answer isn't a number" };
+      if (c < m.messages.length) return { readable: false, why: `the thread shows ${m.messages.length} messages but counts ${c}` };
+      if (c > m.messages.length) return { readable: false, why: `the thread shows ${m.messages.length} of its ${c} messages (a draft in it counts, and can't be told from a reply left out), so floorboss can't tell what the rest say` };
+    }
   }
   const isMine = ownTest(own);
   if (!isMine) return { readable: false, why: "floorboss doesn't know your own address (own_email), so it can't tell your messages from theirs" };
@@ -272,10 +280,17 @@ export function mailFromWitness(resp, { own = [], contact = null, sinceMs = NaN,
   if (!t.ok) return { readable: false, why: t.why };
   if (t.paged) return { readable: false, why: 'the search answered with more pages: floorboss reads a whole answer only' };
   // Beside its conversations, the claude.ai Gmail connector gives its own guess of how many matched
-  // (resultCountEstimate, a text such as "1"): allowed as that, never read. Any other key (omittedContent, which it
+  // (resultCountEstimate, a text such as "1"): allowed as that, and read only to hold (below). Any other key (omittedContent, which it
   // gives when it filtered something out, or one floorboss doesn't know) is unreadable.
   const extra = Object.keys(r.value).filter((k) => k !== 'threads' && !(k === 'resultCountEstimate' && (typeof r.value[k] === 'string' || typeof r.value[k] === 'number')));
   if (extra.length) return { readable: false, why: `the search answered with "${oneLine(extra[0], 40)}" beside its conversations, which isn't the connector's answer` };
+  // Its guess is read only to hold: a guess above the conversations shown, with no page token, may be conversations left
+  // out. A guess that isn't a number is unreadable.
+  if (r.value.resultCountEstimate != null) {
+    const est = String(r.value.resultCountEstimate).trim();
+    if (!/^\d+$/.test(est)) return { readable: false, why: "the search's count of what it matched isn't a number" };
+    if (Number(est) > t.threads.length) return { readable: false, why: `the search says it matched ${Number(est)} conversations but shows ${t.threads.length}, so floorboss can't tell what the rest say` };
+  }
   const isMine = ownTest(own);
   if (!isMine) return { readable: false, why: "floorboss doesn't know your own address (own_email), so it can't tell your messages from theirs" };
   const them = addressOf(contact);

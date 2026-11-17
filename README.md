@@ -417,7 +417,8 @@ run floorboss (it reads your mailbox for it).
 floorboss can't see replies on LinkedIn or in the event app in an unattended run. Check those inboxes regularly and
 tell floorboss or your CRM when one comes in. If you wrote to someone there, their email follow-up still goes into
 your drafts on its day, and the morning page (with the [morning brief](#the-morning-brief-on-its-own) installed)
-names each of them that day.
+names each of them that day. It names only those whose draft the launcher will put in that day, by its own checks
+(one message a day across your events included).
 
 To see what it did: each day's summary is in `~/.floorboss/unattended/summary-<day>.md`, built from its log only,
 with times in the event's zone. It lists every draft put in, every hold and why, every CRM activity Claude judged
@@ -425,7 +426,7 @@ with the reason it gave, and any due follow-up that couldn't go in and why (floo
 before the run, a weekend in the event's zone, an earlier draft not seen sent). A draft whose result never came
 back is listed as "may or may not be in your drafts folder": look, and if it isn't there, tell floorboss ("Ana's
 draft isn't in my drafts"). Claude runs `outreach draft-missing`, Claude Code asks you to confirm, naming the person
-and the follow-up, and it can go in again. If you change and approve the text of a follow-up after a draft of it went
+and the follow-up, and it can go in again: on its own from the next day, or with you there. If you change and approve the text of a follow-up after a draft of it went
 in, the new one waits until you delete the old draft and tell floorboss it's gone the same way. Your next floorboss
 run shows the summary first, and Claude Code mentions it once in any session. The event's ledger marks those drafts as unattended.
 

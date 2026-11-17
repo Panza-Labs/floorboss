@@ -157,10 +157,18 @@ function followupNotices(now) {
   } catch {
     return out;
   }
+  // Only the people the launcher puts on a ticket today, by its own checks (followupsDue, at any hour of the day): the
+  // page and the launcher never disagree about whose draft goes in.
+  let going;
+  try {
+    going = new Set(followupsDue(now, null, { anyHour: true }).items.map((x) => `${x.event}:${x.id}:${x.touch}`));
+  } catch {
+    return out;
+  }
   for (const { slug } of liveOptins(now))
     try {
       const settings = { ...loadEvent(slug).settings, connectors: config.connectors || {} };
-      out.push(...otherChannelPeople(slug, { settings, nowMs: now }));
+      out.push(...otherChannelPeople(slug, { settings, nowMs: now, only: (a) => going.has(`${slug}:${a.id}:${a.touch}`) }));
     } catch {
       /* named nowhere */
     }
@@ -397,7 +405,9 @@ const PLUGIN_VERSION = (() => {
 // thread and mail tools are the ones authorised, on its due day or the day after, before the event's end, on a weekday
 // between 09:00 and 17:00 event time. held: the ones that can't go and won't by waiting (said once a day in the log).
 // Pure: it reads and writes nothing else.
-export function followupsDue(now = nowMs(), log = null) {
+// anyHour: also outside the event's hours on a weekday (the morning page, written before they start, names who the
+// launcher will put on a ticket today by these same checks).
+export function followupsDue(now = nowMs(), log = null, { anyHour = false } = {}) {
   const items = [];
   const held = [];
   // Due, but blocked by something waiting can't fix on its own today: said once in the log, so the user hears why.
@@ -470,7 +480,7 @@ export function followupsDue(now = nowMs(), log = null) {
         const step = before > 1 ? `follow-up ${before - 1}` : 'first message';
         if (b?.staged) wait(`it waits until floorboss sees your ${step} draft was sent: once you've sent it from your mail app, run floorboss (it reads your mailbox for it)`);
         else if (b?.stage_released)
-          wait(`floorboss doesn't know whether your ${step} draft went into your drafts folder (the mail tool never said it did), so this one waits. Look there. If it's there, send it, then run floorboss (it reads your mailbox for it). If it isn't, tell floorboss it isn't there (outreach draft-missing) and that draft can go in again`);
+          wait(`floorboss doesn't know whether your ${step} draft went into your drafts folder (the mail tool never said it did), so this one waits. Look there. If it's there, send it, then run floorboss (it reads your mailbox for it). If it isn't, tell floorboss it isn't there (outreach draft-missing) and that draft can go in again, on its own from the next day`);
         continue;
       }
       const due = followupDueDay(evDir, settings, entries, state[a.id] || {}, { id: a.id, touch: a.touch }, now);
@@ -485,17 +495,17 @@ export function followupsDue(now = nowMs(), log = null) {
         }
       }
       // One message a day to a person, at this event and across all your events (the guard's rules: lib/sendcheck.mjs
-      // sentOrGoingToday and addressBusyToday): someone another message went or is going to today waits for another
-      // day, with no model run spent on them today.
+      // sentOrGoingToday and addressBusyToday): someone another message went or is going to today waits for the user,
+      // with no model run spent on them today (on a later day, that message holds them too: crossEventWhy below).
       if (sentOrGoingToday(entries, state[a.id] || {}, { id: a.id, touch: a.touch, to: a.to }, evDir, now) != null) {
-        wait(`another message to ${name} already went or is going today: one message a day to a person, so it waits for another day`);
+        wait(`another message to ${name} already went or is going today: one message a day to a person, so it waits for you`);
         continue;
       }
       {
         sends ||= homeSends();
         const busy = addressBusyToday(evDir, a.to, now, a.id, sends);
         if (busy) {
-          wait(`${busyWhy(busy, name, a.to)}. One message a day to one person, across all your events`);
+          wait(`${busyWhy(busy, name, a.to)}. One message a day to one person, across all your events, so it waits for you`);
           continue;
         }
       }
@@ -546,8 +556,9 @@ export function followupsDue(now = nowMs(), log = null) {
         if (weekendIn(ev.time_zone, now)) {
           const place = String(ev.time_zone).split('/').pop().replace(/_/g, ' ');
           wait(`it's the weekend in ${place}, and drafts go in on their own on weekdays only (Monday to Friday, ${place} time), so it can't go in on its own today`);
+          continue;
         }
-        continue;
+        if (!anyHour) continue;
       }
       const thread = emailBefore(p, a.touch, a.to)?.thread || null;
       if (!authorisationFor({ event: slug, id: a.id, touch: a.touch, hash: a.hash, to: a.to }, { stageFp, readFp, thread })) {

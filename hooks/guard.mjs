@@ -37,7 +37,7 @@ import { appendLine, writeText } from '../lib/jsonio.mjs';
 import { isMain } from '../lib/main.mjs';
 import { nowMs as clockNow } from '../lib/clock.mjs';
 import { readJsonStrict, fold, leaves, squash } from './guard/shared.mjs';
-import { dayMarker, sendLocks, ownerOf, takeMarker, dropMarkers } from './guard/daymark.mjs';
+import { dayMarker, sendLocks, ownerOf, takeMarker, dropMarkers, dayResetsOf } from './guard/daymark.mjs';
 // How long a draft's call into the mailbox counts as going in now: a second call for it in that time is refused.
 const STAGE_IN_FLIGHT_MS = 30 * 1000;
 // A send's lock per address is broken as stale only past this age: well over the guard's own deadline and Claude
@@ -645,30 +645,6 @@ if (isMain(import.meta.url)) {
           process.exit(2);
         }
         const evDir = join(home(), 'events', it._event);
-        // One message a day to a person across all your events, for a draft too: checked again under the send locks for
-        // the person's addresses (hooks/guard/daymark.mjs sendLocks), so a send at another event that is between its
-        // check and its release is waited for and counted. (A draft writes no release: one staged here holds nothing at
-        // another event. You send it yourself.)
-        if ((it.touch ?? 1) !== 0) {
-          let why = null;
-          try {
-            why = withLocks(
-              sendLocks(evDir, it.id, it.to),
-              () => {
-                const busy = addressBusyToday(evDir, it.to, nowMs, it.id);
-                return busy ? busyWhy(busy, promptPerson(nameOfStaged(evDir, it), it.id), it.to) : null;
-              },
-              { staleMs: SEND_LOCK_STALE_MS }
-            );
-          } catch (e) {
-            if (/^another floorboss process is busy with send-/.test(String(e?.message))) why = SEND_BUSY;
-            else throw e;
-          }
-          if (why) {
-            process.stderr.write(`floorboss blocked this call: the draft can't go into your drafts now: ${why}\n`);
-            process.exit(2);
-          }
-        }
         const batch = stageBatch(evDir);
         const marker = readJsonStrict(join(evDir, 'stage-asked.json'), null);
         const key = `${fold(it.to)}|${it.id}|${it.touch ?? 1}`;
@@ -680,25 +656,59 @@ if (isMain(import.meta.url)) {
         mkdirSync(join(evDir, 'released'), { recursive: true, mode: 0o700 });
         const wentIn = marker?.batch === batch && existsSync(join(evDir, 'released', `stage-${it.id}-${it.touch ?? 1}-${batch}`));
         const callMark = (n) => join(evDir, 'released', `stage-call-${it.id}-${it.touch ?? 1}-${batch}-${n}`);
-        let n = 0;
-        while (existsSync(callMark(n + 1))) n++;
         let inFlight = false;
-        if (n > 0) {
-          const was = Date.parse(readFileSync(callMark(n), 'utf8'));
-          // Done once the PostToolUse hook saw that call run (it writes <marker>.done).
-          inFlight = !existsSync(`${callMark(n)}.done`) && (!Number.isFinite(was) || nowMs - was < STAGE_IN_FLIGHT_MS);
-        }
-        if (!inFlight && !wentIn) {
-          try {
-            writeFileSync(callMark(n + 1), new Date(nowMs).toISOString(), { flag: 'wx', mode: 0o600 });
-          } catch (e) {
-            if (e.code !== 'EEXIST') throw e;
-            inFlight = true;
+        const takeCallMark = () => {
+          let n = 0;
+          while (existsSync(callMark(n + 1))) n++;
+          if (n > 0) {
+            const was = Date.parse(readFileSync(callMark(n), 'utf8'));
+            // Done once the PostToolUse hook saw that call run (it writes <marker>.done).
+            inFlight = !existsSync(`${callMark(n)}.done`) && (!Number.isFinite(was) || nowMs - was < STAGE_IN_FLIGHT_MS);
           }
-          // Noted for this call, so its post hook marks this mark done however late its prompt is answered, also once the
-          // list is out of date or written again (hooks/guard/after-call.mjs).
-          if (!inFlight) noteStageCall(String(input.tool_use_id), { event: it._event, id: it.id, touch: it.touch ?? 1, mark: `stage-call-${it.id}-${it.touch ?? 1}-${batch}-${n + 1}` }, nowMs);
-        }
+          if (!inFlight && !wentIn) {
+            try {
+              writeFileSync(callMark(n + 1), new Date(nowMs).toISOString(), { flag: 'wx', mode: 0o600 });
+            } catch (e) {
+              if (e.code !== 'EEXIST') throw e;
+              inFlight = true;
+            }
+            // Noted for this call, so its post hook marks this mark done however late its prompt is answered, also once the
+            // list is out of date or written again (hooks/guard/after-call.mjs).
+            if (!inFlight) noteStageCall(String(input.tool_use_id), { event: it._event, id: it.id, touch: it.touch ?? 1, mark: `stage-call-${it.id}-${it.touch ?? 1}-${batch}-${n + 1}` }, nowMs);
+          }
+        };
+        // One message a day to a person across all your events, for a draft too: checked again under the send locks for
+        // the person's addresses (hooks/guard/daymark.mjs sendLocks), so a send at another event that is between its
+        // check and its release is waited for and counted. (A draft writes no release: one staged here holds nothing at
+        // another event. You send it yourself.) The step itself is read again under them too, and its call mark is taken
+        // under them: an unattended draft of the same step takes the same locks, writes its release under them and reads
+        // the call marks under them (hooks/guard/unattended.mjs), so of the two only one gets through.
+        if ((it.touch ?? 1) !== 0) {
+          let why = null;
+          try {
+            why = withLocks(
+              sendLocks(evDir, it.id, it.to),
+              () => {
+                const busy = addressBusyToday(evDir, it.to, nowMs, it.id);
+                if (busy) return busyWhy(busy, promptPerson(nameOfStaged(evDir, it), it.id), it.to);
+                const x = eventRecord(evDir).folded?.people?.[it.id]?.touches?.[it.touch ?? 1];
+                if (x?.sent) return 'it was already sent';
+                if (x?.staged) return 'its draft is already in your drafts';
+                if (x?.stage_released) return 'its draft already went into your drafts on its own (an unattended run): check your drafts folder';
+                takeCallMark();
+                return null;
+              },
+              { staleMs: SEND_LOCK_STALE_MS }
+            );
+          } catch (e) {
+            if (/^another floorboss process is busy with send-/.test(String(e?.message))) why = SEND_BUSY;
+            else throw e;
+          }
+          if (why) {
+            process.stderr.write(`floorboss blocked this call: the draft can't go into your drafts now: ${why}\n`);
+            process.exit(2);
+          }
+        } else takeCallMark();
         if (inFlight && !wentIn) {
           process.stderr.write(
             `floorboss blocked this call: a call to put the draft to ${promptPerson(nameOfStaged(evDir, it), it.id)} in your drafts started under ${STAGE_IN_FLIGHT_MS / 1000} seconds ago (it may still be going in, or it was declined or failed). If the draft is there, save its receipt (outreach staged); if not, try again after ${STAGE_IN_FLIGHT_MS / 1000} seconds.\n`
@@ -908,9 +918,8 @@ if (isMain(import.meta.url)) {
       // through the same: it is released when it is typed. The release is the last thing written before the answer.
       for (const it of [...sent, ...typedNotes]) {
         const evDir = join(home(), 'events', it._event);
-        const resets = eventRecord(evDir).entries.filter(
-          (e) => e.id === it.id && e.touch === it.touch && ['release_cleared', 'bounced'].includes(e.type)
-        ).length;
+        // (One day rule with the unattended draft: hooks/guard/daymark.mjs DAY_RESETS.)
+        const resets = dayResetsOf(eventRecord(evDir).entries, it.id, it.touch);
         const mdir = join(evDir, 'released');
         mkdirSync(mdir, { recursive: true, mode: 0o700 });
         const own = join(mdir, `${it.id}-${it.touch}-${resets}`);
@@ -956,7 +965,7 @@ if (isMain(import.meta.url)) {
                 const busy = addressBusyToday(evDir, it.to, nowMs, it.id);
                 if (busy) return `${busyWhy(busy, promptPerson(it.name, it.id), it.to)}. One message a day to one person, across all your events.`;
                 const day = eventDay(evDir, nowMs) || new Date(nowMs).toISOString().slice(0, 10);
-                const cleared = (o) => eventRecord(join(home(), 'events', o.slug)).entries.filter((x) => x.id === o.id && x.touch === o.touch && ['release_cleared', 'bounced'].includes(x.type)).length;
+                const cleared = (o) => dayResetsOf(eventRecord(join(home(), 'events', o.slug)).entries, o.id, o.touch);
                 const got = takeMarker(dayMarker(evDir, it, day), ownerOf(it._event, it, resets), cleared);
                 if (!got) return `another message to ${promptPerson(it.name, it.id)} already went or is going today. One message a day to one person.`;
                 took.push(got);

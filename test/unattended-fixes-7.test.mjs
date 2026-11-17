@@ -198,7 +198,7 @@ test('F6-S2-2b: attendedDraftIn is keyed by person and step, and a receipt or yo
   assert.equal(attendedDraftIn(ev, 'c002', 2, []), null);
 });
 
-test('F6-docs: the search is said as every folder but Spam, as SECURITY.md says it; your word gives the step its day back', () => {
+test('F6-docs: the search is said as every folder but Spam, as SECURITY.md says it; your word gives no day back', () => {
   const SENT = /searches every folder but Spam, which Gmail leaves out, and floorboss can only show that the search covered your own last email and the time since, not that it matched mail from them/i;
   for (const f of ['README.md', 'CHANGELOG.md', 'commands/unattended.md']) {
     assert.match(flat(f), SENT, f);
@@ -213,8 +213,20 @@ test('F6-docs: the search is said as every folder but Spam, as SECURITY.md says 
   assert.match(sec, /every message from them or from anyone else but you holds the draft, whatever its date says/);
   assert.doesNotMatch(sec, /one that shows only older dates matched on a message/);
   assert.match(sec, /holds that step's unattended draft as "may or may not be in your drafts", in the launcher and the guard, whatever text it was for/);
-  // V-R2-3 (owner's call, kept): after your word the step's next draft may go in the same day, and SECURITY.md says so.
-  assert.match(sec, /gives that step its day back, so its next draft can go in the same day as the one you said isn't there/);
+  // V-R2-3, reversed by the owner (2026-11-17, with the integrate security fix F1): after your word the step's next
+  // draft waits until the next day (test/unattended-fixes-8.test.mjs S-F1b), and every place that says it says so.
+  assert.match(sec, /lets that step's draft go in once more, but gives no day back: its next draft waits until the next day/);
+  assert.match(sec, /let that step go in again, once, from the next day/);
+  for (const f of ['SECURITY.md', 'README.md', 'CHANGELOG.md', 'commands/unattended.md', 'skills/event-outreach/SKILL.md', 'skills/flow/SKILL.md', 'hooks/guard/unattended.mjs', 'skills/event-outreach/scripts/commands/unattended.mjs', 'lib/unattended-drafts.mjs', 'scripts/scheduled.mjs'])
+    assert.doesNotMatch(flat(f), /day back, so|go in the same day|on its own on its day \(or the day after\)|can go in again\. If it is there|can go in again`/, f);
+  assert.match(flat('README.md'), /and it can go in again: on its own from the next day, or with you there/);
+  assert.match(flat('CHANGELOG.md'), /once you confirm at Claude Code's prompt, on its own from the next day\)/);
+  assert.match(flat('hooks/guard/unattended.mjs'), /that follow-up can go into your drafts once more: on its own from the next day \(if that is still its due day or the day after\), or with you there\./);
+  assert.match(flat('skills/event-outreach/scripts/commands/unattended.mjs'), /this follow-up can go into your drafts again once this call finishes: on its own from the next day/);
+  assert.match(flat('lib/unattended-drafts.mjs'), /that follow-up can go in again, on its own from the next day\. If it is there/);
+  assert.match(flat('scripts/scheduled.mjs'), /that draft can go in again, on its own from the next day`/);
+  assert.match(flat('skills/event-outreach/SKILL.md'), /that follow-up can go into their drafts again: on its own from the next day/);
+  assert.match(flat('skills/flow/SKILL.md'), /that step can go in again \(on its own from the next day\)/);
   const sr = flat('examples/standins/README.md');
   assert.match(sr, /answers as real calls to the claude\.ai Gmail connector answered \(15 November 2026\)/);
 });
@@ -240,15 +252,17 @@ const REAL_THREAD = (messages, count = messages.length) => ({ id: 'T1', messageC
 test('F6-G1: a search answer with Gmail\'s resultCountEstimate reads clean; omittedContent or any other key beside it holds', () => {
   const ok = mailFromWitness(text({ resultCountEstimate: '1', threads: [REAL_THREAD([REAL_MSG()])] }), SO);
   assert.deepEqual([ok.readable, ok.found_by, ok.inbound, ok.others, ok.own_after], [true, 'id', 0, 0, 0], JSON.stringify(ok));
-  // Its value is never read: a wrong guess changes nothing.
-  for (const v of ['0', '201', 7]) assert.equal(mailFromWitness(text({ resultCountEstimate: v, threads: [REAL_THREAD([REAL_MSG()])] }), SO).readable, true, String(v));
+  // Its value is read only to hold: a guess at or below the conversations shown changes nothing; one above them, or
+  // one that isn't a number, holds (test/unattended-fixes-8).
+  for (const v of ['0', 1]) assert.equal(mailFromWitness(text({ resultCountEstimate: v, threads: [REAL_THREAD([REAL_MSG()])] }), SO).readable, true, String(v));
+  for (const v of ['201', 7, 'many']) assert.equal(mailFromWitness(text({ resultCountEstimate: v, threads: [REAL_THREAD([REAL_MSG()])] }), SO).readable, false, String(v));
   for (const extra of [{ omittedContent: true }, { omittedContent: 'filtered' }, { resultCountEstimate: { n: 1 } }, { resultCountEstimate: null }, { resultSizeEstimate: 1 }, { nextPage: 'x' }]) {
     const w = mailFromWitness(text({ resultCountEstimate: '1', threads: [REAL_THREAD([REAL_MSG()])], ...extra }), SO);
     assert.equal(w.readable, false, `${JSON.stringify(extra)}: ${JSON.stringify(w)}`);
   }
   // The stand-in answers as the real connector did.
   const H = clone(GBASE);
-  const real = gcall(H, 'search_threads', { query: `in:anywhere {from:${ANA} to:${ANA}} after:${Math.floor(Date.parse('2026-10-12T07:45:00Z') / 1000)}`, pageSize: 50 });
+  const real = gcall(H, 'search_threads', { query: `in:anywhere {from:${ANA} to:${ANA}} after:${Math.floor(Date.parse('2026-10-12T07:45:00Z') / 1000)}`, pageSize: 50, view: 'THREAD_VIEW_METADATA_ONLY' });
   assert.deepEqual(Object.keys(real), ['resultCountEstimate', 'threads']);
   assert.equal(real.resultCountEstimate, '1');
   assert.deepEqual(Object.keys(real.threads[0]), ['id', 'messageCount', 'messages', 'viewUrl']);
@@ -267,10 +281,13 @@ test('F6-G1 e2e: a whole run over the stand-in\'s real search answer puts the dr
   assert.equal(releases(H).length, 1);
 });
 
-test('F6-G2: messageCount counts drafts: no hold in your own thread or the thread read; another conversation with more than it shows holds', () => {
-  // get_thread with a draft in it: messageCount 2, one message.
+test('F6-G2: messageCount counts drafts: the thread read holds on a count above what it shows; the search excuses only your own thread; another conversation with more than it shows holds', () => {
+  // get_thread with a draft in it: messageCount 2, one message. A draft can't be told from a reply left out, so it holds.
   const g = mailWitness(text(REAL_THREAD([REAL_MSG()], 2)), { own: [OWN], sinceMs: Date.parse('2026-10-11T00:00:00Z'), thread: true });
-  assert.deepEqual([g.readable, g.inbound, g.own_ids], [true, 0, ['m1']], JSON.stringify(g));
+  assert.equal(g.readable, false, JSON.stringify(g));
+  assert.match(g.why, /the thread shows 1 of its 2 messages/);
+  const g1 = mailWitness(text(REAL_THREAD([REAL_MSG()], 1)), { own: [OWN], sinceMs: Date.parse('2026-10-11T00:00:00Z'), thread: true });
+  assert.deepEqual([g1.readable, g1.inbound, g1.own_ids], [true, 0, ['m1']], JSON.stringify(g1));
   // A count below what it shows, or not a whole number, isn't an answer floorboss can read.
   for (const c of [0, '2', 1.5, -1]) assert.equal(mailWitness(text(REAL_THREAD([REAL_MSG()], c)), { own: [OWN], sinceMs: Date.parse('2026-10-11T00:00:00Z'), thread: true }).readable, false, String(c));
   // The search: your own thread with a draft in it reads clean.
@@ -283,15 +300,16 @@ test('F6-G2: messageCount counts drafts: no hold in your own thread or the threa
   assert.match(w.why, /shows 1 of the 2 messages/);
 });
 
-test('F6-G2 e2e: a draft of yours already in the thread (the stand-in counts it) doesn\'t hold the run', async () => {
+test('F6-G2 e2e: a draft of yours already in the thread (the stand-in counts it) holds the run', async () => {
   const H = clone(GBASE);
   // A draft reply the user made by hand in the thread of message 1: the stand-in's get_thread and search count it.
   gcall(H, 'create_draft', { to: [ANA], subject: 'Re: x', body: 'my own note', replyToMessageId: H.m1.id });
   const th = gcall(H, 'get_thread', { threadId: H.m1.threadId, messageFormat: 'METADATA_ONLY' });
   assert.deepEqual([th.messageCount, th.messages.length], [2, 1]);
   const r = await grun(H);
-  assert.ok(r.allowed, JSON.stringify(r.refused?.stderr || r.last || heldWhy(H)).slice(0, 400));
-  assert.equal(releases(H).length, 1);
+  assert.ok(!r.allowed, 'the draft went in');
+  assert.match(heldWhy(H), /the thread shows 1 of its 2 messages/);
+  assert.equal(releases(H).length, 0);
 });
 
 test('F6-G3: the draft\'s messageId and threadId from create_draft\'s answer are what floorboss records', async () => {

@@ -254,8 +254,9 @@ export function sendList(opts) {
     // A confirmation is for someone who booked; a reply or a booking stops everything else.
     const why =
       c.blocked(id) || (st.stopped ? 'they said stop' : d.kind === 'confirmation' ? null : st.replied ? 'they replied' : st.booked ? 'they booked' : null);
+    // Said for every step, the first message too: an approved message never drops off the list unsaid.
     if (why) {
-      if (t !== 1) waiting.push({ id, touch: t, why: `not sent: ${why}` });
+      waiting.push({ id, touch: t, why: `not sent: ${why}` });
       continue;
     }
     // With sending on, a first message goes only with its whole sequence approved: every planned follow-up in

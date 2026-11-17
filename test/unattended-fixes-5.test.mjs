@@ -232,6 +232,8 @@ test('F4-R1-N2b: on Gmail, a draft replying to your latest own message, but one 
   // release: held, even with a search answer that shows message 1.
   const H2 = clone(H);
   appendFileSync(join(H2.dir, 'ledger.jsonl'), `${JSON.stringify({ at: now, type: 'sent', id: H2.ana, touch: 2, date: '2026-10-13', source: 'mailbox', message_id: H2.m1.id, thread_id: H2.m1.threadId })}\n`);
+  // (Follow-up 1's draft left the thread: a draft still in it holds the thread read on its own, test/unattended-fixes-8.)
+  writeFileSync(join(H2.HOME, 'standin.json.drafts.json'), '[]');
   H2.now = D14;
   const m1 = gcall(H2, 'get_thread', { threadId: H2.m1.threadId, messageFormat: 'METADATA_ONLY' }).messages.find((x) => x.id === H2.m1.id);
   const r = await grun(H2, {

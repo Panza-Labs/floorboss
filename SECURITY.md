@@ -217,13 +217,15 @@ and that person's authorised draft. In that run those three calls skip your own 
   (get_thread, metadata only) and a search of every folder but Spam for anything from them or to them since 15
   minutes before the guard let that email or its draft through, in epoch seconds (only when that time is no later
   than the send's own record and the end of its day, with a day's slack), or else since the day before it
-  (search_threads). The
+  (search_threads, metadata only, so no subject or snippet reaches the run's model). The
   search must prove it covered that time: it must show your own last email to them (by its message id when floorboss
   has one, and then no other email of yours stands in for it; by a message of yours dated since the start only when
   it has none) and every message of each conversation it shows (only the thread of that email, which the thread read
-  reads whole, may show fewer; a message count must be a whole number). Gmail's message count includes a thread's
-  drafts, which it never shows: in the thread of your last email (in the search and in the thread read) a count above
-  what is shown is no hold, and in any other conversation it holds the draft. An empty answer, or one without your email,
+  reads whole, may show fewer; a message count must be a whole number). The search holds the draft when its own count
+  of matches is above the conversations it shows, or isn't a number. Gmail's message count includes a thread's
+  drafts, which it never shows. The thread read holds the draft whenever its count is above the messages it shows,
+  even when the rest is only a draft, and when it gives anything beside the thread's id, count, messages and link.
+  In any other conversation of the search, a count above what is shown holds the draft too. An empty answer, or one without your email,
   holds the draft as a search floorboss can't trust. Anything from them, from someone else in a conversation with
   them, or an email you wrote to them yourself after your last floorboss one holds it too. In the thread of your last
   email only what is dated since the start counts. In any other conversation the search shows, every message from
@@ -269,8 +271,8 @@ and that person's authorised draft. In that run those three calls skip your own 
   run's and under 90 seconds old and clean, every CRM judgement is in and "go", it is a weekday from 09:00 to 17:00
   in the event's zone, its due day or the next, not after the event's last day, and every check a send or a staged
   draft has (the recipe and its exact arguments, the thread, one message a day per person across your events, a
-  stop, a reply, a bounce). Your word that a draft isn't in your drafts folder (`outreach draft-missing`) gives that
-  step its day back, so its next draft can go in the same day as the one you said isn't there. It also reads every other event's ledger for that address: anything that holds the
+  stop, a reply, a bounce). Your word that a draft isn't in your drafts folder (`outreach draft-missing`) lets that
+  step's draft go in once more, but gives no day back: its next draft waits until the next day. It also reads every other event's ledger for that address: anything that holds the
   person there, or anything done about them there since the authorisation or the email it answers (an approval, a
   send, a draft, a hold, a decision of yours), holds the draft. All of it comes from the ledgers and the stored
   authorisation, never from the outbox page or another rendered view. It then takes a once-only mark and writes `stage_released` to the ledger, marked
@@ -280,14 +282,15 @@ and that person's authorised draft. In that run those three calls skip your own 
   it once, and the ledger marks the drafts as unattended. A draft let through whose result never came back is said
   as "may or may not be in your drafts folder": nothing else goes in for that person until you look; if it isn't
   there, your words (`outreach draft-missing`, which the guard puts to you in a Claude Code prompt naming the person
-  and the follow-up; only its PostToolUse hook writes `stage_cleared`) let that step go in again, once. A due follow-up that can't go in is
+  and the follow-up; only its PostToolUse hook writes `stage_cleared`) let that step go in again, once, from the next day. A due follow-up that can't go in is
   said too, once: floorboss in use in the 30 minutes before the run, a weekend in the event's zone, or an earlier draft
   floorboss hasn't seen sent yet. A finished case (they replied or booked) is said once, as over.
 - **Turning it off.** `/floorboss:unattended off` (allowed in any session) or `unattended.mjs off`: the same switch
   stops the brief. `uninstall-followups` removes the job. The opt-in ends with the event's last day.
 - **What it can't see.** Replies on LinkedIn or in the event app: check those inboxes regularly and tell floorboss
   or your CRM when one comes in. If you installed the morning brief, the morning page names the people written to
-  there whose draft can go in on its own that day.
+  there whose draft the launcher will put in on its own that day, by the launcher's own checks (one message a day
+  across your events included), so it never names someone whose draft isn't going in.
 
 ### What floorboss can't control
 
