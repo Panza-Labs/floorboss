@@ -204,10 +204,22 @@ const SINCE = Date.parse('2026-10-11T00:00:00Z');
 const MSG = { id: 'm1', sender: OWN, toRecipients: [ANA], date: '2026-10-12T08:00:00Z', internalDate: String(Date.parse('2026-10-12T08:00:00Z')), labelIds: ['SENT'], threadId: 'T1', viewUrl: 'x' };
 const TH = (extra = {}) => ({ id: 'T1', messageCount: 1, messages: [MSG], viewUrl: 'x', ...extra });
 
-test('S-F2a: the thread read holds on any key beside id, messageCount, messages and viewUrl, and on a count above the messages shown', () => {
+test('S-F2a: the thread read holds on any key beside id, messageCount, messages and viewUrl, on a count above the messages shown, and on no count at all', () => {
   const w = (v) => mailWitness(text(v), { own: [OWN], sinceMs: SINCE, thread: true });
   assert.equal(w(TH()).readable, true);
-  assert.equal(w({ id: 'T1', messages: [MSG] }).readable, true, 'no count, no viewUrl');
+  assert.equal(w({ id: 'T1', messageCount: 1, messages: [MSG] }).readable, true, 'no viewUrl');
+  // The connector always sends messageCount: an answer without one can't be shown to be the whole thread (review of
+  // 45bf380, item 3).
+  for (const v of [{ id: 'T1', messages: [MSG] }, { id: 'T1', messages: [MSG], viewUrl: 'x' }]) {
+    const r = w(v);
+    assert.equal(r.readable, false, JSON.stringify(v));
+    assert.match(r.why, /has no message count/);
+  }
+  for (const c of [null, '1', 1.5, -1, true, [1]]) {
+    const r = w(TH({ messageCount: c }));
+    assert.equal(r.readable, false, JSON.stringify(c));
+    assert.match(r.why, /message count in the answer isn't a number/);
+  }
   for (const extra of [{ omittedContent: 'Some content was filtered: 1 message' }, { omittedContent: true }, { resultSizeEstimate: 1 }, { snippet: 'x' }, { '': {} }]) {
     const r = w(TH(extra));
     assert.equal(r.readable, false, JSON.stringify(extra));

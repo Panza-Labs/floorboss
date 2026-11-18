@@ -68,7 +68,7 @@ import { check } from './check.mjs';
 import { listed, notRealEvent, fullText } from './sends.mjs';
 import { promptPerson, promptLine } from './prompts.mjs';
 import { shellWords } from './shell.mjs';
-import { dayMarker, sendLocks, ownerOf, takeMarker, dropMarkers, dayResetsOf } from './daymark.mjs';
+import { dayMarker, sendLocks, ownerOf, takeMarker, markerFree, dropMarkers, dayResetsOf } from './daymark.mjs';
 import { mailWitness, mailFromWitness, crmWitness, rawValue, activityLine, YOU_WROTE, SEARCH_UNPROVEN } from './witness.mjs';
 import { hasCallId, NO_CALL_ID } from './after-call.mjs';
 
@@ -345,7 +345,7 @@ function draftMissingAsk(words, input, { session, nowMs }) {
     : older
       ? `A draft of its text before you changed it went into your drafts folder${older.draft_id ? ` (draft ${draftIdText(older.draft_id)})` : ''}${older.count > 1 ? `, and ${older.count - 1} more before that` : ''}. Allow this only once you deleted ${older.count > 1 ? 'them' : 'it'}.`
       : 'An unattended run let it through, but floorboss never heard that it went in (the call failed, or its result never came back).';
-  const reason = `floorboss: you say the draft of follow-up ${touch - 1} to ${promptPerson(p?.name || id, id, to)} at ${promptLine(ev.name || slug)} isn't in your drafts folder. ${how} If you allow this, that follow-up can go into your drafts once more: on its own from the next day (if that is still its due day or the day after), or with you there.\n\nYour words: ${promptLine(said)}\n\nAllow only if you looked in your drafts folder and it isn't there.`;
+  const reason = `floorboss: you say the draft of follow-up ${touch - 1} to ${promptPerson(p?.name || id, id, to)} at ${promptLine(ev.name || slug)} isn't in your drafts folder. ${how} If you allow this, that follow-up can go into your drafts once more: on its own, but not on the day the first draft was let through (and only on its due day or the day after), or with you there.\n\nYour words: ${promptLine(said)}\n\nAllow only if you looked in your drafts folder and it isn't there.`;
   writePrivate([], 'draft-missing-pending.json', {
     event: slug,
     id,
@@ -927,6 +927,22 @@ function stepNowWhy(evDir, id, touch, nowMs) {
   if (open) return { why: attendedOpenWhy(open), retry: !!open.at };
   return null;
 }
+// The person's day marker an unattended draft of this step takes (hooks/guard/daymark.mjs): its path for today in the
+// event's zone, the owner it is written with, and how many times a step's release was cleared since. Your word that the
+// draft isn't in your drafts folder (stage_cleared) frees no day, so a draft of that step let through earlier today
+// holds the day: it may go in again on a later day, never on the day the first one was let through. One rule for the
+// guard (takeOnceAndRelease) and the launcher (dayTakenForDraft), so they can't drift.
+export const DAY_TAKEN_WHY = 'another message to them already went or is going today (one a day)';
+function draftDayMarker({ evDir, slug, id, touch, entries, nowMs }) {
+  const day = eventDay(evDir, nowMs) || new Date(nowMs).toISOString().slice(0, 10);
+  const cleared = (q) => dayResetsOf(eventRecord(join(home(), 'events', q.slug)).entries, q.id, q.touch);
+  return { path: dayMarker(evDir, { id, touch }, day), owner: ownerOf(slug, { id, touch }, dayResetsOf(entries, id, touch)), cleared };
+}
+// Whether the guard would refuse an unattended draft of this step now for its day marker (read only).
+export const dayTakenForDraft = (args) => {
+  const m = draftDayMarker(args);
+  return !markerFree(m.path, m.owner, m.cleared);
+};
 function takeOnceAndRelease({ evDir, slug, id, touch, hash, to, name, thread, entries, session, nowMs }) {
   const rdir = join(evDir, 'released');
   const resets = entries.filter((e) => e.id === id && e.touch === touch && RESETS.includes(e.type)).length;
@@ -948,10 +964,9 @@ function takeOnceAndRelease({ evDir, slug, id, touch, hash, to, name, thread, en
         // Read again under the locks: a send or an unattended draft to them at any event that got its release in first.
         const busy = addressBusyToday(evDir, to, nowMs, id);
         if (busy) return { why: `${busyWhy(busy, promptPerson(name, id), to)}. One message a day to one person, across all your events` };
-        const day = eventDay(evDir, nowMs) || new Date(nowMs).toISOString().slice(0, 10);
-        const cleared = (q) => dayResetsOf(eventRecord(join(home(), 'events', q.slug)).entries, q.id, q.touch);
-        const got = takeMarker(dayMarker(evDir, { id, touch }, day), ownerOf(slug, { id, touch }, dayResetsOf(entries, id, touch)), cleared);
-        if (!got) return { why: 'another message to them already went or is going today (one a day)' };
+        const m = draftDayMarker({ evDir, slug, id, touch, entries, nowMs });
+        const got = takeMarker(m.path, m.owner, m.cleared);
+        if (!got) return { why: DAY_TAKEN_WHY };
         took.push(got);
         // Every lock must still be this call's (lib/lock.mjs: a lock broken as stale under it is never given back).
         if (!owned()) return { why: 'another call to them was being checked at the same moment', retry: true };

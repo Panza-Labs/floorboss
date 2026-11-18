@@ -426,7 +426,7 @@ with the reason it gave, and any due follow-up that couldn't go in and why (floo
 before the run, a weekend in the event's zone, an earlier draft not seen sent). A draft whose result never came
 back is listed as "may or may not be in your drafts folder": look, and if it isn't there, tell floorboss ("Ana's
 draft isn't in my drafts"). Claude runs `outreach draft-missing`, Claude Code asks you to confirm, naming the person
-and the follow-up, and it can go in again: on its own from the next day, or with you there. If you change and approve the text of a follow-up after a draft of it went
+and the follow-up, and it can go in again: on its own, but not on the day the first draft was let through, or with you there. If you change and approve the text of a follow-up after a draft of it went
 in, the new one waits until you delete the old draft and tell floorboss it's gone the same way. Your next floorboss
 run shows the summary first, and Claude Code mentions it once in any session. The event's ledger marks those drafts as unattended.
 

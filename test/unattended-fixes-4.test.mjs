@@ -162,8 +162,8 @@ test('V3-A2: a sender text with two addresses in it is unreadable, never "yours"
   const since = Date.parse('2026-10-11T00:00:00Z');
   const mine = { id: 'm1', sender: `Me <${OWN}>`, date: '2026-10-12T08:00:00Z', labelIds: ['SENT'] };
   for (const sender of ['"Me <me@lanecraft.example>" <bo@acme.test>', 'Me <me@lanecraft.example>, Bo <bo@acme.test>', '<me@lanecraft.example> <bo@acme.test>'])
-    assert.equal(mailWitness(text({ id: 'T1', messages: [mine, { id: 'b', sender, date: '2026-10-12T15:00:00Z', labelIds: ['INBOX'] }] }), { own: [OWN], sinceMs: since, thread: true }).readable, false, sender);
-  assert.equal(mailWitness(text({ id: 'T1', messages: [mine, { id: 'b', sender: 'Bo <bo@acme.test>', date: '2026-10-12T15:00:00Z', labelIds: ['INBOX'] }] }), { own: [OWN], sinceMs: since, thread: true }).inbound, 1);
+    assert.equal(mailWitness(text({ id: 'T1', messageCount: 2, messages: [mine, { id: 'b', sender, date: '2026-10-12T15:00:00Z', labelIds: ['INBOX'] }] }), { own: [OWN], sinceMs: since, thread: true }).readable, false, sender);
+  assert.equal(mailWitness(text({ id: 'T1', messageCount: 2, messages: [mine, { id: 'b', sender: 'Bo <bo@acme.test>', date: '2026-10-12T15:00:00Z', labelIds: ['INBOX'] }] }), { own: [OWN], sinceMs: since, thread: true }).inbound, 1);
   // End to end: Bo's reply in Ana's thread with such a sender holds the draft.
   const H = clone(GBASE);
   await grun(H, {
@@ -180,7 +180,7 @@ test('V3-A2: a sender text with two addresses in it is unreadable, never "yours"
 test('V3-A3: a date floorboss can\'t place for sure is unreadable, and in a thread read anyone after your own email counts', async () => {
   const since = Date.parse('2026-10-11T00:00:00Z');
   const mine = { id: 'm1', sender: `Me <${OWN}>`, date: '2026-10-12T08:00:00Z', labelIds: ['SENT'] };
-  const w = (date, thread = true) => mailWitness(text({ id: 'T1', messages: [mine, { id: 'b', sender: 'Bo <bo@acme.test>', date, labelIds: ['INBOX'] }] }), { own: [OWN], sinceMs: since, thread });
+  const w = (date, thread = true) => mailWitness(text({ id: 'T1', messageCount: 2, messages: [mine, { id: 'b', sender: 'Bo <bo@acme.test>', date, labelIds: ['INBOX'] }] }), { own: [OWN], sinceMs: since, thread });
   for (const date of ['Thu, 01 Jan 1970 00:00:00 +0000', 'Oct 12', '01/11/2026', 'Nov 1', '0', 0, '2026-10-12T15:00:00'])
     assert.equal(w(date).readable, false, JSON.stringify(date));
   for (const date of ['2026-10-12T15:00:00Z', '2026-10-12T17:00:00+02:00', 'Mon, 12 Oct 2026 15:00:00 +0000', 'Mon, 12 Oct 2026 15:00:00 +0000 (UTC)', Date.parse('2026-10-12T15:00:00Z'), String(Date.parse('2026-10-12T15:00:00Z') / 1000)])

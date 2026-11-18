@@ -29,7 +29,7 @@ export const sendLocks = (evDir, id, to) => [...new Set([sendLock(to), ...person
 // is written with, and what counts as cleared since. One rule for the attended send and the unattended draft, so
 // neither reads the other's day marker as cleared when it wasn't. (Your word that an unattended draft isn't in your
 // drafts folder, stage_cleared, makes a new once mark for that draft, hooks/guard/unattended.mjs RESETS, but frees no
-// day: that draft waits for the next day. The attended send's message marker, released/<id>-<touch>-<n>, is named by
+// day: that draft can't go in on its own again on the day the first one was let through, only on a later day. The attended send's message marker, released/<id>-<touch>-<n>, is named by
 // the same rule, as lib/sendcheck.mjs markerOnly reads it.)
 export const DAY_RESETS = ['release_cleared', 'bounced'];
 export const dayResetsOf = (entries, id, touch) => (entries || []).filter((e) => e?.id === id && e.touch === touch && DAY_RESETS.includes(e.type)).length;
@@ -58,11 +58,28 @@ export function takeMarker(path, owner, cleared) {
     const was = readOwner(cur);
     if (!was) return null;
     if (present(next)) continue;
-    if (was.slug !== now.slug || was.id !== now.id || was.touch !== now.touch || !(cleared(was) > was.resets)) return null;
+    if (!frees(was, now, cleared)) return null;
     if (create(next, owner)) return next;
     // Another caller made that link first: judge theirs (the loop reads it next).
   }
   return null;
+}
+// Whether the marker `was` frees the day for `now`: the same message, and its release cleared since it was taken.
+const frees = (was, now, cleared) => was.slug === now.slug && was.id === now.id && was.touch === now.touch && cleared(was) > was.resets;
+// Whether takeMarker would take a marker for `owner` now, read only (nothing made): the launcher asks this before it
+// spends a run on a draft the guard would refuse for its day (scripts/scheduled.mjs followupsDue).
+export function markerFree(path, owner, cleared) {
+  const now = parseOwner(owner);
+  if (!now) return false;
+  if (!present(path)) return true;
+  for (let n = 1; n < 1000; n++) {
+    const cur = n === 1 ? path : `${path}~${n - 1}`;
+    const was = readOwner(cur);
+    if (!was) return false;
+    if (present(`${path}~${n}`)) continue;
+    return frees(was, now, cleared);
+  }
+  return false;
 }
 function create(path, owner) {
   try {

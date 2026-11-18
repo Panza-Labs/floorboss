@@ -272,7 +272,7 @@ and that person's authorised draft. In that run those three calls skip your own 
   in the event's zone, its due day or the next, not after the event's last day, and every check a send or a staged
   draft has (the recipe and its exact arguments, the thread, one message a day per person across your events, a
   stop, a reply, a bounce). Your word that a draft isn't in your drafts folder (`outreach draft-missing`) lets that
-  step's draft go in once more, but gives no day back: its next draft waits until the next day. It also reads every other event's ledger for that address: anything that holds the
+  step's draft go in once more, but gives no day back: its next draft can't go in on its own on the day the first draft was let through, only on a later day. It also reads every other event's ledger for that address: anything that holds the
   person there, or anything done about them there since the authorisation or the email it answers (an approval, a
   send, a draft, a hold, a decision of yours), holds the draft. All of it comes from the ledgers and the stored
   authorisation, never from the outbox page or another rendered view. It then takes a once-only mark and writes `stage_released` to the ledger, marked
@@ -282,7 +282,7 @@ and that person's authorised draft. In that run those three calls skip your own 
   it once, and the ledger marks the drafts as unattended. A draft let through whose result never came back is said
   as "may or may not be in your drafts folder": nothing else goes in for that person until you look; if it isn't
   there, your words (`outreach draft-missing`, which the guard puts to you in a Claude Code prompt naming the person
-  and the follow-up; only its PostToolUse hook writes `stage_cleared`) let that step go in again, once, from the next day. A due follow-up that can't go in is
+  and the follow-up; only its PostToolUse hook writes `stage_cleared`) let that step go in again, once, but not on its own on the day the first draft was let through. A due follow-up that can't go in is
   said too, once: floorboss in use in the 30 minutes before the run, a weekend in the event's zone, or an earlier draft
   floorboss hasn't seen sent yet. A finished case (they replied or booked) is said once, as over.
 - **Turning it off.** `/floorboss:unattended off` (allowed in any session) or `unattended.mjs off`: the same switch

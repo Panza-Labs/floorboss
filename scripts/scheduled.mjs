@@ -82,7 +82,7 @@ import {
   DISCLAIMER,
   RUN_LIMIT_MS
 } from '../lib/unattended-drafts.mjs';
-import { crossEventWhy } from '../hooks/guard/unattended.mjs';
+import { crossEventWhy, dayTakenForDraft } from '../hooks/guard/unattended.mjs';
 import { buildFactsBrief } from '../skills/event-outreach/scripts/commands/calendar.mjs';
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -480,7 +480,7 @@ export function followupsDue(now = nowMs(), log = null, { anyHour = false } = {}
         const step = before > 1 ? `follow-up ${before - 1}` : 'first message';
         if (b?.staged) wait(`it waits until floorboss sees your ${step} draft was sent: once you've sent it from your mail app, run floorboss (it reads your mailbox for it)`);
         else if (b?.stage_released)
-          wait(`floorboss doesn't know whether your ${step} draft went into your drafts folder (the mail tool never said it did), so this one waits. Look there. If it's there, send it, then run floorboss (it reads your mailbox for it). If it isn't, tell floorboss it isn't there (outreach draft-missing) and that draft can go in again, on its own from the next day`);
+          wait(`floorboss doesn't know whether your ${step} draft went into your drafts folder (the mail tool never said it did), so this one waits. Look there. If it's there, send it, then run floorboss (it reads your mailbox for it). If it isn't, tell floorboss it isn't there (outreach draft-missing) and that draft can go in again, on its own, but not on the day the first one was let through`);
         continue;
       }
       const due = followupDueDay(evDir, settings, entries, state[a.id] || {}, { id: a.id, touch: a.touch }, now);
@@ -499,6 +499,13 @@ export function followupsDue(now = nowMs(), log = null, { anyHour = false } = {}
       // with no model run spent on them today (on a later day, that message holds them too: crossEventWhy below).
       if (sentOrGoingToday(entries, state[a.id] || {}, { id: a.id, touch: a.touch, to: a.to }, evDir, now) != null) {
         wait(`another message to ${name} already went or is going today: one message a day to a person, so it waits for you`);
+        continue;
+      }
+      // A draft of this same step let through today (a run's, since said not to be in your drafts folder) holds the
+      // day: the guard refuses this step again until a later day (hooks/guard/unattended.mjs dayTakenForDraft, the
+      // guard's own rule), so no run is spent on it today.
+      if (dayTakenForDraft({ evDir, slug, id: a.id, touch: a.touch, entries, nowMs: now })) {
+        wait(`a draft of this follow-up to ${name} was already let through today, so it can't go in again on its own today: it goes in again on its own from a later day`);
         continue;
       }
       {

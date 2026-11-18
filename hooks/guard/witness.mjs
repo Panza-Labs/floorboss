@@ -220,17 +220,17 @@ export function mailWitness(resp, { own = [], sinceMs, thread = false }) {
   // them (omittedContent, which it gives when it filtered something out, or a key floorboss doesn't know) is unreadable.
   // Its messageCount counts its drafts, which messages leaves out, but a count above the messages shown can't be told
   // from a reply left out, so it holds (a draft in that thread before an unattended draft goes in costs only a held
-  // draft). A count that isn't a whole number, or is below the messages shown, isn't an answer floorboss can read.
+  // draft). A count that is missing (the connector always sends one), isn't a whole number, or is below the messages
+  // shown, isn't an answer floorboss can read.
   if (thread) {
     const v = isPlainObject(r.value) ? r.value : {};
     const extra = Object.keys(v).filter((k) => !['id', 'messageCount', 'messages', 'viewUrl'].includes(k));
     if (extra.length) return { readable: false, why: `the thread answered with "${oneLine(extra[0], 40)}" beside its messages, which isn't the connector's answer` };
-    if (v.messageCount != null) {
-      const c = v.messageCount;
-      if (!(Number.isInteger(c) && c >= 0)) return { readable: false, why: "the thread's message count in the answer isn't a number" };
-      if (c < m.messages.length) return { readable: false, why: `the thread shows ${m.messages.length} messages but counts ${c}` };
-      if (c > m.messages.length) return { readable: false, why: `the thread shows ${m.messages.length} of its ${c} messages (a draft in it counts, and can't be told from a reply left out), so floorboss can't tell what the rest say` };
-    }
+    if (!Object.hasOwn(v, 'messageCount')) return { readable: false, why: "the thread's answer has no message count (the connector always sends one), so floorboss can't tell it shows the whole thread" };
+    const c = v.messageCount;
+    if (!(typeof c === 'number' && Number.isInteger(c) && c >= 0)) return { readable: false, why: "the thread's message count in the answer isn't a number" };
+    if (c < m.messages.length) return { readable: false, why: `the thread shows ${m.messages.length} messages but counts ${c}` };
+    if (c > m.messages.length) return { readable: false, why: `the thread shows ${m.messages.length} of its ${c} messages (a draft in it counts, and can't be told from a reply left out), so floorboss can't tell what the rest say` };
   }
   const isMine = ownTest(own);
   if (!isMine) return { readable: false, why: "floorboss doesn't know your own address (own_email), so it can't tell your messages from theirs" };

@@ -214,19 +214,24 @@ test('F6-docs: the search is said as every folder but Spam, as SECURITY.md says 
   assert.doesNotMatch(sec, /one that shows only older dates matched on a message/);
   assert.match(sec, /holds that step's unattended draft as "may or may not be in your drafts", in the launcher and the guard, whatever text it was for/);
   // V-R2-3, reversed by the owner (2026-11-17, with the integrate security fix F1): after your word the step's next
-  // draft waits until the next day (test/unattended-fixes-8.test.mjs S-F1b), and every place that says it says so.
-  assert.match(sec, /lets that step's draft go in once more, but gives no day back: its next draft waits until the next day/);
-  assert.match(sec, /let that step go in again, once, from the next day/);
-  for (const f of ['SECURITY.md', 'README.md', 'CHANGELOG.md', 'commands/unattended.md', 'skills/event-outreach/SKILL.md', 'skills/flow/SKILL.md', 'hooks/guard/unattended.mjs', 'skills/event-outreach/scripts/commands/unattended.mjs', 'lib/unattended-drafts.mjs', 'scripts/scheduled.mjs'])
+  // draft can't go in on its own on the day the first draft was let through (test/unattended-fixes-8.test.mjs S-F1b),
+  // but it can the day after, even when your word came that day (R-F2 in test/unattended-fixes-9.test.mjs), and every
+  // place that says it says the true rule, never "from the next day" (stricter than the code).
+  assert.match(sec, /lets that step's draft go in once more, but gives no day back: its next draft can't go in on its own on the day the first draft was let through, only on a later day/);
+  assert.match(sec, /let that step go in again, once, but not on its own on the day the first draft was let through/);
+  const PLACES = ['SECURITY.md', 'README.md', 'CHANGELOG.md', 'commands/unattended.md', 'skills/event-outreach/SKILL.md', 'skills/flow/SKILL.md', 'hooks/guard/unattended.mjs', 'hooks/guard/daymark.mjs', 'skills/event-outreach/scripts/commands/unattended.mjs', 'lib/unattended-drafts.mjs', 'scripts/scheduled.mjs'];
+  for (const f of PLACES) {
     assert.doesNotMatch(flat(f), /day back, so|go in the same day|on its own on its day \(or the day after\)|can go in again\. If it is there|can go in again`/, f);
-  assert.match(flat('README.md'), /and it can go in again: on its own from the next day, or with you there/);
-  assert.match(flat('CHANGELOG.md'), /once you confirm at Claude Code's prompt, on its own from the next day\)/);
-  assert.match(flat('hooks/guard/unattended.mjs'), /that follow-up can go into your drafts once more: on its own from the next day \(if that is still its due day or the day after\), or with you there\./);
-  assert.match(flat('skills/event-outreach/scripts/commands/unattended.mjs'), /this follow-up can go into your drafts again once this call finishes: on its own from the next day/);
-  assert.match(flat('lib/unattended-drafts.mjs'), /that follow-up can go in again, on its own from the next day\. If it is there/);
-  assert.match(flat('scripts/scheduled.mjs'), /that draft can go in again, on its own from the next day`/);
-  assert.match(flat('skills/event-outreach/SKILL.md'), /that follow-up can go into their drafts again: on its own from the next day/);
-  assert.match(flat('skills/flow/SKILL.md'), /that step can go in again \(on its own from the next day\)/);
+    assert.doesNotMatch(flat(f), /from the next day|until the next day|waits for the next day/, f);
+  }
+  assert.match(flat('README.md'), /and it can go in again: on its own, but not on the day the first draft was let through, or with you there/);
+  assert.match(flat('CHANGELOG.md'), /once you confirm at Claude Code's prompt, on its own, but not on the day the first draft was let through\)/);
+  assert.match(flat('hooks/guard/unattended.mjs'), /that follow-up can go into your drafts once more: on its own, but not on the day the first draft was let through \(and only on its due day or the day after\), or with you there\./);
+  assert.match(flat('skills/event-outreach/scripts/commands/unattended.mjs'), /this follow-up can go into your drafts again once this call finishes: on its own, but not on the day the first draft was let through/);
+  assert.match(flat('lib/unattended-drafts.mjs'), /that follow-up can go in again, on its own, but not on the day the first draft was let through\. If it is there/);
+  assert.match(flat('scripts/scheduled.mjs'), /that draft can go in again, on its own, but not on the day the first one was let through`/);
+  assert.match(flat('skills/event-outreach/SKILL.md'), /that follow-up can go into their drafts again: on its own, but not on the day the first draft was let through/);
+  assert.match(flat('skills/flow/SKILL.md'), /that step can go in again \(on its own, but not on the day the first draft was let through\)/);
   const sr = flat('examples/standins/README.md');
   assert.match(sr, /answers as real calls to the claude\.ai Gmail connector answered \(15 November 2026\)/);
 });

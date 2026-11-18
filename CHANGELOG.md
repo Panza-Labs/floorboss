@@ -282,7 +282,7 @@ The first public version.
   app whose draft goes in that day, since floorboss can't see replies there in an unattended run. It names only
   those the launcher will put on that day's run, by the launcher's own checks. A draft whose
   result never came back is said as "may or may not be in your drafts folder" (`outreach draft-missing` lets it go
-  in again once you confirm at Claude Code's prompt, on its own from the next day), and a due follow-up that can't go in is said once, with why.
+  in again once you confirm at Claude Code's prompt, on its own, but not on the day the first draft was let through), and a due follow-up that can't go in is said once, with why.
   The job waits only when floorboss ran something in the last 30 minutes, not for a session left open.
 - Works with the claude.ai Gmail connector: with it, floorboss reads the whole thread of your last email to them and
   searches for anything from or to them since then, and the draft goes in as a reply to that email. It searches
