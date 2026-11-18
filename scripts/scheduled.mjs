@@ -505,7 +505,13 @@ export function followupsDue(now = nowMs(), log = null, { anyHour = false } = {}
       // day: the guard refuses this step again until a later day (hooks/guard/unattended.mjs dayTakenForDraft, the
       // guard's own rule), so no run is spent on it today.
       if (dayTakenForDraft({ evDir, slug, id: a.id, touch: a.touch, entries, nowMs: now })) {
-        wait(`a draft of this follow-up to ${name} was already let through today, so it can't go in again on its own today: it goes in again on its own from a later day`);
+        // The marker can belong to this step's own earlier draft or to another message to them: say neither for sure.
+        // Tomorrow is only promised while the follow-up is still in its window (its due day or the day after).
+        const later = !windowWhy({ due: due.day, today: addDays(due.today, 1), end: ev.end_date || ev.start_date });
+        wait(
+          `a message to ${name} was already let through today (a draft of this follow-up, or another message to them), so this can't go in on its own today` +
+            (later ? ': it can still go in on its own tomorrow' : ", and tomorrow is too late for it to go on its own, so it waits for you"),
+        );
         continue;
       }
       {

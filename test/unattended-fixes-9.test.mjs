@@ -41,13 +41,33 @@ test('R-F1: after your word that a draft is not there, the launcher spends no ru
     assert.ok(!keys(d.items).includes(`${H.ana}:2`), `${now}: not on a ticket`);
     const w = (d.waiting || []).find((x) => x.id === H.ana && x.touch === 2);
     assert.ok(w, `${now}: waiting`);
-    assert.match(w.why, /already let through today, so it can't go in again on its own today: it goes in again on its own from a later day/);
+    assert.match(w.why, /already let through today \(a draft of this follow-up, or another message to them\), so this can't go in on its own today: it can still go in on its own tomorrow$/);
   }
   H.now = '2026-10-13T10:00:00Z';
   assert.equal((await ticket(H)).items.length, 0, 'no run started for it that day');
   // The next day it is listed again.
   const n = '2026-10-14T10:00:00Z';
   assert.ok(keys(due(H, n).items).includes(`${H.ana}:2`), 'listed the next day');
+});
+
+test('R-F3: let through on the last day it can go on its own, the wait line promises no later day and says it waits for you', async () => {
+  // Due Tue 13; the run lets it through Wed 14 (the day after, the last day of its window); your word Wed 14 09:00.
+  const H = clone(BASE);
+  H.now = '2026-10-14T08:00:00Z';
+  const t1 = await ticket(H);
+  assert.equal(t1.items.length, 1);
+  assert.equal(start(H, t1).code, 0);
+  assert.equal(readMail(H, t1, MAIL_OK).pre.decision, 'allow');
+  assert.equal(stage(H, t1, stageItem(H, t1), { post: false }).pre.decision, 'allow');
+  const T = '2026-10-14T09:00:00Z';
+  bashCall(H, scriptCmd('event-outreach', 'draft-missing', '--event', H.slug, '--id', H.ana, '--touch', '2', '--said', 'notthere'), { session: 's-r3', now: T });
+  hook(H, { hook_event_name: 'SessionEnd', session_id: 's-r3' }, { now: T });
+  const d = due(H, '2026-10-14T10:00:00Z');
+  assert.ok(!keys(d.items).includes(`${H.ana}:2`), 'not on a ticket');
+  const w = (d.waiting || []).find((x) => x.id === H.ana && x.touch === 2);
+  assert.ok(w, 'waiting');
+  assert.match(w.why, /tomorrow is too late for it to go on its own, so it waits for you$/);
+  assert.doesNotMatch(w.why, /can still go in on its own tomorrow/);
 });
 
 test('R-F2: your word given the day after the draft was let through lets it go in on its own that same day', async () => {
