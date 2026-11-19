@@ -131,13 +131,20 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
     }
     if (s.call) {
       // The guard first, as Claude Code would run it; then the stand-in, then the receipt.
-      const g = spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify({ tool_name: persona.sendTool || s.call.recipe?.mcp_name || 'mcp__gmail__send_email', tool_input: argsFor(s.call), tool_use_id: `toolu_sim_${s.call.item.id}_${s.call.item.touch}_${Math.random().toString(36).slice(2, 10)}` }), env: { ...H.env, FLOORBOSS_NOW: H.now }, encoding: 'utf8' });
+      const callTool = persona.sendTool || s.call.recipe?.mcp_name || 'mcp__gmail__send_email';
+      const callId = `toolu_sim_${s.call.item.id}_${s.call.item.touch}_${Math.random().toString(36).slice(2, 10)}`;
+      const g = spawnSync('node', [join(ROOT, 'hooks/guard.mjs')], { input: JSON.stringify({ tool_name: callTool, tool_input: argsFor(s.call), tool_use_id: callId }), env: { ...H.env, FLOORBOSS_NOW: H.now }, encoding: 'utf8' });
       (persona.guardCalls ||= []).push({ step: s.step, item: s.call.item, status: g.status, stdout: g.stdout, stderr: g.stderr });
       if (g.status !== 0) throw new Error(`the guard refused ${s.call.item.id}:${s.call.item.touch}: ${g.stderr}`);
       // Sends and CRM tasks ask the user every time.
       if (!/"permissionDecision":"ask"/.test(g.stdout)) throw new Error(`a ${s.call.task === 'crm.create_task' ? 'CRM task' : 'send'} went without the prompt: ${s.call.item.id}:${s.call.item.touch}`);
       const receipt = persona.call ? persona.call(s.call.item, s.call) : { sends: [{ id: s.call.item.id, touch: s.call.item.touch, message_id: `m-${s.call.item.id}-${s.call.item.touch}`, thread_id: s.call.item.thread_id || `t-${s.call.item.id}` }] };
       if (receipt.__tool_error) { toolFailed(H, s, s.call, receipt); continue; }
+      // The tool's own answer, as Claude Code hands it to the guard's post hook: the ids a follow-up threads by come
+      // only from it (audit run 7, finding 1). The stand-in answers the ids its receipt names.
+      const sent = (receipt.sends || []).find((x) => x.id === s.call.item.id && x.touch === s.call.item.touch);
+      if (sent && s.call.task !== 'crm.create_task')
+        spawnSync('node', [join(ROOT, 'hooks/guard.mjs'), 'post'], { input: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: callTool, tool_input: argsFor(s.call), tool_use_id: callId, tool_response: { content: [{ type: 'text', text: JSON.stringify({ id: sent.message_id, ...(sent.thread_id ? { threadId: sent.thread_id } : {}) }) }] } }), env: { ...H.env, FLOORBOSS_NOW: H.now }, encoding: 'utf8' });
       writeFileSync(join(H.HOME, 'events', slug, 'work', 'receipt.json'), JSON.stringify(receipt));
       const r = cli(H, skillOf(s.call.then), s.call.then.slice(2)); if (r.ERROR) throw new Error(`${s.step} then: ${r.ERROR}`);
       continue;

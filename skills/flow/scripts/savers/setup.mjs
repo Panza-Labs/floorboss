@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Savers for the first questions: which event, the disclaimer, the event itself, the goal, the setup level,
 // and who the user and their company are.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { allowedPath } from '../../../../lib/paths.mjs';
+import { allowedPath, readChecked } from '../../../../lib/paths.mjs';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { levelOptions } from '../../../event-context/scripts/onboarding-tree.mjs';
 import { touchSession, listEvents } from '../../../../lib/scope.mjs';
@@ -100,7 +100,14 @@ export const SETUP_SAVERS = {
     const entries = others
       .map((x) => fileOf(x, 'dnc.txt', 'dnc_path'))
       .filter(Boolean)
-      .flatMap((f) => parseDncReport(readFileSync(f, 'utf8')).entries);
+      .flatMap((f) => {
+        try {
+          return parseDncReport(readChecked(f, 50 * 1024 * 1024)).entries;
+        } catch (err) {
+          failed.push(`do-not-contact list: ${String(err.message).slice(0, 120)}`);
+          return [];
+        }
+      });
     const rowOf = (en) =>
       `${en.type === 'domain' ? `@${en.value}` : en.type === 'company' ? `company: ${en.label || en.value}` : en.type === 'name' ? en.label || en.value : en.value},${en.until || ''}`;
     const dncRows = [...new Set(entries.map(rowOf))];

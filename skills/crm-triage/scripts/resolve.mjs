@@ -193,6 +193,9 @@ export function resolve(contact, evidence, ctx) {
   // old company isn't theirs now.
   const movedRows = new Set(exact.filter((e) => e.record && e.moved).map((e) => e.record));
   const crmFuzzy = fuzzy.filter((e) => e.record);
+  // A name match whose addresses differ (evidence.mjs crmMatches address_unbound): its holds apply, but it is asked
+  // about, and its notes and warm or customer status stay out, until the user says same person.
+  const unbound = exact.filter((e) => e.record && e.address_unbound);
   const rungs = []; // every rung that fires, in ladder order
   const fire = (rung, group, says, extra = {}) => rungs.push({ rung, group, says, ...extra });
 
@@ -209,8 +212,8 @@ export function resolve(contact, evidence, ctx) {
           ? String(m.ref).replace(/^crm:/, '')
           : m.group === 'different-person'
             ? 'all'
-            : crmFuzzy.length === 1
-              ? String(crmFuzzy[0].row)
+            : crmFuzzy.length + unbound.length === 1
+              ? String((crmFuzzy[0] || unbound[0]).row)
               : '';
     for (const e of crmFuzzy)
       if (String(e.row) === ref || ref === 'all') {
@@ -220,6 +223,12 @@ export function resolve(contact, evidence, ctx) {
             crm.push(e.record);
           }
         } else e.sure = 'dismissed';
+      }
+    // "Different person" stops the question; the record's holds stay (a name match always held), its notes stay out.
+    for (const e of unbound)
+      if (String(e.row) === ref || ref === 'all') {
+        if (m.group === 'same-person') e.address_unbound = false;
+        else e.unbound_settled = true;
       }
     if (m.group === 'different-person' && ref === 'all') for (const e of fuzzy) if (e.from !== 'crm') e.sure = 'dismissed';
     // "Not in the CRM", said for the address they have now: the lookup that gave no answer is settled. Said for an
@@ -329,7 +338,14 @@ export function resolve(contact, evidence, ctx) {
   // user's choice (coworker_contacts, or per coworker in coworker_overrides): leave (left alone), ask (check-these),
   // warn (drafted, listed at approval), mine (treated as the user's own). The holds above (do-not-contact,
   // off-limits, opt-out or stop, a recent loss) and the customer rule below apply whatever the choice.
-  const ownRecord = crm.some((r) => r.owner && ownerIsUser(r.owner));
+  // The records that are this person beyond doubt: an address-unbound name match isn't, until the user says so.
+  const unboundRows = new Set(unbound.filter((e) => e.address_unbound).map((e) => e.record));
+  const crmOwn = crm.filter((r) => !unboundRows.has(r));
+  const ownRecord = crmOwn.some((r) => r.owner && ownerIsUser(r.owner));
+  // An account match lends its CRM words (status, note) and customer standing only when it is itself bound to where
+  // the message goes: the address is at the account's own domain (evidence.mjs accountMatches), or the person's own
+  // bound record is at that very account (its company key the account's, not a record from an old job).
+  const accountBound = (e) => !!e?.bound || crmOwn.some((r) => !movedRows.has(r) && !!r.company_key && r.company_key === e?.account?.key);
   const coworkerMode = (holder) => {
     const o = settings.coworker_overrides || {};
     const k = Object.keys(o).find((n) => holder && n.toLowerCase() === String(holder).toLowerCase());
@@ -364,7 +380,7 @@ export function resolve(contact, evidence, ctx) {
     if (r.owner && !INACTIVE_OWNER.test(r.owner) && !ownerIsUser(r.owner))
       coworker(settings.crm_user_name ? `${who(r.owner)} holds this relationship` : `${who(r.owner)} holds this record (set crm_user_name if that's you)`, r.owner);
   }
-  const ownDeal = crm.some(
+  const ownDeal = crmOwn.some(
     (r) =>
       !movedRows.has(r) &&
       r.owner &&
@@ -439,7 +455,8 @@ export function resolve(contact, evidence, ctx) {
       const detail = [status, e.account.owner_note].filter(Boolean).join(', ');
       fire('account', 'reach', `at ${who(e.account.owner)}'s account ${e.account.label}`, {
         note_only: true,
-        account_note: `at ${who(e.account.owner)}'s account ${e.account.label}${detail ? ` (${detail})` : ''}`
+        // (The account's CRM words only with someone whose own record is bound to where the message goes.)
+        account_note: `at ${who(e.account.owner)}'s account ${e.account.label}${detail && accountBound(e) ? ` (${detail})` : ''}`
       });
     }
   }
@@ -458,37 +475,62 @@ export function resolve(contact, evidence, ctx) {
   // 8b. The customer rule from onboarding.
   const rule = settings.customer_rule;
   // A won deal makes a customer, whatever the person's own status says.
-  const isCustomer = crm.some((r) => !movedRows.has(r) && ((r.meanings || []).includes('customer') || r.won_at || r.deal_state === 'won'));
+  const isCustomer = crmOwn.some((r) => !movedRows.has(r) && ((r.meanings || []).includes('customer') || r.won_at || r.deal_state === 'won'));
   const ownAccount = exact.find((x) => x.account && !x.account.off && (x.account.mine || (x.account.owner && ownerIsUser(x.account.owner))));
   // What the user's records say about the company, for a draft to anyone there: the account's status and the
   // account's own CRM note. At a customer account, someone with no record of their own still writes as to a
   // customer from it (fact source "account"), as someone with a record does from the CRM summary.
-  const accNote = ownAccount?.account.note ? `; the CRM's note on the account: "${ownAccount.account.note}"` : '';
+  // The account's CRM text (its status words and its note) goes only with someone whose own record is bound to where
+  // the message goes (evidence.mjs crmMatches), or whose address is at the account's own domain (accountMatches bound):
+  // anyone can put a company's name on a list row. Anyone else there gets the plain fact, "at your account X".
+  const accText = !!ownAccount && accountBound(ownAccount);
+  const accNote = accText && ownAccount?.account.note ? `; the CRM's note on the account: "${ownAccount.account.note}"` : '';
   const customerAccount =
     ownAccount && /customer|client|won/i.test(ownAccount.account.status || '')
-      ? `your customer ${ownAccount.account.label} (CRM: "${ownAccount.account.status}")${accNote}`
+      ? accText
+        ? `your customer ${ownAccount.account.label} (CRM: "${ownAccount.account.status}")${accNote}`
+        : `at your account ${ownAccount.account.label}`
       : null;
   // A live partner is said as one ("a partner (CRM status "Partner - active")"), never as a customer or a coworker.
-  const partnerRow = crm.find((r) => !movedRows.has(r) && crmRelation(r) === 'partner');
+  const partnerRow = crmOwn.find((r) => !movedRows.has(r) && crmRelation(r) === 'partner');
   const customerWord = partnerRow ? `a partner (CRM status "${relationStatus(partnerRow)}")` : 'a customer';
-  if (rule && (isCustomer || (ownAccount && /customer|client|won/i.test(ownAccount.account.status || '')))) {
-    const won = crm
+  // The rule's holds ("hold", "ask") go by a company or name match, as the other holds do: anyone at a customer
+  // account, and anyone a customer record matches by name, address or not. Its standing ("warm", "treated as new")
+  // goes only with someone bound to it: their own bound record, or a bound match of the customer account. Unbound,
+  // they get the plain fact and no CRM words.
+  const accCustomer = !!ownAccount && /customer|client|won/i.test(ownAccount.account.status || '');
+  const custRow = (r) => !movedRows.has(r) && ((r.meanings || []).includes('customer') || r.won_at || r.deal_state === 'won');
+  const standing = isCustomer || (accCustomer && accText);
+  const allCustomer = crm.some(custRow);
+  // Which case of the rule (recent, on the won deal, other) is picked over every record matched, bound or not, as the
+  // holds are: a name match's recent close or won deal still picks its case. The words said with a "warm" or
+  // "treated as new" (a close date, the won deal) come only from this person's own bound records.
+  const caseOf = (rows, cust) => {
+    const won = rows
       .map((r) => r.won_at)
       .filter((d) => d && today && d <= today)
       .sort()
       .pop();
     const recent = won && daysBetween(won, today) <= Number(rule.recent_months) * 30.44;
-    const onDeal = crm.some((r) => r.on_won_deal === true);
-    const which = !isCustomer ? 'other' : recent ? 'recent' : onDeal ? 'on_deal' : 'other';
-    // "Not on the won deal" only when the CRM has a deal column to say so: a connector gives the status alone.
-    const dealData = isCustomer && crm.some((r) => typeof r.on_won_deal === 'boolean');
+    const onDeal = rows.some((r) => r.on_won_deal === true);
+    const dealData = cust && rows.some((r) => typeof r.on_won_deal === 'boolean');
+    return { won, dealData, which: !cust ? 'other' : recent ? 'recent' : onDeal ? 'on_deal' : 'other' };
+  };
+  const ruleCase = rule && (standing || accCustomer || allCustomer) ? caseOf(crm, allCustomer) : null;
+  const ruleHolds = !!ruleCase && !['warm', 'cold'].includes(rule[ruleCase.which]);
+  if (ruleCase && (standing || ruleHolds)) {
+    const which = ruleCase.which;
+    const act = rule[which];
+    // A hold or an ask says the case it fired on (to you, never in a draft); a warm or a new reach says only what
+    // this person's own records do.
+    const said = ruleHolds ? ruleCase : caseOf(crmOwn, isCustomer);
+    const { won, dealData } = said;
     const why =
-      which === 'recent'
+      said.which === 'recent'
         ? `${customerWord} whose deal closed ${won} (within ${rule.recent_months} months)`
-        : which === 'on_deal'
+        : said.which === 'on_deal'
           ? `${customerWord}, and on the won deal`
           : `at a customer${won ? ` (deal closed ${won})` : ''}${dealData ? ', but not on the won deal' : ''}`;
-    const act = rule[which];
     const cn = customerAccount ? { account_note: customerAccount } : {};
     if (!['warm', 'ask', 'hold', 'cold'].includes(act))
       fire('customer_rule', 'check', `${why}: your customer rule has no valid answer for this case (${which})`, cn);
@@ -497,8 +539,8 @@ export function resolve(contact, evidence, ctx) {
     else if (act === 'warm') fire('customer_rule', 'warm', why, cn);
     else fire('customer_rule', 'reach', `${why}: treated as new, as you set`, { as_new: true, ...cn });
   } else if (isCustomer) {
-    const cr = crm.find((r) => (r.meanings || []).includes('customer'));
-    const wonDeal = crm.find((r) => r.deal_state === 'won');
+    const cr = crmOwn.find((r) => (r.meanings || []).includes('customer'));
+    const wonDeal = crmOwn.find((r) => r.deal_state === 'won');
     fire(
       'customer_rule',
       'warm',
@@ -514,7 +556,7 @@ export function resolve(contact, evidence, ctx) {
   } else if (ownAccount)
     fire('customer_rule', 'reach', `at your account ${ownAccount.account.label}`, {
       note_only: true,
-      account_note: `at your account ${ownAccount.account.label}${ownAccount.account.status ? ` (${ownAccount.account.status})` : ''}${accNote}`
+      account_note: `at your account ${ownAccount.account.label}${accText && ownAccount.account.status ? ` (${ownAccount.account.status})` : ''}${accNote}`
     });
 
   // 9. Already in touch (your contacts, your mailbox with a reply, an earlier event): held for a warm note.
@@ -524,7 +566,7 @@ export function resolve(contact, evidence, ctx) {
 
   // 10. Warm: a two-way CRM status, an open deal (a conversation going on), a note that logs
   // a real conversation, or a two-way last contact. A deal or a note from an old job isn't theirs now.
-  for (const r of crm) {
+  for (const r of crmOwn) {
     const wi = (r.meanings || []).indexOf('warm');
     const ci = (r.meanings || []).indexOf('coordinate');
     if (wi >= 0) fire('warm', 'warm', `CRM status "${r.statuses[wi]}"`);
@@ -551,6 +593,10 @@ export function resolve(contact, evidence, ctx) {
     )
       fire('warm', 'warm', `last contact ${r.last_contact}`);
   }
+  // A name match not bound to this person still asks about a stage floorboss doesn't know (it could be a lost deal),
+  // without the deal's words.
+  for (const r of crm.filter((x) => unboundRows.has(x) && !movedRows.has(x) && x.deal_state === 'unclear'))
+    fire('warm', 'check', "a CRM record matched by name has a deal at a stage floorboss doesn't know. Is it open, won or lost (leave alone)?");
   if (ctx.notes?.some((n) => n.known)) fire('warm', 'warm', 'you know them personally', { user_known: true });
 
   // 11. A stranger who fits, or doesn't.
@@ -567,7 +613,7 @@ export function resolve(contact, evidence, ctx) {
       e.sure === 'fuzzy' &&
       !crmAccountsOff(e.account) &&
       !(e.account && !e.account.off && (e.account.mine || (e.account.owner && ownerIsUser(e.account.owner)) || ownRecord))
-  );
+  ).concat(unbound.filter((e) => e.address_unbound && !e.unbound_settled));
   // The user's "reach", "warm" or "colleague" wins over the holds they could see when they said it (it records
   // them). A do-not-contact entry, an opt-out or stop, or an off-limits account that appeared since holds again.
   // The holds as they read now, before any "(new since …)" is added: what a decision made now has seen.
@@ -700,9 +746,9 @@ export function resolve(contact, evidence, ctx) {
   // may describe an old role. The account it names is the old company's, and an address at the old company's
   // domain may be out of date.
   const listCo = contact?.company_key || (contact?.company ? companyKey(contact.company) : null);
-  const rowCo = crm[0]?.company ? companyKey(crm[0].company) : null;
+  const rowCo = crmOwn[0]?.company ? companyKey(crmOwn[0].company) : null;
   const crmStale = !!(listCo && rowCo && !companyRelated(listCo, rowCo));
-  const rowDomain = crmStale ? emailDomain(crm[0].email) : null;
+  const rowDomain = crmStale ? emailDomain(crmOwn[0].email) : null;
   const accountNote = notes.find((n) => n.account_note)?.account_note || rungs.find((r) => r.rung === 'customer_rule' && r.account_note)?.account_note || null;
   return {
     // "Hold" from the user (check-these, "all of Dana's: hold") keeps the owner the CRM names, so the card shows
@@ -716,10 +762,18 @@ export function resolve(contact, evidence, ctx) {
     evidence,
     alternatives: decided.slice(1).map(({ rung, group, says, holder }) => ({ rung, would_be: group, says, holder })),
     account_note:
-      (accountNote && !(crmStale && accountNote.toLowerCase().includes(String(crm[0].company).toLowerCase())) ? accountNote : null) ||
+      (accountNote && !(crmStale && accountNote.toLowerCase().includes(String(crmOwn[0].company).toLowerCase())) ? accountNote : null) ||
       (overridden ? `at ${ownerSaid(overridden.holder)}'s account ${contact?.company || ''}`.trim() : null),
     crm_stale: crmStale || undefined,
-    email_old_company: crmStale && rowDomain && emailDomain(contact?.email) === rowDomain ? crm[0].company : undefined,
+    // Tied to the CRM's standing at the company the list names (the company the brief is about): their own bound record
+    // is at it, or a bound account match is that very account (accountBound). Only then does the company brief's CRM
+    // relation go with a draft to them (todo.mjs).
+    company_bound:
+      (!!listCo &&
+        (crmOwn.some((r) => !movedRows.has(r) && !!r.company_key && r.company_key === listCo) ||
+          exact.some((x) => x.account && !x.account.off && x.account.key === listCo && accountBound(x)))) ||
+      undefined,
+    email_old_company: crmStale && rowDomain && emailDomain(contact?.email) === rowDomain ? crmOwn[0].company : undefined,
     // A coworker's contact the user chose to write to: who holds them, and whether to warn before sending.
     coworker: notes.find((n) => n.coworker)?.coworker || null,
     coworker_warn: notes.some((n) => n.coworker_warn),
@@ -730,23 +784,23 @@ export function resolve(contact, evidence, ctx) {
     holds_seen,
     hold_rungs,
     mailbox_note: exact.find((x) => x.mailbox && !x.mailbox.they_replied)?.says || null,
-    crm: crm[0]
+    crm: crmOwn[0]
       ? {
           // The status that says who they are to the sender (a "Partner - active" label), not a marketing one
           // that means nothing here ("Subscribed").
-          status: relationStatus(crm[0]) || null,
+          status: relationStatus(crmOwn[0]) || null,
           // A customer or a live partner: the relationship the drafter and the company brief go by.
-          relation: crmRelation(crm[0]),
-          holder: crm[0].owner || null,
-          last_contact: crm[0].last_contact || null,
-          deal: crm[0].deal ? crmNotes(crm[0].deal).slice(0, 120) : null,
-          deal_stage: crm[0].deal_stage ? crmNotes(crm[0].deal_stage).slice(0, 60) : null,
-          notes: crmNotes(crm[0].notes),
-          crm_id: crm[0].crm_id || null,
-          email: crm[0].email || null,
-          profile_url: crm[0].profile_url || null,
-          company: crm[0].company || null,
-          title: crm[0].title || null
+          relation: crmRelation(crmOwn[0]),
+          holder: crmOwn[0].owner || null,
+          last_contact: crmOwn[0].last_contact || null,
+          deal: crmOwn[0].deal ? crmNotes(crmOwn[0].deal).slice(0, 120) : null,
+          deal_stage: crmOwn[0].deal_stage ? crmNotes(crmOwn[0].deal_stage).slice(0, 60) : null,
+          notes: crmNotes(crmOwn[0].notes),
+          crm_id: crmOwn[0].crm_id || null,
+          email: crmOwn[0].email || null,
+          profile_url: crmOwn[0].profile_url || null,
+          company: crmOwn[0].company || null,
+          title: crmOwn[0].title || null
         }
       : null
   };

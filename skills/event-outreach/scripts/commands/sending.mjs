@@ -29,7 +29,7 @@ function testWriteDuringList(c) {
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(event)) || event === c.event.slug || !line || typeof line !== 'object') return;
   append(join(home(), 'events', event, 'ledger.jsonl'), line, c.now);
 }
-import { ticketByToken } from '../../../../lib/unattended-drafts.mjs';
+import { ticketByToken, emailBefore, handSentDraft, gmailReads, readWitness } from '../../../../lib/unattended-drafts.mjs';
 
 // Approved emails not yet staged and not sent: exactly what to put in the mailbox, from floorboss's files.
 // Approved, not sent, not staged, and still allowed: removed, dropped and suppressed people are checked
@@ -72,7 +72,7 @@ function stageable(c, { unattended = false, held = [] } = {}) {
     // A follow-up goes in the thread of the message before it: the draft of it that went in, or the send floorboss made.
     const prev = card.touch > 1 ? earlierWith(st, card.touch, 'staged') || earlierWith(st, card.touch, 'sent_msg') : card.touch === 0 && lastSent ? st.touches?.[lastSent]?.staged : null;
     // For a draft tool that threads by the message it replies to (Gmail's replyToMessageId): the email that went
-    // before it, as sent (the send tool's own answer, or the mailbox), else its draft's message.
+    // before it, as sent (the send tool's own answer as the guard read it), else its draft's message as the guard read it.
     const prevSent = card.touch > 1 ? earlierWith(st, card.touch, 'sent_msg') : null;
     listed.add(card.id);
     out.push({
@@ -111,8 +111,19 @@ export function stageList(opts) {
   // listed_at: the guard stages an item only within 30 minutes of its listing (a stop or reply after that
   // can't be missed by a list made before it).
   const held = [];
+  // In the scheduled run, on Gmail, after a floorboss draft you sent yourself: the follow-up replies to your email as
+  // this run's own read of the thread showed it (Gmail may give the sent message a new id), never to an id from a
+  // mailbox file. Nothing read yet: no reply id, and the run holds it.
+  const session = opts.unattended ? ticketByToken(process.env.FLOORBOSS_UNATTENDED)?.session || null : null;
+  const gmail = opts.unattended && !!gmailReads(loadConfig());
+  const replyIdOf = (x) => {
+    if (!gmail || !session || !(x.touch > 1) || !handSentDraft(emailBefore(c.folded.people?.[x.id], x.touch, x.to)?.x)) return x.reply_to_message_id;
+    const mw = readWitness(session, opts.event, x.id, 'mail');
+    return mw?.readable && mw.own_last?.id ? String(mw.own_last.id) : null;
+  };
   const listed = stageable(c, { unattended: !!opts.unattended, held }).map((x) => ({
     ...x,
+    reply_to_message_id: replyIdOf(x),
     listed_at: c.now.toISOString(),
     elsewhere: othersChanged ? CHANGED_ELSEWHERE : lentAbout(c.paths.dir, { ...(c.folded.people[x.id] || {}), emails: [x.to].filter((y) => /@/.test(String(y || ''))) })
   }));
@@ -417,7 +428,8 @@ export function sentReceipts(opts) {
   if (!Array.isArray(list)) throw new Error('expected {"sends":[{"id","touch","message_id"}]}');
   const today = c.today;
   const done = [],
-    refused = [];
+    refused = [],
+    dropped = [];
   for (const x of list) {
     // The list file is rewritten by every send-list call (--ids lists one person), so a receipt is matched
     // against the guard's release in the log first, and the list only as a fallback for browser items.
@@ -444,6 +456,13 @@ export function sentReceipts(opts) {
       continue;
     }
     if (c.state[item.id]?.sent?.[item.touch]) continue;
+    // The ids that count are the guard's own reading of the send tool's answer (call_result). A receipt's id is kept
+    // only where it is the guard's; one the guard didn't read (or read otherwise) is dropped, said so: a follow-up
+    // never goes into a thread only a receipt names.
+    const guardIds = [...c.entries].reverse().find((e) => e.type === 'call_result' && e.kind === 'send' && e.id === item.id && (e.touch ?? 1) === item.touch) || null;
+    const keep = (k) => (x[k] && guardIds?.[k] != null && String(x[k]) === String(guardIds[k]) ? { [k]: String(x[k]).slice(0, 200) } : {});
+    for (const k of ['message_id', 'thread_id'])
+      if (x[k] && !keep(k)[k]) dropped.push({ id: item.id, touch: item.touch, [k]: String(x[k]).slice(0, 80), why: guardIds?.[k] ? "it isn't the one the send tool answered" : "the send tool's answer, as floorboss's guard read it, gave none" });
     led(c, {
       type: 'sent',
       id: item.id,
@@ -452,12 +471,12 @@ export function sentReceipts(opts) {
       via: 'floorboss',
       hash: rel?.hash || c.state[item.id]?.touches?.[item.touch]?.approved?.hash || undefined,
       channel: item.via === 'browser' ? item.where : item.via,
-      ...(x.message_id ? { message_id: String(x.message_id).slice(0, 200) } : {}),
-      ...(x.thread_id ? { thread_id: String(x.thread_id).slice(0, 200) } : {})
+      ...keep('message_id'),
+      ...keep('thread_id')
     });
     done.push(`${item.id}:${item.touch}`);
   }
-  return { recorded: done, refused };
+  return { recorded: done, refused, ...(dropped.length ? { ids_not_kept: dropped } : {}) };
 }
 
 // send-failed --event <slug> --id <c…> --touch <n> --error <text>: the send call the guard let through failed

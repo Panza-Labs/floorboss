@@ -19,6 +19,7 @@ import {
   emailDomain,
   emailBase,
   isSharedDomain,
+  isMailboxProvider,
   similarity,
   levenshtein
 } from '../../../lib/normalize.mjs';
@@ -121,6 +122,40 @@ export function crmMatches(contact, index) {
         (sameName(r.name, contact.name, { initials: true }) || nameMatchKey(r.name) === nameMatchKey(contact.name))
       )
         add(r, 'fuzzy', `nickname or initial: ${r.name} at ${r.company}`);
+  }
+  // The one rule for what a matched record lends this person. However the record was found (an address, a link, the
+  // name, another address of a merged row), its warm, customer or partner standing, its notes and whose record it is
+  // count only when the place the message goes is one of the record's own: for an email, the address it goes to
+  // (contact.email) is the record's, exactly (at a shared mail domain such as gmail.com, the same mailbox, dots and
+  // +tags aside); with no address, the row's LinkedIn link is the record's. Anything else (a name, a link copied
+  // beside another address, a record with no address or link) is unbound: its holds (an opt-out, a coworker, a lost
+  // deal) still apply, and it goes to check-these with both until the user says same person (resolve.mjs). A row with
+  // no address beside a record with one may have the record's own address filled in for it (enrich), and is then bound.
+  const sendTo = String(contact.email || '').trim().toLowerCase();
+  const link = profileKey(contact.profile_url);
+  const bound = (r) => {
+    const theirs = String(r.email || '').trim().toLowerCase();
+    if (sendTo) {
+      if (!theirs) return false;
+      if (sendTo === theirs) return true;
+      const d = emailDomain(theirs);
+      return !!d && isMailboxProvider(d) && emailBase(sendTo) != null && emailBase(sendTo) === emailBase(theirs);
+    }
+    const theirLink = profileKey(r.profile_url);
+    return !!link && !!theirLink && link === theirLink;
+  };
+  for (const e of out) {
+    if (!e.record || e.sure !== 'exact' || bound(e.record)) continue;
+    const r = e.record;
+    const here = sendTo || (contact.profile_url ? String(contact.profile_url).slice(0, 120) : 'no address or link');
+    const there = r.email ? String(r.email).toLowerCase() : r.profile_url ? String(r.profile_url).slice(0, 120) : 'no address or link';
+    Object.assign(e, {
+      address_unbound: true,
+      ...(!sendTo && r.email ? { no_list_address: true } : {}),
+      list_email: here,
+      crm_email: there,
+      says: `${e.says}; but messages would go to ${here} and the CRM has ${there}: the same person?`
+    });
   }
   return out;
 }
@@ -379,16 +414,24 @@ export const relatedVia = (a, b, listKeys = []) => {
 
 export function accountMatches(contact, accounts, { sharedDomains = [], listKeys = [] } = {}) {
   const dom = emailDomain(contact.email);
+  // Matching, which raises the account's holds (off limits, a coworker's), goes by any domain that isn't shared, as
+  // before: an ISP's own staff write from its domain too. Standing goes only by a company's own domain (bound below).
   const workDom = dom && !isSharedDomain(dom, sharedDomains) ? dom : null;
   const out = [];
   for (const a of accounts) {
     const exact =
       (a.key && contact.company_key && a.key === contact.company_key) || (a.domain && workDom && (workDom === a.domain || workDom.endsWith(`.${a.domain}`)));
     const fuzzy = !exact && a.key && contact.company_key && relatedVia(a.key, contact.company_key, listKeys);
+    // bound: the address a message goes to is at the account's own email domain (its identifier), and that domain is
+    // no mailbox provider's (anyone can have an address at rogers.com or comcast.net). Only then do the CRM's words
+    // about the account (its status, its note, its customer standing) go with someone who has no record of their own
+    // bound to them.
+    const bound = !!(a.domain && workDom && !isMailboxProvider(a.domain, sharedDomains) && (workDom === a.domain || workDom.endsWith(`.${a.domain}`)));
     if (exact || fuzzy)
       out.push({
         from: a.from,
         account: a,
+        ...(bound ? { bound: true } : {}),
         sure: exact ? 'exact' : 'fuzzy',
         says: exact ? `at ${a.label}` : `looks like ${a.label} (the list says ${contact.company})`
       });

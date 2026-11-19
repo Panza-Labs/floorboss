@@ -131,7 +131,7 @@ export function world({ crm = false, two = false, gmail = false, gserver = G } =
   H.ana = idOf(H, 'Ana Berg');
   if (two) H.bo = idOf(H, 'Bo Lind');
   approveAll(H, NOW);
-  // Message 1, through the guard with its prompt, then its receipt (with the thread the send tool gave).
+  // Message 1, through the guard with its prompt, the send tool's answer read by the guard's post hook, then its receipt.
   const sl = cli(H, 'event-outreach', ['send-list', '--event', H.slug], NOW);
   const firsts = JSON.parse(readFileSync(sl.file, 'utf8')).filter((x) => x.touch === 1);
   const sends = [];
@@ -149,8 +149,11 @@ export function world({ crm = false, two = false, gmail = false, gserver = G } =
       sends.push({ id: who, touch: 1, message_id: answer.id });
       continue;
     }
-    const pre = hook(H, { hook_event_name: 'PreToolUse', tool_name: 'mcp__mail__send_email', tool_input: { to: m1.to, subject: m1.subject, body: m1.body }, session_id: 's-att', tool_use_id: tu });
+    const input = { to: m1.to, subject: m1.subject, body: m1.body };
+    const pre = hook(H, { hook_event_name: 'PreToolUse', tool_name: 'mcp__mail__send_email', tool_input: input, session_id: 's-att', tool_use_id: tu });
     if (pre.decision !== 'ask') throw new Error(`message 1 to ${who} should ask: ${pre.code} ${pre.stderr}`);
+    // The send tool's own answer, read by the guard's post hook: the thread a follow-up goes in comes only from it.
+    hook(H, { hook_event_name: 'PostToolUse', tool_name: 'mcp__mail__send_email', tool_input: input, tool_response: text({ id: mid, threadId: thread }), session_id: 's-att', tool_use_id: tu }, { args: ['post'] });
     sends.push({ id: who, touch: 1, message_id: mid, thread_id: thread });
   }
   cli(H, 'event-outreach', ['sent', '--event', H.slug, '--receipts-file', file(H, 'r1.json', { sends })], NOW);

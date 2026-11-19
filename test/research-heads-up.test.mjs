@@ -20,7 +20,8 @@ test('company research: one heads-up naming the companies; "skip Globex" researc
       const f = join(H.HOME, 'work', 'cr.txt');
       writeFileSync(f, 'skip Globex, the rest is fine');
       assert.match(simCli(H, 'flow', ['answer', '--event', s.event, '--ask', 'company_research', '--value-file', f]).ERROR || '', /Name the companies/);
-      return 'skip Globex';
+      // (A lone company is decided at once only with "only" or "just": audit run 7.)
+      return 'skip only Globex';
     },
     research_scale: (s) => { asked.research_scale = s.ask; return 'none'; },
   } });

@@ -10,7 +10,7 @@ import { readFileSync, unlinkSync, writeFileSync, mkdirSync, readdirSync } from 
 import { home, allowedPath, readChecked } from '../../lib/paths.mjs';
 import { stampRun } from '../../lib/runlock.mjs';
 import { loadEvent } from '../../lib/event.mjs';
-import { addDays } from '../../lib/tz.mjs';
+import { addDays, todayKeyIn } from '../../lib/tz.mjs';
 import { appendLine } from '../../lib/jsonio.mjs';
 import { contactable, append as appendLedger } from '../../lib/ledger.mjs';
 import { eventRecord, verifySend, eventDay, followupDueDay, approvalHash, addressBusyToday, busyWhy, personAddressKeys, addressKeys } from '../../lib/sendcheck.mjs';
@@ -32,6 +32,9 @@ import {
   authorisable,
   authorisationFor,
   listHash,
+  gapChangedWhy,
+  handSentDraft,
+  MAILBOX_ANCHOR_WHY,
   bindTicket,
   ticketed,
   stopped,
@@ -115,6 +118,15 @@ const settingsOf = (slug, config) => {
   }
 };
 const own = (config, settings) => [config?.own_email, settings?.own_email].filter(Boolean);
+// The message id the mailbox search must show for the email this follow-up answers.
+const searchOwnId = (session, it, p) => {
+  const prev = emailBefore(p, it.touch, it.to)?.x;
+  if (!handSentDraft(prev)) return messageIdOf(prev);
+  const mw = readWitness(session, it.event, it.id, 'mail');
+  return mw?.readable && mw.own_last?.id ? String(mw.own_last.id) : null;
+};
+// What a held draft tells the user to do, when only they can.
+export const SEND_IT_YOURSELF = 'send this follow-up yourself, from your mailbox';
 
 // ---------- SessionStart ----------
 // A fresh startup of the session the launcher named, with its token: the ticket is bound (once), and the session is
@@ -276,7 +288,8 @@ const alreadyAuthorised = (x) => {
   return lines.some((l) => {
     try {
       const a = JSON.parse(l);
-      return JSON.stringify([a.event, a.id, a.touch, a.hash, fold(a.to), a.thread_id || null, a.recipe_fp, a.read_fp]) === want;
+      // (One given with no day to bind counts only under the gap it was given under: after a change it may be given again.)
+      return JSON.stringify([a.event, a.id, a.touch, a.hash, fold(a.to), a.thread_id || null, a.recipe_fp, a.read_fp]) === want && (!!a.due_day || ((a.gap_key ?? null) === (x.gap_key ?? null) && !(x.due_day && x.anchor_from_mailbox)));
     } catch {
       return false;
     }
@@ -393,7 +406,11 @@ function judge(words, { session, nowMs }) {
     if (reason.length < 3 || reason.length > 200 || /[\r\n]/.test(String(j?.reason ?? ''))) return { refuse: 'each judgement needs a one-line reason, at most 200 characters.' };
     const forced = j.decision === 'go' && a.steers;
     const decision = forced ? 'hold' : j.decision;
-    const why = forced ? `held by floorboss: the activity's own text speaks to floorboss or Claude, so it can't be a reason to go (the model said go: ${reason})` : reason;
+    const why = !forced
+      ? reason
+      : a.steered_by?.line
+        ? `held by floorboss: ${oneLine(a.steered_by.line, 160)}, so no go is taken from this answer (the model said go: ${reason})`
+        : `held by floorboss: the activity's own text speaks to floorboss or Claude, so it can't be a reason to go (the model said go: ${reason})`;
     out[aid] = { decision, reason: oneLine(why, 400), ...(forced ? { forced: true } : {}), at: new Date(nowMs).toISOString() };
     lines.push({ aid, a, decision, reason: why });
   }
@@ -475,6 +492,7 @@ export function afterBash(input, nowMs = Date.now()) {
                 read_fp: x.read_fp,
                 crm_id: x.crm_id ?? null,
                 due_day: x.due_day,
+                gap_key: x.gap_key ?? null,
                 list: p.list,
                 session: p.session
               })
@@ -766,8 +784,20 @@ function stageDecision(input, it, { config, ticket, nowMs, session, no }) {
     if (!threadArg.length || threadArg.some((t) => t !== String(it.reply_in_thread))) return held('it must go in the thread of your last message to them, and this call names no such thread');
   }
   let replyTo = null;
+  // The email this follow-up answers, and whether it was a floorboss draft you sent yourself (its send is known only
+  // from your mailbox: Gmail may give the sent message a new id, and its day is the mailbox file's).
+  const prevE = emailBefore(folded.people?.[it.id], touch, it.to);
+  const handSent = handSentDraft(prevE?.x);
   if (repliesTo(stage)) {
-    const want = messageIdOf(emailBefore(folded.people?.[it.id], touch, it.to)?.x);
+    let want = messageIdOf(prevE?.x);
+    // On Gmail, a draft you sent yourself is replied to as the guard's own read of your thread shows it: your latest
+    // email there (the checks below hold it to one dated since the draft went in).
+    if (handSent && gmailReads(config)) {
+      const mw = readWitness(session, slug, it.id, 'mail');
+      want = mw?.readable && fresh(mw, nowMs, WITNESS_MS) && mw.own_last?.id ? String(mw.own_last.id) : null;
+      if (!want) return held(`floorboss's own read of your thread with them doesn't show the email you sent from its draft, so this follow-up can't go in reply to it: ${SEND_IT_YOURSELF}`);
+      it = { ...it, reply_to_message_id: want };
+    }
     if (!want) return held("floorboss has no message id for your last email to them (its send's answer didn't give one), so this draft couldn't go in reply to it");
     const got = valuesAt(input, stage, '{reply_to_message_id}');
     if (!got.length || got.some((v) => v !== want) || String(it.reply_to_message_id || '') !== want) return held('it must go in reply to your last email to them, and this call names another message or none');
@@ -805,9 +835,9 @@ function stageDecision(input, it, { config, ticket, nowMs, session, no }) {
   if (gmailReads(config)) {
     const since = readSince(folded.people?.[it.id], touch, it.to);
     if (replyTo && !(Array.isArray(mail.own_ids) ? mail.own_ids : []).map(String).includes(replyTo))
-      return held("the message this draft would reply to isn't one of yours that floorboss's own read of your thread with them showed, so it could go into another conversation");
+      return held(`the message this draft would reply to isn't one of yours that floorboss's own read of your thread with them showed, so it could go into another conversation: ${SEND_IT_YOURSELF}`);
     if (replyTo && (String(mail.own_last?.id ?? '') !== replyTo || !since || !(Date.parse(mail.own_last?.at) >= since.from_s * 1000)))
-      return held("the message this draft would reply to isn't your latest email in your thread with them since floorboss let your last one through, so it may not be the email this follow-up answers");
+      return held(`the message this draft would reply to isn't your latest email in your thread with them since floorboss let your last one through, so it may not be the email this follow-up answers: ${SEND_IT_YOURSELF}`);
     const unsearchable = gmailSearchWhy(it.to);
     if (unsearchable) return held(unsearchable);
     const from = readWitness(session, slug, it.id, 'mailfrom');
@@ -864,6 +894,27 @@ function stageDecision(input, it, { config, ticket, nowMs, session, no }) {
   if (due.why) return held(due.why);
   // The day the authorisation prompt showed binds: never earlier (a gap changed since moves nothing forward).
   if (auth.due_day && due.day < auth.due_day) return held(`its day moved since you authorised it (you allowed it for ${shortDay(auth.due_day)}, it's due ${shortDay(due.day)} now)`);
+  {
+    const gw = gapChangedWhy(auth, settings);
+    if (gw) return held(gw);
+  }
+  // Authorised with no day yet, after a send floorboss knows only from your mailbox (a draft you sent yourself, a send
+  // you reported): its day is what a mailbox file Claude wrote says. On Gmail the day counts from the later of that and
+  // the day the guard's own read of your thread shows your email went; elsewhere it waits for you to authorise it with
+  // its day shown.
+  if (!auth.due_day && prevE?.x?.sent && !prevE.x.send_result) {
+    if (!gmailReads(config)) return held(MAILBOX_ANCHOR_WHY);
+    const mw = readWitness(session, slug, it.id, 'mail');
+    const at = Date.parse(mw?.own_last?.at || '');
+    if (!Number.isFinite(at)) return held(`floorboss's own read of your thread with them doesn't show when your last email went: ${SEND_IT_YOURSELF}`);
+    const seen = todayKeyIn(ev.time_zone || 'UTC', new Date(at));
+    const st0 = state[it.id] || {};
+    if (seen > String(prevE.x.sent.date || '')) {
+      const due2 = followupDueDay(evDir, settings, entries, { ...st0, sent: { ...(st0.sent || {}), [prevE.touch]: seen } }, { id: it.id, touch }, nowMs, d);
+      if (due2.why) return held(due2.why);
+      if (due2.day > due2.today) return held(`counted from ${shortDay(seen)}, when your mailbox shows your last email to them went, it's due ${shortDay(due2.day)}`, { retry: true });
+    }
+  }
   const ww = windowWhy({ due: due.day, today: due.today, end: ev.end_date || ev.start_date });
   if (ww) return held(ww);
   // Every check a send has (a stop, a reply, a bounce, one message a day, its day, slots gone, the address, the text),
@@ -1130,7 +1181,8 @@ export function afterMcp(input, nowMs = Date.now()) {
           ? mailWitness(input?.tool_response, { own: own(config, settings), sinceMs: s.ms, thread: !!gmailReads(config) && m[2] === 'get_thread' })
           : kind === 'mailfrom'
             ? // From the search's own start (after:), with your last email to them by its message id, and its thread.
-              mailFromWitness(input?.tool_response, { own: own(config, settings), contact: it.to, sinceMs: s.from_s * 1000, ownId: messageIdOf(emailBefore(p, it.touch, it.to)?.x), ownThread: it.thread_id })
+              // (After a floorboss draft you sent yourself, your email as this run's own read of the thread showed it.)
+              mailFromWitness(input?.tool_response, { own: own(config, settings), contact: it.to, sinceMs: s.from_s * 1000, ownId: searchOwnId(session, it, p), ownThread: it.thread_id })
             : crmWitness(input?.tool_response, { contact: it.to, own: own(config, settings), sinceMs: s.ms, ours });
       writeWitness(session, it.event, it.id, kind, { v: 1, kind, session, event: it.event, id: it.id, touch: it.touch, at: new Date(nowMs).toISOString(), since: s.day, ...w });
       // What came in stays seen for the rest of the run (stageDecision holds on it), whatever a later read shows.

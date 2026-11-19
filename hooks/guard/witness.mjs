@@ -7,7 +7,6 @@
 // and up to five messages each, or {} for none) and two CRM shapes (HubSpot-like engagements; Pipedrive-like mail
 // messages), as the stand-ins in examples/standins/ answer (gmail-real.mjs: the claude.ai Gmail connector's). Anything else, an error, a page that says more follow, or a message the guard can't read
 // whole is "unreadable": no witness, and the follow-up is held.
-
 const ADDRESS = /^[^@\s<>"]+@[^@\s<>"]+$/;
 // One address, or null. A text with more than one "<" or ">" ('"Me <me@x>" <bo@y>', "Me <me@x>, Bo <bo@y>") names more
 // than one, and floorboss can't tell which is the sender: null, so the message is one it can't read.
@@ -336,7 +335,38 @@ export function mailFromWitness(resp, { own = [], contact = null, sinceMs = NaN,
   };
 }
 
-// A CRM answer's activities: { ok, shape, activities: [{ aid, type, dir, from, at, subject, text }] } or { ok: false }.
+// Every string in an activity record, as the model reading the answer sees it (all properties and metadata, whole):
+// what the steering screen reads. Past SCREEN_MAX characters, or nested past a depth floorboss walks, the record can't
+// be screened whole, and screen_whole is false (a go on it is then a hold).
+const SCREEN_MAX = 1_000_000;
+function screenText(rec, { keys = false } = {}) {
+  const parts = [];
+  let size = 0;
+  let whole = true;
+  const put = (v) => {
+    size += v.length + 1;
+    if (size > SCREEN_MAX) whole = false;
+    else parts.push(v);
+  };
+  const walk = (v, depth) => {
+    if (!whole) return;
+    if (typeof v === 'string') put(v);
+    else if (v && typeof v === 'object') {
+      if (depth > (keys ? 12 : 8)) whole = false;
+      else if (Array.isArray(v)) for (const x of v) walk(x, depth + 1);
+      else
+        for (const [k, x] of Object.entries(v)) {
+          // A property's name is text the model reads too ("ignore holds": "x"); underscores read as spaces.
+          if (keys) put(k.replace(/_/g, ' '));
+          walk(x, depth + 1);
+        }
+    }
+  };
+  walk(rec, 0);
+  return { screen: oneLine(parts.join(' '), SCREEN_MAX), screen_whole: whole };
+}
+// A CRM answer's activities: { ok, shape, activities: [{ aid, type, dir, from, at, subject, text, screen, screen_whole }] }
+// or { ok: false }.
 export function crmActivities(value) {
   if (value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.results)) {
     const list = value.results;
@@ -368,8 +398,13 @@ export function crmActivities(value) {
         at,
         // When it was logged: an activity logged since floorboss's last message counts even when it is dated before.
         logged: Math.max(at, ...[e.createdAt, r?.createdAt, p.hs_createdate].map(timeOf).filter((t) => t != null)),
-        subject: oneLine(r?.metadata?.subject ?? p.hs_email_subject ?? p.hs_meeting_title ?? '', 160),
-        text: oneLine(r?.metadata?.text ?? p.hs_body_preview ?? p.hs_note_body ?? '', 600)
+        // A task, a call or a deal named too, so the judge step and the summary say which one it is.
+        subject: oneLine(r?.metadata?.subject ?? p.hs_email_subject ?? p.hs_meeting_title ?? p.hs_task_subject ?? p.hs_call_title ?? p.dealname ?? '', 160),
+        // The email's own subject alone, for telling floorboss's own sent email (ours): a task's, call's or deal's name
+        // never makes an activity ours.
+        mail_subject: oneLine(r?.metadata?.subject ?? p.hs_email_subject ?? p.hs_meeting_title ?? '', 160),
+        text: oneLine(r?.metadata?.text ?? p.hs_body_preview ?? p.hs_note_body ?? p.hs_task_body ?? p.hs_call_body ?? '', 600),
+        ...screenText(r, { keys: true })
       });
     }
     return { ok: true, shape: 'hubspot', activities: out };
@@ -391,7 +426,8 @@ export function crmActivities(value) {
         at,
         logged: Math.max(at, ...[r?.add_time].map(timeOf).filter((t) => t != null)),
         subject: oneLine(r.subject ?? '', 160),
-        text: oneLine(r.snippet ?? '', 600)
+        text: oneLine(r.snippet ?? '', 600),
+        ...screenText(r, { keys: true })
       });
     }
     return { ok: true, shape: 'pipedrive', activities: out };
@@ -399,6 +435,30 @@ export function crmActivities(value) {
   return { ok: false, why: "floorboss can't read this CRM answer's shape" };
 }
 
+// Text as a reader sees it, for the steering screen: HTML tags out (both joined and spaced: "pro<b></b>ceed",
+// "<p>go</p><p>ahead"), entities decoded ("go&nbsp;ahead"), full-width and other compatibility forms folded (NFKC:
+// "Ｐｒｏｃｅｅｄ"), invisible characters out, spaces made single.
+const ENTITIES = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", ensp: ' ', emsp: ' ', thinsp: ' ' };
+const decodeEntities = (s) =>
+  s.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]{2,8});?/gi, (m, e) => {
+    if (e[0] === '#') {
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : ' ';
+    }
+    return ENTITIES[e.toLowerCase()] ?? m;
+  });
+// (tag null: the markup kept, as the model reads the raw text: an HTML comment, an attribute, text between a stray "<"
+// and ">" are read too.)
+const readable = (s, tag) =>
+  decodeEntities(tag == null ? String(s ?? '') : String(s ?? '').replace(/<[^<>]{0,500}>/g, tag))
+    .normalize('NFKC')
+    .replace(/\p{Cf}+/gu, '')
+    .replace(/\s+/g, ' ');
+// A hit on any reading counts: the raw text as it is (one line, nothing decoded or folded: "proceed™", "proceed&#95;now"),
+// the raw text with its markup kept but folded and entity-decoded, and the text with the tags out.
+export const steersText = (s) =>
+  STEERS.test(oneLine(s, Infinity)) ||
+  STEERS.test(readable(s, null)) || STEERS.test(readable(s, '')) || STEERS.test(readable(s, ' ')) || STEERS.test(readable(decodeEntities(String(s ?? '')), ''));
 // Text that speaks to the model reading it: a note like this can never be a reason to go on (CRM text is data), so a
 // "go" on it is recorded as a hold.
 export const STEERS = /\b(floorboss|claude|assistant|chatgpt|ai agent|ignore|disregard|instructions?|unrelated|go ahead|proceed|safe to send|send (it|the|this|anyway)|not a reply|judge|judg(e|ement)|hold|release)\b/i;
@@ -434,6 +494,29 @@ export function crmWitness(resp, { contact, own = [], sinceMs, ours = [] }) {
   if (!c.ok) return { readable: false, why: c.why };
   if (c.activities.length > 100) return { readable: false, why: 'the CRM logged more than 100 activities for this person: too many to judge with nobody there' };
   const isMine = ownTest(own) || (() => false);
+  // Each activity's own go is screened on its own whole record (every string and property name; one too big or too
+  // deep to screen whole counts as steering): a "from" or a direction is a CRM property anyone logging activity can set.
+  const selfSteers = (a) => a.screen_whole === false || steersText(`${a.subject} ${a.text} ${a.screen ?? ''}`);
+  // Text in the answer outside its activity records (its top-level keys, paging, Pipedrive's related_objects and
+  // additional_data) that speaks to floorboss or Claude holds every go on it. (A steering note in another activity is
+  // a known limit: SECURITY.md.)
+  const outside = (() => {
+    const v = r.value && typeof r.value === 'object' ? { ...r.value } : {};
+    if (c.shape === 'hubspot') delete v.results;
+    if (c.shape === 'pipedrive') delete v.data;
+    const t = screenText(v, { keys: true });
+    return t.screen_whole === false || steersText(t.screen);
+  })();
+  // Two activities with one id (a note "2" and an email "2"): a judgement names an activity by its id alone, so it could
+  // be read for the other one. Every go on such an answer is a hold.
+  const dup = (() => {
+    const seenIds = new Set();
+    for (const a of c.activities) {
+      if (seenIds.has(String(a.aid))) return String(a.aid);
+      seenIds.add(String(a.aid));
+    }
+    return null;
+  })();
   const them = addressOf(contact);
   const left = ours.filter((o) => /^\d{4}-\d{2}-\d{2}$/.test(String(o?.day || '')) && subjectKey(o.subject)).map((o) => ({ day: o.day, key: subjectKey(o.subject) }));
   const near = (at, day) => [-1, 0, 1].some((k) => new Date(at + k * 864e5).toISOString().slice(0, 10) === day);
@@ -443,7 +526,7 @@ export function crmWitness(resp, { contact, own = [], sinceMs, ours = [] }) {
     const fromThem = fromContact(a, them);
     let ours = false;
     if (!fromThem && /EMAIL/.test(a.type) && a.dir === 'out' && (!a.from || isMine(a.from))) {
-      const i = left.findIndex((o) => o.key === subjectKey(a.subject) && near(a.at, o.day));
+      const i = left.findIndex((o) => o.key === subjectKey(a.mail_subject ?? a.subject) && near(a.at, o.day));
       if (i >= 0) {
         ours = true;
         left.splice(i, 1);
@@ -456,7 +539,14 @@ export function crmWitness(resp, { contact, own = [], sinceMs, ours = [] }) {
       at: new Date(a.at).toISOString(),
       from: a.from,
       subject: a.subject,
-      steers: STEERS.test(`${a.subject} ${a.text}`)
+      // Screened over every string of the record the model read, not a chosen few fields; one too big to screen whole
+      // counts as steering (a go on it is a hold).
+      ...(() => {
+        if (!ours && selfSteers(a)) return { steers: true, steered_by: 'itself' };
+        if (dup) return { steers: true, steered_by: { line: `two activities in your CRM's answer share the id ${oneLine(dup, 60)}` } };
+        if (outside) return { steers: true, steered_by: { line: "text in your CRM's answer outside its activities speaks to floorboss or Claude" } };
+        return { steers: false };
+      })()
     });
   }
   return {

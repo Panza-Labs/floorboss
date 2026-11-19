@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // A contacts export the user gives (LinkedIn Connections.csv, Gmail or Outlook contacts): people they already
 // talk to. Each becomes { name, email, emails_seen, company, company_key, date, stopped, source }.
-import { readFileSync } from 'node:fs';
+import { readChecked } from '../../../lib/paths.mjs';
 import { readCsvText, decode } from '../../../lib/csv.mjs';
 import { companyKey, emailsIn } from '../../../lib/normalize.mjs';
 import { parseDate, optedOut } from './sources.mjs';
 
 const pick = (headers, re) => headers.find((h) => re.test(h.trim()));
 
+// Read through readChecked: a plain file (no link at the name), and in a shared temp folder one this user owns. A
+// saved path is read again at every view, so a file another account planted or swapped there later isn't read.
 export function readKnown(path) {
   // LinkedIn's Connections.csv opens with a "Notes:" paragraph before the header row.
-  const { text } = decode(readFileSync(path));
+  const { text } = decode(readChecked(path, 50 * 1024 * 1024, { raw: true }));
   const lines = text.split(/\r?\n/);
   const at = lines.findIndex((l) => /(^|,)\s*"?(first name|name|full name|e-?mail( address)?|display name)"?\s*(,|$)/i.test(l));
   const { headers, records } = readCsvText(at > 0 ? lines.slice(at).join('\n') : text);

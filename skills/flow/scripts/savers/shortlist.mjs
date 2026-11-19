@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJson, appendLine } from '../../../../lib/jsonio.mjs';
 import { context, nextStep } from '../steps.mjs';
-import { skipNames, unclearSkip } from '../../../../lib/names.mjs';
+import { skipNames, unclearSkip, skipReadBack } from '../../../../lib/names.mjs';
 import { INTERPRETED, ledger, writeWork, writeWorkText, cli, pathOf, mapping, decisions, gateWords, isNo, peopleScaleOf } from './helpers.mjs';
 
 export const SHORTLIST_SAVERS = {
@@ -149,6 +149,8 @@ export const SHORTLIST_SAVERS = {
     // A company's name inside other words ("skip this step", with a company called Step) is asked again: read as a
     // list it would start web research on the others.
     if (read.unclear) throw new Error('Name the companies to skip as they are listed, with commas ("skip Acme, Globex"), or say "skip all".');
+    // One company alone that could be a refusal word ("skip altogether", with a company called Altogether): read back.
+    if (read.doubtful) throw new Error(skipReadBack(t, read.named[0], listed, 'skip all'));
     const some = read.named;
     if (some.length && some.length < listed.length) {
       cli('attendee-research', ['skip-companies', '--event', c.slug, '--companies', JSON.stringify(some)], c);
@@ -170,6 +172,7 @@ export const SHORTLIST_SAVERS = {
     // Only a skip names companies: "go for Acme and Globex" and "yes, especially Acme" are a go.
     const read = /^(skip|leave out|not)\b/i.test(t) ? skipNames(t, listed) : { named: [], unclear: false };
     if (read.unclear) throw new Error('Name the companies to skip as they are listed, with commas ("skip Acme, Globex"), or say "skip the news".');
+    if (read.doubtful) throw new Error(skipReadBack(t, read.named[0], listed, 'skip the news'));
     const named = read.named;
     const all = /^(skip|no|none|don'?t|not)\b/i.test(t) && !named.length;
     const some = all ? listed : /^(skip|leave out|not)\b/i.test(t) ? named : [];

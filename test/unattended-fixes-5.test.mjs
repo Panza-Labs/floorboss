@@ -232,6 +232,22 @@ test('F4-R1-N2b: on Gmail, a draft replying to your latest own message, but one 
   // release: held, even with a search answer that shows message 1.
   const H2 = clone(H);
   appendFileSync(join(H2.dir, 'ledger.jsonl'), `${JSON.stringify({ at: now, type: 'sent', id: H2.ana, touch: 2, date: '2026-10-13', source: 'mailbox', message_id: H2.m1.id, thread_id: H2.m1.threadId })}\n`);
+  // H3: the same, but the ids are the guard's own (a call_result it recorded names message 1 for follow-up 1): the
+  // guard's read-time rule is what holds it.
+  const H3 = clone(H);
+  appendFileSync(
+    join(H3.dir, 'ledger.jsonl'),
+    `${JSON.stringify({ at: now, type: 'call_result', who: 'guard', id: H3.ana, touch: 2, kind: 'send', message_id: H3.m1.id, thread_id: H3.m1.threadId, tool: 'send_message' })}\n${JSON.stringify({ at: now, type: 'sent', id: H3.ana, touch: 2, date: '2026-10-13', source: 'mailbox' })}\n`
+  );
+  writeFileSync(join(H3.HOME, 'standin.json.drafts.json'), '[]');
+  H3.now = D14;
+  const m13 = gcall(H3, 'get_thread', { threadId: H3.m1.threadId, messageFormat: 'METADATA_ONLY' }).messages.find((x) => x.id === H3.m1.id);
+  const r3 = await grun(H3, {
+    answer: (n, args) => (n === 'search_threads' ? text({ threads: [{ id: H3.m1.threadId, messageCount: 1, messages: [m13] }] }) : text(gcall(H3, n, args)))
+  });
+  assert.equal(r3.args?.replyToMessageId, H3.m1.id, `the stage list names message 1: ${JSON.stringify(r3.last || r3.refused?.stderr || '')}`);
+  refused(r3.refused, /the message this draft would reply to isn't your latest email in your thread with them since floorboss let your last one through/);
+  assert.ok(!released(H3, 3));
   // (Follow-up 1's draft left the thread: a draft still in it holds the thread read on its own, test/unattended-fixes-8.)
   writeFileSync(join(H2.HOME, 'standin.json.drafts.json'), '[]');
   H2.now = D14;
@@ -239,8 +255,10 @@ test('F4-R1-N2b: on Gmail, a draft replying to your latest own message, but one 
   const r = await grun(H2, {
     answer: (n, args) => (n === 'search_threads' ? text({ threads: [{ id: H2.m1.threadId, messageCount: 1, messages: [m1] }] }) : text(gcall(H2, n, args)))
   });
-  assert.equal(r.args?.replyToMessageId, H2.m1.id, `the stage list names message 1: ${JSON.stringify(r.last || r.refused?.stderr || '')}`);
-  refused(r.refused, /the message this draft would reply to isn't your latest email in your thread with them since floorboss let your last one through/);
+  // Since audit run 7 (finding 1) the ids of a sent record written some other way are never used: a draft sent from
+  // the mail app is replied to as the run's own read of the thread shows it (here message 1, the latest there), and the
+  // guard's date rule still holds it.
+  refused(r.refused, /isn't your latest email in your thread with them since floorboss let your last one through/);
   assert.ok(!released(H2, 3));
 });
 

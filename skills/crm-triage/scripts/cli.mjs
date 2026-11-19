@@ -39,6 +39,13 @@ import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, recordHolds, IN
 // A list file named on the command line: in a folder floorboss reads from, not a key place, a list's kind of
 // file and size (lib/security.mjs listFileProblem). Any such file in the working folder can be given this way,
 // and its copy lands where Claude reads without asking.
+// A person asked about only because their row has no address and a CRM record with their name has one: that record's
+// own address may be filled in for them (the message then goes to the record's person, and the match is no longer
+// unbound). Any other open question fills nothing.
+function noAddressOnly(r) {
+  const open = (r?.evidence || []).filter((e) => e.sure === 'fuzzy' || (e.sure === 'exact' && e.address_unbound && !e.unbound_settled));
+  return open.length === 1 && open[0].no_list_address && open[0].record?.email ? { email: open[0].record.email, profile_url: null } : null;
+}
 function listFile(p, kind) {
   const src = notSensitive(allowedPath(expandHome(p), { list: true }));
   if (!existsSync(src)) throw new Error(`${p} isn't there.`);
@@ -291,6 +298,8 @@ function takeInputs(c, opts) {
   }
   if (knownFile) {
     const p = knownFile;
+    // Read once now as every view reads it (readChecked): a path it would refuse is never saved.
+    readChecked(p, 50 * 1024 * 1024, { raw: true });
     const have = c.config.known_contacts_paths || [];
     if (!have.includes(p)) {
       saveConfig({ known_contacts_paths: [...have, p] });
@@ -1596,7 +1605,7 @@ function enrichList(opts) {
   const planned = planEnrich(ids, {
     byId,
     want: { email: true, linkedin: false },
-    crmOf: (id) => (v.resolved[id]?.group === 'check' ? null : v.resolved[id]?.crm_stale ? { ...v.resolved[id].crm, email: null } : v.resolved[id]?.crm), // a record from their old company: never its address
+    crmOf: (id) => (v.resolved[id]?.group === 'check' ? noAddressOnly(v.resolved[id]) : v.resolved[id]?.crm_stale ? { ...v.resolved[id].crm, email: null } : v.resolved[id]?.crm), // a record from their old company: never its address
     have: { ...prior, ...have },
     today: c.today
   });

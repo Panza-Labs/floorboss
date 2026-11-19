@@ -18,7 +18,9 @@ test('fold: a person, a fit, a draft, its verdict, approval, release and send', 
     L('critic', { id: 'c001', touch: 1, hash: H, verdict: 'PASS', reasons: [] }),
     L('approved', { id: 'c001', touch: 1, hash: H, to: 'ana@acme.test', via: 'email.send', who: 'user', said: 'approve all' }),
     L('send_released', { id: 'c001', touch: 1, hash: H, to: 'ana@acme.test', via: 'email.send', who: 'guard' }),
-    L('sent', { id: 'c001', touch: 1, hash: H, via: 'email.send', date: '2026-10-10', message_id: 'm1', thread_id: 't1' }),
+    // The ids come from the guard's reading of the send tool's answer; the receipt's own are never used.
+    L('call_result', { id: 'c001', touch: 1, kind: 'send', message_id: 'm1', thread_id: 't1', who: 'guard' }),
+    L('sent', { id: 'c001', touch: 1, hash: H, via: 'email.send', date: '2026-10-10', message_id: 'm1', thread_id: 't-receipt' }),
   ]);
   const p = st.people.c001, x = p.touches[1];
   assert.equal(p.email, 'ana@acme.test');

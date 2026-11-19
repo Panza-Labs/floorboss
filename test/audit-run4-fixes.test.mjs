@@ -249,16 +249,18 @@ test('C9: the words of the question never name a company', () => {
   const listed = ['Companies', 'All', 'News', 'Acme', 'Ai', 'People', 'None', 'People.ai'];
   for (const t of ['skip companies', 'skip all', 'skip the news', 'no, skip the news', 'skip all of them', 'skip all please', 'skip research for all companies', 'skip news please', 'skip all research', 'skip company research', 'skip companies, people: none', 'skip companies, people: top 5', 'skip the people', 'skip news.', 'no'])
     assert.deepEqual(namedCompanies(t, listed), [], t);
-  assert.deepEqual(namedCompanies('skip Acme', listed), ['Acme']);
+  // (A lone company is decided at once only with "only" or "just" before it, audit run 7: else it is read back.)
+  assert.deepEqual(namedCompanies('skip Acme', listed), []);
+  assert.deepEqual(namedCompanies('skip only Acme', listed), ['Acme']);
   assert.deepEqual(namedCompanies('skip Acme and News', listed), ['News', 'Acme']);
   assert.deepEqual(namedCompanies('skip what he said', listed), [], 'a name counts whole, never inside a word');
-  assert.deepEqual(namedCompanies('skip Acme, people: all', listed), ['Acme']);
-  assert.deepEqual(namedCompanies('skip Acme, people: none', listed), ['Acme']);
-  assert.deepEqual(namedCompanies('skip People.ai', listed), ['People.ai']);
+  assert.deepEqual(namedCompanies('skip only Acme, people: all', listed), ['Acme']);
+  assert.deepEqual(namedCompanies('skip only Acme, people: none', listed), ['Acme']);
+  assert.deepEqual(namedCompanies('skip only People.ai', listed), ['People.ai']);
   assert.deepEqual(namedCompanies('skip People, Acme', listed), ['Acme', 'People']);
   for (const t of ['skip all for now', 'skip news today', 'skip companies and people', 'skip companies and news']) assert.deepEqual(namedCompanies(t, listed), [], t);
-  assert.deepEqual(namedCompanies('skip People Data Labs', ['People Data Labs', 'Globex']), ['People Data Labs']);
-  assert.deepEqual(namedCompanies('skip People All Stars', ['People All Stars', 'Globex']), ['People All Stars']);
+  assert.deepEqual(namedCompanies('skip only People Data Labs', ['People Data Labs', 'Globex']), ['People Data Labs']);
+  assert.deepEqual(namedCompanies('skip only People All Stars', ['People All Stars', 'Globex']), ['People All Stars']);
 });
 
 const ODD = 'Name,Title,Company,Email\nAna Berg,COO,Companies,ana@companies.test\nBo Li,VP Ops,Globex,bo@globex.test\nCy Oh,COO,News,cy@news.test\n';

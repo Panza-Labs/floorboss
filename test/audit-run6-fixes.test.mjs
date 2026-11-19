@@ -538,8 +538,11 @@ test('through the flow: a company named like a word of a refusal never narrows "
   const led = readFileSync(join(some.H.HOME, 'events', some.slug, 'ledger.jsonl'), 'utf8');
   assert.match(led, /"ask":"company_research","value":"yes","said":"skip both Acme and Globex"/);
   assert.ok(some.trail.includes('company_briefs'), 'the other two are looked up');
-  for (const t of ['skip only Acme', 'skip just Acme', 'skip Acme please', 'skip Acme for now', 'skip Acme too', 'skip Acme because they are a customer', 'skip the Acme one', 'skip Acme (customer)', 'leave out Acme', 'not Acme'])
+  for (const t of ['skip only Acme', 'skip just Acme', 'skip only Acme please', 'skip just the Acme one'])
     assert.deepEqual(namedCompanies(t, ['Step', 'Later', 'Acme', 'Globex']), ['Acme'], t);
+  // A lone company without "only" or "just" is read back, however it is put (audit run 7, round 4).
+  for (const t of ['skip Acme please', 'skip Acme for now', 'skip Acme too', 'skip Acme because they are a customer', 'skip the Acme one', 'skip Acme (customer)', 'leave out Acme', 'not Acme'])
+    assert.deepEqual(namedCompanies(t, ['Step', 'Later', 'Acme', 'Globex']), [], t);
 });
 
 // 10. skills/slot-finder/scripts/cli.mjs:create:existing-event-json-replaced-dropping-mock-flag

@@ -58,12 +58,13 @@ test('a CRM record\'s note is in crm_summary.notes, for the drafter and the crit
   assert.equal(critic(H, sofia).crm_summary.notes, 'Met at LogiFair; interested in carrier check-in');
 });
 
-test('the account row\'s note is in the account note of someone there, and a draft quoting it passes', () => {
-  const { H, t, job } = ready();
+// Since audit run 7 (round 4): the CRM's words about an account go only with someone whose address is at the
+// account's own domain, or whose own record is bound to them. An account row with no address gives no domain, so
+// someone there gets the plain fact (anyone can put a company's name on a list row).
+test('the account row\'s note stays out of the account note when the account has no domain to bind someone to it', () => {
+  const { job } = ready();
   const amira = job('Amira Haddad');
   assert.ok(amira, 'Amira is drafted');
-  assert.match(amira.account_note, /^at your account Pellworth Grocers \(Prospect\); the CRM's note on the account: "trialled our dock scheduler in 2025 at their Leeds DC; paused when the project lead left"$/);
-  const saved = save(H, amira, 'Hi Amira, Pellworth trialled our dock scheduler at your Leeds DC in 2025, and I would like to hear whether it is worth another look.', 'account', t);
-  assert.equal(saved.checks, 'pass', JSON.stringify(saved));
-  assert.match(critic(H, amira).account_note, /trialled our dock scheduler in 2025 at their Leeds DC/);
+  assert.equal(amira.account_note, 'at your account Pellworth Grocers');
+  assert.doesNotMatch(JSON.stringify(amira), /trialled our dock scheduler/);
 });

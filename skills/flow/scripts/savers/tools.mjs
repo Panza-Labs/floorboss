@@ -7,7 +7,7 @@ import { withLock } from '../../../../lib/lock.mjs';
 import { lookupCount } from '../../../../lib/normalize.mjs';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { allowedPath, expandHome } from '../../../../lib/paths.mjs';
+import { allowedPath, expandHome, readChecked } from '../../../../lib/paths.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { context, nextStep } from '../steps.mjs';
 import { readUrl, listFileProblem } from '../../../../lib/security.mjs';
@@ -141,6 +141,8 @@ function readBack(c, value, fx, all, said, { why = null, lead = '', owners = [],
             ? `Your CRM writes the owner ${ownerShown(of)} with a first name only, and no other owner there has that first name, so your answer is taken as that owner and saved as you wrote it. `
           : why === 'taken_out'
             ? `Your answer holds more than a name, so the name was taken out of it. `
+            : why === 'several_names'
+              ? `Your CRM writes that owner as several names joined by "|", and floorboss would read each of them as you, so it is shown back before it is saved. `
             : why === 'doubtful'
               ? `It isn't plainly a name or an address, so it is shown back before it is saved. `
               : why === 'not_listed'
@@ -653,6 +655,12 @@ export const TOOLS_SAVERS = {
     const p = allowedPath(pathOf(v), { list: true });
     const bad = existsSync(p) ? listFileProblem(p, 0, 'known') : `${p} isn't there.`;
     if (bad) throw new Error(`${bad} Nothing was saved.`);
+    // Read once now as triage reads it (readChecked): a path it would refuse is never saved.
+    try {
+      readChecked(p, 50 * 1024 * 1024, { raw: true });
+    } catch (e) {
+      throw new Error(`${e.message} Nothing was saved.`);
+    }
     const have = c.cfg.known_contacts_paths || [];
     config(c, { known_contacts_paths: [...new Set([...have, p])] });
     return answers(c, { known_asked: true });

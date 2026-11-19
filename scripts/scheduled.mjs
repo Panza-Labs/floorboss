@@ -80,7 +80,9 @@ import {
   sha256,
   otherChannelPeople,
   DISCLAIMER,
-  RUN_LIMIT_MS
+  RUN_LIMIT_MS,
+  gapChangedWhy,
+  MAILBOX_ANCHOR_WHY
 } from '../lib/unattended-drafts.mjs';
 import { crossEventWhy, dayTakenForDraft } from '../hooks/guard/unattended.mjs';
 import { buildFactsBrief } from '../skills/event-outreach/scripts/commands/calendar.mjs';
@@ -526,6 +528,21 @@ export function followupsDue(now = nowMs(), log = null, { anyHour = false } = {}
       if (a.due_day && due.day < a.due_day) {
         hold(`its day moved since you authorised it (you allowed it for ${shortDay(a.due_day)}, it's due ${shortDay(due.day)} now): it waits for you`);
         continue;
+      }
+      {
+        const gw = gapChangedWhy(a, settings);
+        if (gw) {
+          hold(gw);
+          continue;
+        }
+      }
+      // Authorised with no day, after a send known only from your mailbox, with no Gmail thread read to date it.
+      if (!a.due_day && !gmail) {
+        const pe = emailBefore(p, a.touch, a.to)?.x;
+        if (pe?.sent && !pe.send_result) {
+          hold(`${MAILBOX_ANCHOR_WHY}: it waits for you`);
+          continue;
+        }
       }
       const ww = windowWhy({ due: due.day, today: due.today, end: ev.end_date || ev.start_date });
       if (ww) {

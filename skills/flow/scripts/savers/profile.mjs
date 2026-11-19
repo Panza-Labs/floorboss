@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Savers for the questions about what the user sells and how they write: segments, insights, the offer,
 // writing samples, languages, and how sending and follow-ups should work.
-import { readFileSync } from 'node:fs';
-import { allowedPath, expandHome } from '../../../../lib/paths.mjs';
+import { allowedPath, expandHome, readChecked } from '../../../../lib/paths.mjs';
 import { parseSegments } from '../../../event-context/scripts/context-check.mjs';
 import { followupsModeOf } from '../steps.mjs';
 import { openingOf, OPENINGS } from '../../../event-outreach/scripts/structures.mjs';
@@ -133,7 +132,7 @@ export const PROFILE_SAVERS = {
               : splitEmails(String(x.body))
             : [];
         const p = allowedPath(expandHome(x.trim()), { list: true });
-        return splitEmails(readFileSync(p, 'utf8').slice(0, 8000)).map((e) => ({ ...e, source: 'file' }));
+        return splitEmails(readChecked(p, 50 * 1024 * 1024).slice(0, 8000)).map((e) => ({ ...e, source: 'file' }));
       })
       .slice(0, 5);
     if (emails.length && c.slug) cli('event-outreach', ['voice-save', '--event', c.slug, '--file', writeWork(c, 'voice-samples.json', { samples: emails })], c);

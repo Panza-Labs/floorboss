@@ -55,8 +55,9 @@ export function ftu6Flow(over = {}) {
 
 // The event through the mapping (in the simulated tester's words), the load and the fits: everyone fits, so who is
 // held or asked about comes from the CRM alone.
-export function ftu6({ settings = {}, home = null, event = {} } = {}) {
-  const H = setup({ home, event, attendees: ATTENDEES, crm: CRM, accounts: 'Company,Status\nStockroom AI,do not contact this company\n', settings: {
+// extraCrm: more CRM rows after the tester's own.
+export function ftu6({ settings = {}, home = null, event = {}, extraCrm = '' } = {}) {
+  const H = setup({ home, event, attendees: ATTENDEES, crm: CRM + extraCrm, accounts: 'Company,Status\nStockroom AI,do not contact this company\n', settings: {
     own_company: 'Paylark', own_domains: ['paylark.example'], colleagues: ['Sam Okafor', 'Sofia Marin'], crm_user_name: 'Ines Moreau', coworker_contacts: 'leave', crm_accounts: 'apply', colleague_notes: false,
     customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' }, ...settings } });
   cli(H, 'crm-triage', ['propose-mapping', '--event', H.slug, '--kind', 'attendees']);

@@ -45,6 +45,12 @@ test('commands: no unscoped Read, Write, Edit, Grep or WebFetch; writes are scop
     for (const t of ['Read', 'Write', 'Edit', 'Grep', 'WebFetch', 'NotebookEdit']) assert.ok(!tools.includes(t), `${f} pre-approves bare ${t}`);
     // unattended.md never pre-approves installing, removing or switching back on what runs on its own.
     if (f === 'unattended.md') for (const t of tools) assert.doesNotMatch(t, /install|uninstall|unattended\.mjs" on/, t);
+    // The scheduled run writes only its CRM judgement files (audit run 7, finding 2): its one write scope is those.
+    if (f === 'followups-due.md') {
+      const judge = 'Write(~/.floorboss/events/*/work/crm-judge-*.json)';
+      assert.ok(tools.includes(judge) && tools.every((t) => !/^(Write|Edit|MultiEdit|NotebookEdit)\(/.test(t) || t === judge), `${f}: writes scoped to the judgement files`);
+      continue;
+    }
     assert.ok(tools.includes('Write(~/.floorboss/**)') && tools.includes('Edit(~/.floorboss/**)'), `${f}: writes scoped to the data folder`);
     assert.ok(tools.every((t) => !/^(Write|Edit)\(/.test(t) || /^(Write|Edit)\(~\/\.floorboss\/\*\*\)$/.test(t)), `${f}: no other write scope`);
   }

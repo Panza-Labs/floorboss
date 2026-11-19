@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setup, triage, todoJobs, idOf } from './fixtures/harness.mjs';
+import { setup, cli, triage, todoJobs, idOf } from './fixtures/harness.mjs';
 
 const CRM = 'First Name,Last Name,Email,Company,Deal Owner,Stage,Last Activity Date,Email Opt Out\n'
   + 'Sofia,Marques,sofia.marques@crestpay.example,Crestpay,Maya Okafor,Customer,09/12/2026,No\n'
@@ -21,6 +21,12 @@ const LIST = 'Full Name,Job Title,Organisation,Email\n'
 test('the old company\'s row: linked as possibly stale; no "your account" at Fennick from a lead who left; Pebbleway, where the holder still is, keeps its note', () => {
   const H = setup({ attendees: LIST, crm: CRM, settings: { crm_user_name: 'Maya Okafor', crm_accounts: 'apply', coworker_contacts: 'leave' } });
   assert.ok(!triage(H).load.ERROR);
+  // Her list address is at another domain than the CRM row's: the match waits for the user's word (audit run 7,
+  // finding 6), and once she is the same person the row is linked as from her old job.
+  const before = JSON.parse(readFileSync(join(H.dir, 'derived', 'resolved.json'), 'utf8'))[idOf(H, 'Isabel Costa')];
+  assert.equal(before.group, 'check', JSON.stringify(before).slice(0, 300));
+  assert.ok(!before.crm);
+  assert.ok(!cli(H, 'crm-triage', ['decide', '--event', H.slug, '--id', idOf(H, 'Isabel Costa'), '--group', 'same-person', '--because', 'she moved to Harborline']).ERROR);
   const res = JSON.parse(readFileSync(join(H.dir, 'derived', 'resolved.json'), 'utf8'));
   const isabel = res[idOf(H, 'Isabel Costa')];
   assert.equal(isabel.crm?.company, 'Fennick Money', JSON.stringify(isabel));

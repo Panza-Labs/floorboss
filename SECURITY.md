@@ -185,7 +185,10 @@ and that person's authorised draft. In that run those three calls skip your own 
   day and its whole text. Only a text the critic passed counts (never a skipped review or an approval past a
   fail). Only the PostToolUse hook writes `unattended/authorised.jsonl`, and only if the list is still the one the
   prompt showed. Each line is bound to the approval's hash, the address, the thread and the fingerprints of the draft
-  and mailbox recipes; a change to any of them means not authorised.
+  and mailbox recipes; a change to any of them means not authorised. A follow-up authorised before it has a day ("due
+  on its day", because the step before it hasn't gone) is bound to the days between follow-ups you had then: if that
+  setting changes afterwards, by anyone and at any step, the draft waits for you and the flow offers to authorise it
+  again under the new gap.
 - **The run.** Each hour the launcher works out from floorboss's records, with no model, what is authorised and due.
   With nothing due it ends. Otherwise, with no floorboss run lock live in any session and no other unattended run,
   it writes a one-time ticket (`unattended/tickets/<session>.json`: a fresh session id, the sha256 of a random 32-byte
@@ -205,7 +208,11 @@ and that person's authorised draft. In that run those three calls skip your own 
   fork, a subagent, a wrong or missing token, or a ticket already used never counts. In a session with a token,
   every call that would ask is refused instead, Bash runs only the run's own steps (`flow next --unattended`,
   `flow run-end` and `crm-judge`), and only three connected-tool calls pass: the mailbox read and the CRM read for a
-  person on the ticket, and the draft. The first refusal of anything in the run stops it.
+  person on the ticket, and the draft. Claude's file tools (Write, Edit, MultiEdit, NotebookEdit) write one kind of
+  file there: the CRM judgement file of a follow-up on the ticket (`events/<event>/work/crm-judge-<id>.json`, by its
+  path as written, with no link at it or on the way to it from the data folder). Your voice, offer and who-to-meet files, the session's event, an attendee list and every other file are
+  refused, and the run's command pre-approves writes to that judgement file only. The first refusal of anything in
+  the run stops it.
 - **What the guard reads itself.** A read passes only when its arguments are exactly its saved recipe filled with
   the run's own values for that person (their address, the day before the email this follow-up answers, the thread,
   the CRM record bound at the authorisation, your address, their name): a later day, text after the day, another
@@ -254,7 +261,15 @@ and that person's authorised draft. In that run those three calls skip your own 
   read.
 - **Claude's judgement.** For each activity in "the rest", the run's model records hold or go and a one-line reason
   (`outreach crm-judge`). The guard records it only for the activities its own witness listed, only "hold" or "go",
-  and records a "go" on an activity whose own text speaks to floorboss or Claude as a hold. A hold, once recorded,
+  and records a "go" on an activity whose own text speaks to floorboss or Claude as a hold. That screen reads the
+  activity's whole record as the CRM returned it (every field and property name, not only the subject and the start of
+  the note), as stored, as a reader sees it (HTML tags and entities taken out, full-width letters folded) and with its
+  markup kept (an HTML comment or an attribute counts); a hit on any reading counts, and a record too big or too deeply
+  nested to screen whole counts as speaking to it. Text in the answer outside its activity records (its top-level
+  keys, paging data, a Pipedrive answer's additional_data) that speaks to floorboss or Claude holds every "go" on that
+  answer, and so does an answer in which two activities share an id. The screen is a word filter, so it holds on
+  ordinary words too ("on hold", "a release"), which is the safe way round, and it can be got round (see "Limits we
+  know about"): the real control is the hold itself, and your own review of every draft before you send it. A task, a call or a deal is named by its own title in the judgement step and the summary. A hold, once recorded,
   stays for the run. Anything from the contact holds whatever the model says. Every judgement and reason goes in the
   log and the summary. Only the CRM activity your CRM activity reader (`crm.activity`) returns is read: a reader that
   lists only emails never shows calls, notes or stage changes. A CRM connected with no activity reader (only a
@@ -267,7 +282,14 @@ and that person's authorised draft. In that run those three calls skip your own 
   due day is not earlier than the one the authorisation showed), no draft of the same step is going in from a
   session with you there or went in from one (or failed there) with no receipt saved, for any text of the step, no Salesforce or Close CRM is connected, it is a
   follow-up by email, your last email to them went to that
-  address, in that thread, through a floorboss prompt you allowed, the critic passed this text, both reads are this
+  address, in that thread, through a floorboss prompt you allowed (the thread, and the message a draft replies to,
+  come only from the guard's own reading of the send or draft tool's answer, or of a draft the guard let through
+  itself, for every kind of mailbox; a thread or message id that only a receipt or a mailbox file Claude wrote names
+  is never used, and with none the draft waits for you; on Gmail, after a floorboss draft you sent yourself, the draft
+  replies to your latest email in the thread as the run's own read of it shows, since Gmail may give the sent message
+  a new id; a follow-up authorised before it had a day, after a send known only from your mailbox, counts its day from
+  the later of the mailbox's day and the day the guard's own read of the thread shows, and elsewhere than Gmail waits
+  until you authorise it again with its day shown), the critic passed this text, both reads are this
   run's and under 90 seconds old and clean, every CRM judgement is in and "go", it is a weekday from 09:00 to 17:00
   in the event's zone, its due day or the next, not after the event's last day, and every check a send or a staged
   draft has (the recipe and its exact arguments, the thread, one message a day per person across your events, a
@@ -394,6 +416,20 @@ how to pin a release by commit, and how to check one. A report about anything th
 user installs (the release process, CI, the marketplace file) is as welcome as one about the code.
 
 ## Limits we know about
+
+- **The unattended CRM screen is a word filter.** It reads each activity's own record for words that speak to
+  floorboss or Claude, and holds a "go" on that activity. A steering note in an older or another activity of the same
+  answer doesn't hold a "go" on this one (planned for 0.1.1). The words can also be disguised so the filter misses
+  them: joined to a word by an underscore or a digit ("please_proceed"), letters from another script that look the same
+  and that Unicode folding doesn't map ("prоceed" with a Cyrillic o), invisible characters outside the format class
+  (a Hangul filler, a combining grapheme joiner), text escaped twice ("\\u0070roceed"), or a word split across two
+  fields. The real control is the hold itself and your own review: an unattended run only ever puts the text you
+  approved into your drafts folder, and you send it yourself.
+- **Customer accounts with no address in the CRM.** An account the CRM knows only from a row with no email address
+  (a company row with a status and a note) has no domain to tie anyone on your list to it. The people there are told
+  "at your account X", with none of the CRM's words about it, no customer standing from it, and no customer lines in
+  their company brief (your customer rule's "hold" or "ask" still applies to them). This is deliberate: anyone can put a company's name on a list row. Give the account an
+  addressed record in the CRM to bind the people at its domain.
 
 - **Your environment.** Some of floorboss's checks rely on settings Claude can't put on its own commands (the
   guard refuses a floorboss script call with anything before `node`). Whoever controls the environment Claude
@@ -563,7 +599,10 @@ floorboss can't tell a faithful relay from a made-up one:
   can mean one person is read back by ID and name and saved only on a following "yes", "ok" or "sure" (the reading waits in the
   event's `derived` folder for 30 minutes, and a change to the list, to the shortlist, to a draft or to the critic's verdict on one drops it). A waiting reading is not an
   approval: nothing can be listed or sent from it. The "yes" is text Claude passes on like any other answer,
-  so the read-back is shown to you and the yes must be yours. Answers the code can't read are read by the model,
+  so the read-back is shown to you and the yes must be yours. At the company research and news questions, "skip"
+  with one company alone is said back, never read as that company, however it is written ("skip altogether", "Skip
+  Altogether.", with a company called Altogether): "skip only Altogether" skips that one, "skip all" every one, and two
+  or more companies named are skipped at once. Answers the code can't read are read by the model,
   by ID only, and always shown back, quoting your words, for a yes before anything is saved. The waiting
   reading (`derived/pending-*.json`) carries no signature: it is one of floorboss's records, which the guard keeps
   Claude's file tools (Write, Edit) from writing, like the ledger; only floorboss's scripts write it.
@@ -583,7 +622,33 @@ floorboss can't tell a faithful relay from a made-up one:
   CRM activity that didn't come from the contact, recorded with its reason.
 - **CRM records you found or imported.** `crm-records --via check` and `--via import` record which CRM record
   belongs to whom from what Claude read in the CRM or an export; floorboss can't tie them to a call it saw, as it
-  does for records it created.
+  does for records it created. What a matched CRM record lends a row (its warm, customer or partner standing, its notes, whose record it is, and the
+  CRM's words about its account) counts only when the message goes to one of that record's own identifiers: the
+  address it is sent to is the record's, exactly (at a shared mail domain such as gmail.com, the same mailbox, dots and
+  +tags aside), or, for a row with no address, its LinkedIn link is the record's. A name, another mailbox at the same
+  company, another address of a merged row, the record's link copied beside another address, or a record with no
+  address or link never counts: the record's holds (an opt-out, a coworker, a lost deal, a deal at a stage floorboss
+  doesn't know, your customer rule's "hold" or "ask") apply at once, and the row
+  goes to check-these with both until you say it is the same person. A row with no address may have the record's own
+  address filled in for it (enrich), and is then that record's. Someone at one of your accounts gets the CRM's words
+  about the account (its status, its note) and its customer standing only when that account match is itself bound:
+  their address is at the account's own email domain (the one its records use, and not a mailbox provider's such as a
+  relay, an ISP or a webmail domain, which anyone can have an address at), or their own bound record is at that very
+  account (not a record at another company or from an old job). A mailbox provider's domain still matches the account
+  for its holds, as any domain that isn't shared webmail or government does: an address at rogers.com still finds an
+  off-limits or coworker account whose records use rogers.com, and that hold applies; it just lends no standing. In
+  the same way your customer rule's "hold" or "ask" applies to everyone at a customer account, bound or not, as it
+  is your own rule for anyone there; its "warm" or "treated as new" needs the binding. Anyone else there, and everyone
+  at an account row with no address, gets the plain fact, "at your account X". The company brief a draft to them
+  carries leaves out its CRM lines (customer or partner, with the status and deal they name) and says the relation
+  isn't given for them; its web research stays.
+- **Lists you name.** A contacts export, your own emails for the voice, and an earlier event's do-not-contact list
+  are read as plain files only, each time they are read: a link at the name, or a file in a shared temp folder that
+  another account owns, is refused, and such a path is never saved.
+- **Follow-up threads.** The thread a follow-up goes in, and the message it replies to, come only from the guard's
+  own reading of the send or draft tool's answer. A thread or message id that a receipt, `send-outcome` or a mailbox
+  file names (all written by Claude) is never used: with none, an attended follow-up starts a new thread and an
+  unattended one waits for you.
 - **Your context files.** What you bring, your voice and who you want to meet live in `~/.floorboss/` and
   can be edited without a prompt. The critic checks a draft's claims against them.
 - **Sending off, the default.** There is no prompt, because you send each message yourself. The outbox's
@@ -597,5 +662,6 @@ floorboss can't tell a faithful relay from a made-up one:
   every item. A draft put in your mailbox while sending is off gets the same check against your other events when it
   is staged (`hooks/guard/sends.mjs`). The CRM owner setting, which decides whose people are yours, is saved only
   through its question (`event-context config --set` refuses it), which reads back first any change that would take
-  an approved message from you, and any owner value that isn't plainly a name or an email address (it is shown
-  quoted, as data, and saved only on your yes).
+  an approved message from you, any owner value that isn't plainly a name or an email address, and an owner cell of
+  several names joined by "|" that your answer picked without typing them so (it is shown quoted, as data, and saved
+  only on your yes).

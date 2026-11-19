@@ -318,6 +318,56 @@ The first public version.
   inside the deadline. Resolving a very long path no longer takes time in proportion to the square of its length.
 - A subagent can hand its result back during a run on current Claude Code, which delivers results through a tool of its
   own that the guard refused as unknown: critics, researchers and writers did the work and couldn't report it.
+- From a seventh audit (17 Nov, 8 confirmed findings, all low, each fixed here with a regression test in
+  `test/audit-run7-fixes.test.mjs`; it includes the three the sixth left for later):
+  - The thread a follow-up goes in, and the message it replies to, come only from the guard's own reading of the send
+    or draft tool's answer. A thread or message id that only a send receipt, `send-outcome` or a mailbox file written
+    by Claude names is never used, for any kind of mailbox: an attended follow-up then starts a new thread, and an
+    unattended one waits for you. A receipt id that differs from the tool's answer is not kept, and `outreach sent`
+    says which. The claude.ai Gmail connector's send answers its thread, so Gmail works as before. On Gmail, after a
+    floorboss draft you sent yourself, the next unattended follow-up replies to your email as the run's own read of the
+    thread shows it, and a held draft says to send that follow-up yourself. A follow-up authorised before it had a day,
+    after a send known only from your mailbox, counts from the later of the mailbox's day and the thread read's on
+    Gmail, and elsewhere is offered again with its day shown.
+  - An account lends its CRM words and its customer standing only when that account match is itself bound (an address
+    at the account's own domain, or the person's own bound record at that very account); a bound personal record at
+    another company no longer lends them, in the job or in the company brief. A mailbox provider's domain (a relay, an
+    ISP, webmail) never binds anyone to an account, though it still matches one for its holds (off limits, a
+    coworker's). Your customer rule's "hold" or "ask" still applies to everyone at a customer account and to every
+    name match, bound or not; only its "warm" or "treated as new" needs the binding. The company brief in a draft job
+    keeps its CRM lines only for someone bound to that standing at the brief's own company; for anyone else the
+    relation is left unsaid. A customer account
+    the CRM knows only from a row with no address binds nobody on the list: its people get "at your account X" and no
+    customer brief (a deliberate trade-off, SECURITY.md).
+  - In an unattended run, Claude's file tools write only the CRM judgement file of a follow-up on the run's ticket.
+    Your voice, offer and who-to-meet files, the session's event and the attendee lists are refused, and so is a write
+    through a link put at that file's name or on the way to it. The run's command pre-approves that one file.
+  - The check that holds a "go" on CRM activity whose own text speaks to floorboss or Claude reads the activity's whole
+    record (a HubSpot task's or call's own fields, a long note past its first 600 characters, property names), as
+    stored, folded (HTML tags and entities out, full-width letters folded) and with its markup (an HTML comment or
+    attribute counts). Steering text in the answer outside its activities, or two activities sharing an id, holds every
+    "go" on that answer. A steering note in another activity is a known limit, planned for 0.1.1 (SECURITY.md). A
+    task, a call or a deal is named by its title in the judgement step and the summary; that title never makes an
+    activity count as floorboss's own sent email, which is told by the email's own subject alone.
+  - A follow-up authorised before it had a day ("due on its day") is held if the days between follow-ups change
+    afterwards, and the flow offers to authorise it again under the new gap.
+  - A first name that picks an owner cell of several names joined by "|" ("I'm Bram" for "Bram Janssens|Carla Diaz")
+    is read back before it is saved, since every name in it would count as you. A plain name still saves at once.
+  - A CRM record lends a list row its notes, its warm, customer or partner standing and its account's CRM words only
+    when the message goes to one of the record's own identifiers: the same address (at a shared mail domain, the same
+    mailbox), or, with no address, the same LinkedIn link. Anything else (a name, another mailbox at the company, a
+    merged row's other address, a copied link beside another address, a record with neither) goes to check-these with
+    both, the record's holds applying at once. A row with no address waits until the record's own address is filled
+    in for it. Someone at your account gets the CRM's words about it only with a bound record of their own or an
+    address at the account's own domain; anyone else there (and everyone at an account row with no address, whose
+    company brief no longer says customer from it) gets "at your account X" and no CRM words.
+    The record's holds apply at once; its notes and warm or customer status wait until you say it's the same person.
+  - A saved contacts export, your voice emails and an earlier event's do-not-contact list are read as plain files each
+    time (no link at the name, and in a shared temp folder only a file of yours). A path that would be refused is never
+    saved, and a saved one that is refused later is left out, said so.
+  - "skip" with one company alone ("skip altogether", "Skip Altogether.", with a company called Altogether) is said
+    back instead of being read as that company, however it is written: "skip only Altogether" skips just that one,
+    "skip all" every company, and two or more named are skipped at once. The same goes for the news heads-up.
 - From a sixth full audit (11 Nov, 13 confirmed findings, all low; ten fixed here, each with a regression test, and
   three planned for a later release: numbers 4, 7 and 10 of its report, list files read from a shared temp folder, a
   CRM record matched by name to a row with another address, and thread ids taken from a receipt Claude writes), and

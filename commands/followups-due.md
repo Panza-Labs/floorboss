@@ -1,6 +1,6 @@
 ---
 description: Used only by floorboss's own scheduler (the follow-up drafts job you install from your terminal). It puts authorised follow-ups into your drafts folder, each after floorboss read your mailbox (and your CRM) for that person. Nothing is sent. Run by hand, it does nothing.
-allowed-tools: ["Bash(node \"${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs\" next --unattended)", "Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs next --unattended)", "Bash(node \"${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs\" run-end)", "Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs run-end)", "Bash(node \"${CLAUDE_PLUGIN_ROOT}/skills/event-outreach/scripts/cli.mjs\" crm-judge:*)", "Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/event-outreach/scripts/cli.mjs crm-judge:*)", "Read(~/.floorboss/**)", "Write(~/.floorboss/**)", "Edit(~/.floorboss/**)"]
+allowed-tools: ["Bash(node \"${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs\" next --unattended)", "Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs next --unattended)", "Bash(node \"${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs\" run-end)", "Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs run-end)", "Bash(node \"${CLAUDE_PLUGIN_ROOT}/skills/event-outreach/scripts/cli.mjs\" crm-judge:*)", "Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/event-outreach/scripts/cli.mjs crm-judge:*)", "Read(~/.floorboss/**)", "Write(~/.floorboss/events/*/work/crm-judge-*.json)"]
 ---
 
 This command is for floorboss's scheduled run only. Nobody is there to answer you: ask nothing, explain nothing,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Claude's own file tools (Read, Grep, Glob, Write, Edit, MultiEdit, NotebookEdit): no read of keys or
 // credentials, no write to floorboss's records, and during a run no write outside the data and temp folders.
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { home, sensitiveKind, secretPlace, realPath, linkRefusal, recordFile, hardLinkRefusal, followed } from '../../lib/paths.mjs';
@@ -261,6 +261,38 @@ function launchdRefusal(p, input) {
   return named
     ? `${p} is the launchd file for what floorboss runs on its own. It is installed and changed only by you, the user, from your own terminal (scripts/unattended.mjs), never by Claude.`
     : null;
+}
+// In a ticketed unattended run (FLOORBOSS_UNATTENDED set), Claude writes one kind of file: the CRM judgement file of
+// a follow-up on the run's own ticket (events/<event>/work/crm-judge-<id>.json). The path as written must be that path
+// itself (resolved, never through a link), and nothing on the way from the data folder to it may be a link: a link
+// planted at the judgement file's name earlier would carry the write to the voice file or anywhere else. Everything
+// else the run's model might be steered into writing (the user's saved voice and offer, the session's event, an
+// attendee list) is refused. ticket: the bound ticket, or null when the run isn't bound (then every write is refused).
+export function runWriteRefusal(tool, input, ticket) {
+  if (!WRITE_TOOLS.has(tool)) return null;
+  const items = Array.isArray(ticket?.items) ? ticket.items : [];
+  const base = resolve(home());
+  const judgeFiles = items
+    .filter((it) => /^[a-z0-9][a-z0-9-]{0,80}$/.test(String(it?.event || '')) && /^c\d+$/.test(String(it?.id || '')))
+    .map((it) => join(base, 'events', it.event, 'work', `crm-judge-${it.id}.json`));
+  const paths = pathsOf(tool, input);
+  if (!paths.length) return 'an unattended run writes only its CRM judgement file.';
+  for (const p of paths) {
+    if (!judgeFiles.includes(p)) return `an unattended run writes only the CRM judgement file of a follow-up on its ticket, not ${String(p).slice(0, 200)}.`;
+    // Each part under the data folder, the file itself included: no link (a missing part is fine; the write makes it).
+    let at = base;
+    for (const part of p.slice(base.length + 1).split(sep)) {
+      at = join(at, part);
+      let st = null;
+      try {
+        st = lstatSync(at);
+      } catch {
+        st = null;
+      }
+      if (st?.isSymbolicLink()) return `${String(at).slice(0, 200)} is a link: an unattended run writes its CRM judgement file only as a plain file.`;
+    }
+  }
+  return null;
 }
 // Why a file tool call is refused, or null.
 // The limits that hold while a run is under way apply to the session that ran floorboss (run.session); other

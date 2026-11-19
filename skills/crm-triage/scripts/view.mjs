@@ -354,9 +354,19 @@ export function readInputs(c, contacts) {
       return false;
     }
   };
+  // Each saved path read as it was saved (readChecked refuses a link put at that name since, or a temp file another
+  // account owns); one it refuses is left out, said so.
   const known = knownPaths
     .filter((p) => isFile(p))
-    .flatMap((p) => readKnown(notSensitive(p)))
+    .flatMap((p) => {
+      try {
+        notSensitive(p);
+        return readKnown(p);
+      } catch (e) {
+        notes.push(`The contacts file ${p} can't be read (${String(e.message).slice(0, 160)}), so it doesn't count for "in touch": give it again with --known.`);
+        return [];
+      }
+    })
     .filter((k) => !k.date || daysBetween(k.date, c.today) <= knownDays);
   for (const p of knownPaths.filter((x) => !existsSync(x))) notes.push(`The contacts file ${p} isn't there any more, so it no longer counts for "in touch".`);
   for (const p of knownPaths.filter((x) => existsSync(x) && !isFile(x)))
@@ -732,6 +742,7 @@ export function compatOf(c, v) {
       crm: r.crm || null,
       account_note: r.account_note || undefined,
       crm_stale: r.crm_stale || undefined,
+      company_bound: r.company_bound || undefined,
       email_old_company: r.email_old_company || undefined,
       mailbox_note: r.mailbox_note || undefined,
       coworker: r.coworker || undefined,
@@ -834,6 +845,7 @@ export function writeDerived(c, v) {
           alternatives: r.alternatives,
           account_note: r.account_note,
           crm_stale: r.crm_stale || undefined,
+          company_bound: r.company_bound || undefined,
           email_old_company: r.email_old_company || undefined,
           mailbox_note: r.mailbox_note,
           crm: r.crm,

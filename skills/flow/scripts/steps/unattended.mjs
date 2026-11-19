@@ -30,6 +30,8 @@ import {
   authorisable,
   authorisedLines,
   readSince,
+  emailBefore,
+  handSentDraft,
   readValues,
   unclearDrafts,
   crmUnreadableWhy,
@@ -209,13 +211,20 @@ function itemStep(it, { session, config, now }) {
   const item = (Array.isArray(listed) ? listed : []).find((y) => y.id === it.id && y.touch === it.touch);
   if (!item) return hold("floorboss's stage list doesn't list it now (another message to them today, or its day moved)");
   if (!item.reply_in_thread || String(item.reply_in_thread) !== String(it.thread_id || '')) return hold("it isn't listed in the thread of your last message to them");
+  // On Gmail, after a floorboss draft you sent yourself: in reply to your latest email in the thread as the guard's own
+  // read shows it (Gmail may give the sent message a new id), never an id from a mailbox file.
+  let replyId = item.reply_to_message_id || null;
+  if (gmail && handSentDraft(emailBefore(p, it.touch, it.to)?.x)) {
+    replyId = mail.own_last?.id ? String(mail.own_last.id) : null;
+    if (!replyId) return hold("floorboss's own read of your thread with them doesn't show the email you sent from its draft: send this follow-up yourself, from your mailbox");
+  }
   return ask(
     'stage',
     step('stage_one', `Put ${it.name}'s approved follow-up ${it.touch - 1} in the drafts folder, in your thread with them. Nothing is sent.`, {
       call: {
         task: 'stage_draft',
         recipe: recipeOf(config.connectors?.stage_draft),
-        item: { id: item.id, touch: item.touch, to: item.to, subject: item.subject, body: item.body, reply_in_thread: item.reply_in_thread, reply_to_message_id: item.reply_to_message_id || null },
+        item: { id: item.id, touch: item.touch, to: item.to, subject: item.subject, body: item.body, reply_in_thread: item.reply_in_thread, reply_to_message_id: replyId },
         rule: "Call the stage_draft recipe once, with to, subject, body and the thread (or the message it replies to) exactly as written in item, each {placeholder} replaced by its value in item. Never send, never change a word. Record nothing: floorboss's guard reads the answer itself. Then run flow next --unattended again."
       }
     })
@@ -275,8 +284,11 @@ export function unattendedOfferStep(x) {
   } catch {
     return null;
   }
-  const done = new Set(authorisedLines().map((l) => `${l.event}:${l.id}:${l.touch}:${l.hash}`));
-  const open = items.filter((i) => !done.has(`${i.event}:${i.id}:${i.touch}:${i.hash}`));
+  // (One given with no day to bind counts only under the gap it was given under: after a change it is offered again.)
+  const lines = authorisedLines();
+  const open = items.filter(
+    (i) => !lines.some((l) => `${l.event}:${l.id}:${l.touch}:${l.hash}` === `${i.event}:${i.id}:${i.touch}:${i.hash}` && (!!l.due_day || ((l.gap_key ?? null) === (i.gap_key ?? null) && !(i.due_day && i.anchor_from_mailbox))))
+  );
   if (!open.length) return null;
   const people = new Set(open.map((i) => i.id)).size;
   return step('unattended_authorise', `Unattended drafts are on for ${e.event.name}, and ${open.length} approved follow-up${open.length === 1 ? '' : 's'} could go into your drafts on their own.`, {

@@ -15,11 +15,14 @@ function berlin({ mock = false } = {}) {
   sent('Felix Braun', 1, '2026-10-01'); sent('Felix Braun', 2, '2026-10-05'); sent('Lena Vogt', 1, '2026-10-01');
   return E0;
 }
+// A Kassenwerk record with an address gives the account its own domain, kassenwerk.example, so Felix (an address there)
+// is bound to it: its customer standing and words are his (audit run 7: an account binds only by its own domain).
+const KASSENWERK = 'Petra Holm,petra.holm@kassenwerk.example,Kassenwerk,Ines Moreau,Customer,\n';
 const resolved = (H) => JSON.parse(readFileSync(join(H.dir, 'derived', 'resolved.json'), 'utf8'));
 
 test('written to at an earlier event: held as in touch before the customer rule, with the customer kept as the account note', () => {
   const E0 = berlin();
-  const H = ftu6({ home: E0.HOME, event: { slug: 'paris', name: 'Paris Shopfront Week' } });
+  const H = ftu6({ home: E0.HOME, event: { slug: 'paris', name: 'Paris Shopfront Week' }, extraCrm: KASSENWERK });
   const r = resolved(H);
   const felix = r[idOf(H, 'Felix Braun')], lena = r[idOf(H, 'Lena Vogt')], daniel = r[idOf(H, 'Daniel Kurz')];
   assert.equal(felix.group, 'in_touch', JSON.stringify(felix));
@@ -33,7 +36,7 @@ test('written to at an earlier event: held as in touch before the customer rule,
 
 test('the mock event never holds anyone at a real event', () => {
   const E0 = berlin({ mock: true });
-  const H = ftu6({ home: E0.HOME, event: { slug: 'paris', name: 'Paris Shopfront Week' } });
+  const H = ftu6({ home: E0.HOME, event: { slug: 'paris', name: 'Paris Shopfront Week' }, extraCrm: KASSENWERK });
   const felix = resolved(H)[idOf(H, 'Felix Braun')];
   assert.notEqual(felix.group, 'in_touch', JSON.stringify(felix));
   assert.equal(felix.rung, 'customer_rule');

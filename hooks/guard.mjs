@@ -53,7 +53,7 @@ import { testOnItsServer, testContactItem, testPasses, markOnce, nameOfStaged } 
 import { callNote, enrichNotes, windowUsed, windowAllowed, lookupsGone, enrichPendingDir } from './guard/lookups.mjs';
 import { listed, listedSends, refusedSends, fullText, stageBatch, recipientShown } from './guard/sends.mjs';
 import { openWindow, openLogWindow, callId, windowKey, browserItems, logItems, KEY_OK, logTyping, noteWhy } from './guard/browser.mjs';
-import { READ_TOOLS, WRITE_TOOLS, fileRefusal, schedulePathRefusal } from './guard/files.mjs';
+import { READ_TOOLS, WRITE_TOOLS, fileRefusal, runWriteRefusal, schedulePathRefusal } from './guard/files.mjs';
 import { recordSearchHosts, WEB_TOOLS, webRefusal, knownEventSites, isResearcher, seenHosts, companyHosts } from './guard/web.mjs';
 import { bashRefusal, floorbossScriptCall, connectorChange, scheduleRefusal, mcpScheduleRefusal, unattendedCall, shellWords } from './guard/shell.mjs';
 import { check } from './guard/check.mjs';
@@ -441,7 +441,13 @@ if (isMain(import.meta.url)) {
     try {
       if (READ_TOOLS.has(toolName) || WRITE_TOOLS.has(toolName)) {
         const fileRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
-        const why = fileRefusal(toolName, input.tool_input, fileRun);
+        // A ticketed unattended run writes its CRM judgement files only (and nothing at all unbound).
+        let why = null;
+        if (runToken() && WRITE_TOOLS.has(toolName)) {
+          const un = unattendedSession(input, clockNow(), subagent);
+          why = runWriteRefusal(toolName, input.tool_input, un.ok ? un.ticket : null);
+        }
+        why ||= fileRefusal(toolName, input.tool_input, fileRun);
         if (why) {
           process.stderr.write(`floorboss blocked this call: ${why}\n`);
           process.exit(2);
