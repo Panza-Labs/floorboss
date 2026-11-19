@@ -15,9 +15,11 @@ import { taskList, tasksCreated, taskStatus } from './commands/tasks.mjs';
 import { agendaDataCmd, agendaNews, agendaSave, agendaFacts, calendarBookings } from './commands/calendar.mjs';
 import { rateSet, rate, voiceSave } from './commands/ratings.mjs';
 import { authoriseUnattended, crmJudge, draftMissing } from './commands/unattended.mjs';
+import { reportCmd } from './commands/report.mjs';
 export { blockReason, sendingOn } from './commands/context.mjs';
 
 run({
+  report: reportCmd,
   'agenda-data': agendaDataCmd,
   'agenda-news': agendaNews,
   'agenda-save': agendaSave,

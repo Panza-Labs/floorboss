@@ -21,6 +21,7 @@ import { planQuestions, NODES, ROUNDS, CHOICES, choiceValue, defaultsFor } from 
 import { onboardingPlan as planOnboarding, onboardingState } from './onboarding-state.mjs';
 import { allowedPath } from '../../../lib/paths.mjs';
 import { instructionsPath } from '../../event-outreach/scripts/drafter.mjs';
+import { connected, inventoryView, modeLine } from '../../../lib/harness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -106,7 +107,7 @@ function config(opts) {
           throw new Error('drafter.gaps holds "voice", "company_context", "proof" and/or "research".');
     }
     if (patch.drafter?.type === 'agent') {
-      const inv = readJson(join(dirname(configPath()), 'inventory.json'), null);
+      const inv = inventoryView(readJson(join(dirname(configPath()), 'inventory.json'), null));
       const a = inv?.items?.find((x) => x.type === 'agent' && x.name === patch.drafter.invoke);
       const risk = a ? a.tools_risk : 'unknown (not in the scan)';
       if (!['none', 'reads'].includes(risk))
@@ -457,6 +458,22 @@ function onboarding(opts) {
 function scanCmd(opts) {
   // Another folder to scan is for tests only: an agent file Claude wrote elsewhere is never the user's setup.
   if (opts.cwd && process.env.FLOORBOSS_TEST !== '1') throw new Error('scan reads your Claude setup where Claude runs: --cwd is for tests only.');
+  // Outside Claude Code floorboss uses no connected tool, so nothing is scanned and nothing is written: every reader
+  // of the inventory sees it empty there (lib/harness.mjs inventoryView), and a Claude Code scan saved in the same
+  // data folder stays as it was for Claude Code.
+  if (!connected()) {
+    const file = join(dirname(configPath()), 'inventory.json');
+    return {
+      outbound: 'none',
+      writers: [],
+      found: {},
+      counts: {},
+      hand_send: true,
+      note: modeLine(),
+      file,
+      next: 'Tell the user that line, then run flow next again.'
+    };
+  }
   const base = scan({ cwd: (process.env.FLOORBOSS_TEST === '1' && opts.cwd) || process.env.FLOORBOSS_SCAN_CWD || process.cwd() });
   const session = opts['session-file'] ? readJson(allowedPath(opts['session-file'])) : null;
   const inv = summarize(base.items, session);

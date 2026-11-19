@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The outbox page: one card per message, rendered for the user to read before approving.
 import { spawn } from 'node:child_process';
-import { existsSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, statSync, readFileSync, lstatSync, rmSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { files, nowFrom } from '../../../../lib/event.mjs';
 import { withLock } from '../../../../lib/lock.mjs';
@@ -18,7 +18,7 @@ import { MODES } from '../leadtime.mjs';
 import { gapFor, noDayWhy, stateOf } from '../../../../lib/spacing.mjs';
 import { INSTRUCTION_LIKE } from '../../../crm-triage/scripts/view.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { renderOutbox, renderOutOfDate } from '../outbox.mjs';
+import { renderOutbox, renderOutOfDate, mailOf } from '../outbox.mjs';
 import { hashOf, pickAt, whereAt } from './routes.mjs';
 import { isOut, labelOf, ctxOf, colleagueTold, takenTest } from './context.mjs';
 import { savedDraft, readTodo, draftFiles, ledgerTouch, followupDayOf, laterSent } from './saved-drafts.mjs';
@@ -77,6 +77,12 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       holder: j.holder,
       channel: j.kind === 'coordinate' ? 'note' : j.channel,
       address: ct.email,
+      // Where the send buttons address it (outbox.mjs mailOf): the address it was approved to go to, else the list's.
+      send_to: j.kind !== 'coordinate' && j.channel === 'email' ? c.state[j.id]?.touches?.[j.touch]?.approved?.to || ct.email : undefined,
+      // The user sends this email themselves (email isn't one of the channels floorboss sends on for this event, as in
+      // Codex, or with sending off): only then does the page offer to open it in their mail app. With email sending
+      // on, floorboss sends it after a prompt, and a button to send it by hand too could send it twice.
+      you_send: j.kind !== 'coordinate' && j.channel === 'email' && !(c.settings.sending?.channels || []).includes('email') ? true : undefined,
       profile_url: ct.profile_url,
       routed: pickAt(c, j.id, j.touch) || undefined,
       // Where a paste message goes: where it was approved to go, else where the route sends it now.
@@ -150,6 +156,7 @@ export function renderFile(c, cards) {
   const counts = {};
   for (const g of Object.values(c.triage.final || {})) counts[g.group] = (counts[g.group] || 0) + 1;
   const html = renderOutbox({
+    hand_send: c.settings.hand_send === true,
     event: c.event,
     generatedAt: `${c.now.toISOString().slice(0, 16).replace('T', ' ')} UTC`,
     counts: { coordinate: counts.coordinate || 0, suppressed: counts.suppressed || 0, not_drafted: (counts.not_drafted || 0) + (counts.check || 0) },
@@ -163,8 +170,32 @@ export function renderFile(c, cards) {
     build
   });
   if (c.inputsAt) savePageInputs(c.paths, sealPageInputs(c.inputsAt), build);
+  writeMailFiles(c.paths.outbox, cards);
   writeText(c.paths.outbox, html);
   return c.paths.outbox;
+}
+
+// The .eml files the page's "Download .eml" buttons point at, in mail/ next to the page: emptied first, then one for
+// each card whose page offers it (outbox.mjs mailOf), so a file is there only while its card offers it. A link or
+// anything else at mail/ is removed, never followed.
+export function clearMailFiles(outboxPath) {
+  const dir = join(dirname(outboxPath), 'mail');
+  let st = null;
+  try {
+    st = lstatSync(dir);
+  } catch {
+    return dir;
+  }
+  if (st.isDirectory() && !st.isSymbolicLink()) rmSync(dir, { recursive: true, force: true });
+  else unlinkSync(dir);
+  return dir;
+}
+function writeMailFiles(outboxPath, cards) {
+  const dir = clearMailFiles(outboxPath);
+  for (const card of cards) {
+    const m = mailOf(card);
+    if (m) writeText(join(dir, m.file), m.eml);
+  }
 }
 
 // The review page (drafts waiting for a yes, nothing to copy) or the final one, written through the page's lock like
@@ -339,6 +370,7 @@ function markOutOfDate(paths, slug, e, inputs) {
     if (!existsSync(paths.outbox) || !statSync(paths.outbox).isFile()) return false;
     const build = inputs ? buildIdOf({ ...inputs, failed: String(e.message) }) : null;
     if (inputs) savePageInputs(paths, sealPageInputs(inputs), build, { failed: e.message });
+    clearMailFiles(paths.outbox);
     writeText(paths.outbox, renderOutOfDate({ name: nameOf(paths, slug), why: e.message, slug, build }));
     return true;
   } catch {
@@ -379,6 +411,12 @@ export function openOutbox(opts) {
   const paths = files(opts.event);
   rebuildOutbox(opts.event, opts, { force: true, review: !!opts.review });
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
-  if (!opts['dry-run'] && !opts['no-open']) spawn(cmd, [paths.outbox], { stdio: 'ignore', detached: true }).unref();
+  if (!opts['dry-run'] && !opts['no-open']) {
+    const child = spawn(cmd, [paths.outbox], { stdio: 'ignore', detached: true });
+    // No opener on this system (a Linux or WSL without xdg-open): the page is written all the same, so say where it is
+    // rather than crash after the work is done.
+    child.on('error', () => process.stderr.write(`floorboss: couldn't open the page with ${cmd}; open it yourself: ${paths.outbox}\n`));
+    child.unref();
+  }
   return opts['dry-run'] || opts['no-open'] ? { written: paths.outbox, opened: false } : { opened: paths.outbox, with: cmd };
 }

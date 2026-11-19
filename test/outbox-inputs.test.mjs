@@ -366,7 +366,8 @@ test('the inputs the page records cover every file a build reads', () => {
     if (!existsSync(p) && listed.has(dirname(rp))) return false;
     // The temp folder's own checks, and the build's outputs and lock.
     if (outsideHome(p) && /^(\/private)?(\/tmp|\/var\/folders)/.test(rp) && !rp.startsWith(real(home))) return false;
-    if (/\/derived\/(?!todo\.json$)|\/outbox\.html(\.tmp-\d+)?$|\.tmp-\d+$|\/outbox-ev\.lock/.test(rp) && rp.startsWith(real(H.dir))) return false;
+    // The page's .eml files (mail/) are outputs too: emptied and written again by each build.
+    if (/\/derived\/(?!todo\.json$)|\/outbox\.html(\.tmp-\d+)?$|\/mail(\/[a-z0-9-]+\.eml)?$|\.tmp-\d+$|\/outbox-ev\.lock/.test(rp) && rp.startsWith(real(H.dir))) return false;
     if (rp.startsWith(real(join(home, 'outbox-ev.lock')))) return false;
     if (rp === real(H.dir) || rp === real(B.dir)) return false;
     // Another event's view of its own list (titles for a carried match): it follows that event's list and record,

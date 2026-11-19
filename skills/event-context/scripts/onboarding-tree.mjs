@@ -8,6 +8,7 @@
 //          list: { rows, with_email } | null, days (days until the event, or null) }
 // Each node: id, round, when(s) → applies?, done(s) → answered?, ask(s) → text, options(s) → [...], saves.
 
+import { connected, harness, HARNESSES } from '../../../lib/harness.mjs';
 import { EVENT_ANSWERS } from '../../../lib/scope.mjs';
 import { plainText, noteOwnerQuestion, effectsHash } from '../../../lib/reading.mjs';
 import { ownerQuoted, plainOwnerValue } from '../../../lib/names.mjs';
@@ -86,7 +87,9 @@ export function levelOptions(s) {
   return [
     `quick${tools.length ? '' : ' (recommended)'}: your list, who you want to meet and what you offer, then drafts for you to send yourself. It assumes you work alone, with no CRM and no writing samples, and asks before any web research.${tools.length ? ` Nothing connected is used${crm.length ? `, so ${crm.join(' or ')} isn't checked: someone you already work with, a coworker's contact or an opt-out could get a first-time note` : ''}.` : ''}`,
     `standard${tools.length ? ' (recommended)' : ''}: also checks the list against ${tools.length ? tools.join(', ') : 'your CRM export or contacts file'} (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, and sets your tone from samples. You send the messages.`,
-    `full: everything in standard, plus floorboss sends what you approve${found(s, 'email').length ? ` from ${found(s, 'email')[0]}` : ''}, reads replies to stop follow-ups (LinkedIn and the event app only with your yes for each), and logs messages in your CRM.`
+    connected()
+      ? `full: everything in standard, plus floorboss sends what you approve${found(s, 'email').length ? ` from ${found(s, 'email')[0]}` : ''}, reads replies to stop follow-ups (LinkedIn and the event app only with your yes for each), and logs messages in your CRM.`
+      : `full: everything in standard, plus the order of channels and the days between follow-ups. You still send every message yourself, from your own mail app: floorboss uses no connected tools in ${HARNESSES[harness()].label}.`
   ];
 }
 
@@ -718,7 +721,9 @@ NODES.push(
     when: () => true,
     done: (s) => s.ans.sending_asked === true,
     ask: (s) =>
-      ![s.inv?.found?.email, s.inv?.found?.chat, s.inv?.found?.browser].some(any)
+      !connected()
+        ? `floorboss is running in ${HARNESSES[harness()].label}, where it uses no connected tools, so it prepares each message for you to send yourself: on the outbox page, each email has a button that opens it in your mail app with everything filled in, and you press Send there. Then tell floorboss "sent" (or tick Sent and paste the page's status), and tell it what came back. OK?`
+        : ![s.inv?.found?.email, s.inv?.found?.chat, s.inv?.found?.browser].some(any)
         ? 'Nothing in your setup can send messages (no mailbox, chat app or browser is connected), so floorboss will prepare each message for you to send yourself. If you want it to send later, connect your mailbox to Claude and run /floorboss:start again.'
         : `Should floorboss send the messages itself once you approve them, or prepare them for you to send? It never sends anything you haven't approved, word for word: you'll see each person's whole sequence (first message and follow-ups) before anything goes. Where may it send?`,
     // Only what this setup can do: a channel with nothing connected to send on isn't offered.
@@ -737,7 +742,7 @@ NODES.push(
     id: 'linkedin_send',
     round: 'sending',
     phase: 'later',
-    when: (s) => (s.ans.sending_channels || '').includes?.('linkedin'),
+    when: (s) => connected() && (s.ans.sending_channels || '').includes?.('linkedin'),
     done: (s) => s.ans.linkedin_send_ack === true || s.ans.linkedin_send_declined === true,
     ask: () =>
       'LinkedIn forbids automated messaging in its terms and restricts or suspends accounts it catches, sometimes permanently. Floorboss would type and send each approved message in your own browser, slowly, as you. The risk to your account is yours. Turn it on?',
@@ -748,7 +753,7 @@ NODES.push(
     id: 'send_setup',
     round: 'sending',
     phase: 'later',
-    when: (s) => /email|chat/.test(String(s.ans.sending_channels || '')),
+    when: (s) => connected() && /email|chat/.test(String(s.ans.sending_channels || '')),
     done: (s) => s.ans.send_setup_done === true || s.ans.send_setup_skipped === true || !!s.cfg.connectors?.['email.send'] || !!s.cfg.connectors?.['chat.send'],
     ask: (s) =>
       `To send ${/email/.test(String(s.ans.sending_channels)) ? 'email' : 'chat messages'} itself, floorboss needs the send tool set up: your own ${/email/.test(String(s.ans.sending_channels)) ? 'address' : 'number'} (the only place a test can go), then one test message to yourself that you check arrived. ${/email/.test(String(s.ans.sending_channels)) ? "Propose the connected mailbox's own address and ask only to confirm it" : 'Which number is yours'}?`,
@@ -760,7 +765,7 @@ NODES.push(
     round: 'sending',
     phase: 'later',
     when: (s) =>
-      any(s.inv?.found?.browser) && (/linkedin|app/.test(String(s.ans.sending_channels || '')) || !!s.ev?.app_name || s.ans.list_has_linkedin === true),
+      connected() && any(s.inv?.found?.browser) && (/linkedin|app/.test(String(s.ans.sending_channels || '')) || !!s.ev?.app_name || s.ans.list_has_linkedin === true),
     done: (s) => s.ans.inbox_read_asked === true,
     ask: (s) =>
       `Should floorboss read replies in your browser, so it can stop follow-ups and spot a "yes" or a "no"? It only reads: it never types or clicks send there. You can say yes to each one separately: your LinkedIn messages${s.ev?.app_name ? `, ${s.ev.app_name}'s inbox` : ''}.${s.ans.crm_choice && s.ans.crm_choice !== 'none' ? ' And should the replies it finds be logged in your CRM?' : ''} If not, you'll be asked "has X replied?" before each follow-up.`,
@@ -783,7 +788,9 @@ NODES.push(
     done: (s) => !!s.cfg.crm_log,
     ask: () => 'When a LinkedIn or event-app message goes out, how should it get into your CRM? (Email logs itself if your CRM syncs your mailbox.)',
     options: (s) =>
-      any(s.inv?.found?.browser)
+      !connected()
+        ? ["I'll import a CSV from the outbox (recommended)", "don't log them"]
+        : any(s.inv?.found?.browser)
         ? ['log it in my CRM in the browser, automatically (recommended)', 'make a CRM task for each', "I'll import a CSV from the outbox", "don't log them"]
         : ['make a CRM task for each (recommended)', "I'll import a CSV from the outbox", "don't log them"],
     saves: 'config: crm_log (browser | tasks | csv | none) and crm_name (what the CRM is called)'
@@ -815,7 +822,7 @@ NODES.push(
     id: 'crm_create_contacts',
     round: 'sending',
     phase: 'later',
-    when: (s) => s.cfg.crm_log === 'browser',
+    when: (s) => connected() && s.cfg.crm_log === 'browser',
     done: (s) => !!s.cfg.crm_create_contacts,
     ask: () =>
       "When someone you message (often LinkedIn-only) isn't a contact in your CRM yet, should floorboss create them, so the message can be logged? It creates a new contact only (name, company, title, email, LinkedIn URL) and never edits or merges existing records.",
@@ -826,7 +833,7 @@ NODES.push(
     id: 'crm_fill_blanks',
     round: 'sending',
     phase: 'later',
-    when: (s) => s.cfg.crm_log === 'browser',
+    when: (s) => connected() && s.cfg.crm_log === 'browser',
     done: (s) => !!s.cfg.crm_fill_blanks,
     ask: () =>
       'While logging, should floorboss fill empty fields on existing contacts, like a missing LinkedIn URL or job title? It only fills blanks: a field that already has a value is never changed.',
@@ -838,6 +845,7 @@ NODES.push(
     round: 'sending',
     phase: 'later',
     when: (s) =>
+      connected() &&
       !!s.ans.sending_channels &&
       String(s.ans.sending_channels) !== '[]' &&
       String(s.ans.sending_channels) !== '' &&

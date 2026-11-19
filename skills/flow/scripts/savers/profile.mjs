@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Savers for the questions about what the user sells and how they write: segments, insights, the offer,
 // writing samples, languages, and how sending and follow-ups should work.
+import { connected } from '../../../../lib/harness.mjs';
 import { allowedPath, expandHome, readChecked } from '../../../../lib/paths.mjs';
 import { parseSegments } from '../../../event-context/scripts/context-check.mjs';
 import { followupsModeOf } from '../steps.mjs';
@@ -235,8 +236,9 @@ export const PROFILE_SAVERS = {
   },
   // Send setup reads these channels straight away (connectors' chosenChannels); the full sending setting is written with the follow-up mode.
   sending: (v, c) => {
+    // Outside Claude Code (lib/harness.mjs) floorboss sends on no channel, whatever the answer says.
     const chans =
-      isNo(v) || /myself|nowhere/i.test(String(v))
+      !connected() || isNo(v) || /myself|nowhere/i.test(String(v))
         ? []
         : Array.isArray(v)
           ? v
@@ -266,6 +268,6 @@ export const PROFILE_SAVERS = {
         chans = raw.split(/[\s,]+/).filter(Boolean);
       }
     }
-    return config(c, { sending: { channels: chans, followups: followupsModeOf(v), linkedin_ack: c.ob.ans.linkedin_send_ack === true } });
+    return config(c, { sending: { channels: connected() ? chans : [], followups: followupsModeOf(v), linkedin_ack: connected() && c.ob.ans.linkedin_send_ack === true } });
   },
 };

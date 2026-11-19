@@ -23,7 +23,12 @@ export const WHATS = [
   'note_passed',
   'skipped',
   'unsent',
-  'undo'
+  'undo',
+  // What happened at a booked meeting, and someone who stopped by with no booked time.
+  'held',
+  'no_show',
+  'rescheduled',
+  'walkup'
 ];
 
 // "c7150", or a name (with the company when the name is common). Returns { id } or { error }.
@@ -181,6 +186,28 @@ export function planRecord(items, ctx) {
     if (!WHATS.includes(item?.what)) {
       errors.push(`${where}: "what" must be one of ${WHATS.join(', ')}`);
       return;
+    }
+    // "Rescheduled" is a move to the new time, for a meeting that is booked.
+    if (item.what === 'rescheduled') item = { ...item, what: 'moved', rescheduled: true };
+    // A walk-up by someone who isn't on the list: kept by name and company, apart from the list.
+    if (item.what === 'walkup') {
+      const r0 = resolveWho(item, ctx);
+      if (r0.error && /^nobody called /.test(r0.error)) {
+        const name = text(item.who, 120);
+        const company = item.company ? text(item.company, 120) : null;
+        if (!name || (!/\s/.test(name) && !company)) {
+          errors.push(`${where}: "${name}" isn't on this event's list: for a walk-up, give their full name and company`);
+          return;
+        }
+        const date = item.date || today;
+        if (!validDay(date) || date > today) {
+          errors.push(`${where}: a walk-up's date is a real day, YYYY-MM-DD, on or before today (${today})`);
+          return;
+        }
+        entries.push({ type: 'walkup', via: 'user', ...(item.said ? { said: text(item.said, 300) } : {}), name, company, date });
+        lines.push(`walk-up: ${name}${company ? ` (${company})` : ''} stopped by on ${date}; not on this event's list, so kept apart from it`);
+        return;
+      }
     }
     const r = resolveWho(item, ctx);
     if (r.error) {
@@ -345,6 +372,10 @@ export function planRecord(items, ctx) {
       }
       case 'booked':
       case 'moved': {
+        if (item.rescheduled && !st.booked) {
+          errors.push(`${where}: ${who} has no booked meeting to reschedule; record it as booked`);
+          return;
+        }
         const start = parseLocal(item.time, ctx.zone);
         if (!start) {
           errors.push(`${where}: "time" must be the meeting's real local time as YYYY-MM-DD HH:MM`);
@@ -467,6 +498,42 @@ export function planRecord(items, ctx) {
               `${who}: that reads like a time (${tm.words}): record it as booked with {"who":"${id}","what":"booked","time":"${tm.at || 'YYYY-MM-DD HH:MM'}"} if it's confirmed`
             );
         }
+        break;
+      }
+      // What happened at their booked meeting, once its time has come: held, or a no-show. Said again with another
+      // outcome, the later word stands (the report and the agenda read the latest).
+      case 'held':
+      case 'no_show': {
+        const word = item.what === 'held' ? 'held' : 'a no-show';
+        if (!st.booked || !st.booked_start) {
+          errors.push(`${where}: ${who} has no booked meeting to mark as ${word}`);
+          return;
+        }
+        if (Date.parse(st.booked_start) > ctx.now.getTime()) {
+          errors.push(`${where}: ${who}'s meeting is at ${labelInZone(st.booked_start, ctx.zone)}, still to come: mark it once it's time`);
+          return;
+        }
+        const was = [...(ctx.state[id]?.meeting_outcomes || [])].reverse().find((o) => o.start === st.booked_start);
+        if (was?.outcome === item.what) {
+          notes.push(`${who}: the meeting at ${labelInZone(st.booked_start, ctx.zone)} is already marked ${word}`);
+          return;
+        }
+        entries.push({ type: 'meeting_outcome', ...base, outcome: item.what, slot: st.booked, start: st.booked_start });
+        lines.push(
+          `${who}: the meeting at ${labelInZone(st.booked_start, ctx.zone)} ${item.what === 'held' ? 'happened' : 'was a no-show'}${was ? ` (it was marked ${was.outcome === 'held' ? 'held' : 'a no-show'} before)` : ''}`
+        );
+        break;
+      }
+      // Someone on the list who stopped by with no booked time: a walk-up, and in touch now (as "met"), so no cold
+      // message or follow-up goes to them.
+      case 'walkup': {
+        const date = item.date || today;
+        if (!validDay(date) || date > today) {
+          errors.push(`${where}: a walk-up's date is a real day, YYYY-MM-DD, on or before today (${today})`);
+          return;
+        }
+        entries.push({ type: 'walkup', ...base, date }, { type: 'replied', ...base, outcome: 'met in person' });
+        lines.push(`walk-up: ${who} stopped by on ${date}; nothing more goes to them from floorboss`);
         break;
       }
       // Met in person (at a booth, by chance): in touch now, so no cold message or follow-up goes to them.

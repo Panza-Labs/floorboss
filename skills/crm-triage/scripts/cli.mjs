@@ -35,6 +35,7 @@ import { plannedDays, followupDay, spacingWords } from '../../../lib/spacing.mjs
 import { HARD_HOLDS } from './resolve.mjs';
 import { plainOwnerValue, ownerQuoted, ownerSaid } from '../../../lib/names.mjs';
 import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
+import { inventoryView } from '../../../lib/harness.mjs';
 
 // A list file named on the command line: in a folder floorboss reads from, not a key place, a list's kind of
 // file and size (lib/security.mjs listFileProblem). Any such file in the working folder can be given this way,
@@ -909,7 +910,7 @@ function view(opts) {
     quick_warning: (() => {
       const d = dirname(configPath());
       const ob = readJson(join(d, 'onboarding.json'), {});
-      const inv = readJson(join(d, 'inventory.json'), {});
+      const inv = inventoryView(readJson(join(d, 'inventory.json'), {})) || {};
       const crm = (inv?.found?.crm || []).map((x) => x.replace(/^[a-z]+:/, ''));
       return ob.answers?.setup_level === 'quick' && crm.length && !v.inputs.crm
         ? `Quick setup: this list was NOT checked against ${crm.join(' or ')}, so people you already work with, coworkers' contacts and opt-outs there look like strangers. Say "standard setup" to check it before anything is drafted.`

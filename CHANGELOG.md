@@ -6,6 +6,21 @@ All notable changes to floorboss are listed here. The format follows Keep a Chan
 
 The first public version.
 
+### Codex and hand-send
+- floorboss runs in OpenAI's Codex: the whole event, with you sending every message from your own mail app. A
+  Codex pack (`.codex-plugin/plugin.json`, `.agents/skills/floorboss/`, `AGENTS.md`) asks in the chat and runs the
+  critic in the same conversation, and says so. Untested in Codex itself, on Windows and with Outlook.
+- A mode table (`lib/harness.mjs`): connected sending, CRM writes, browser notes and connected reads only in Claude
+  Code (`CLAUDECODE=1`, no Codex marker). Codex and any unknown program get hand-send, and nothing in a setting can
+  switch it.
+- The outbox page: each approved email that may go today gets "Open in your mail app" (a mailto: link with the
+  exact approved text) and "Download .eml" (an unsent draft file), in Claude Code too. Only cards that offer Copy
+  get them.
+
+### Meeting outcomes
+- Record how each booked meeting went (held, no-show, cancelled, rescheduled) and walk-ups, in your own words; the
+  day's agenda shows outcomes and the meetings not marked yet; `/floorboss:report` writes an after-show page and CSV.
+
 ### Setup
 - `/floorboss:start` with three setup levels (quick, standard, full), scan-first onboarding that asks only
   what it can't work out, and answers in your own words.

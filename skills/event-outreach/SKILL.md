@@ -385,7 +385,7 @@ Write the user's report to a file in `~/.floorboss/work/` (floorboss's data fold
 
 - `who`: the person's id, or their name as on the list. Add `company` when the name is common. A name
   that matches nobody, or more than one person, records nothing and says which; ask the user.
-- `what`: `sent`, `booked`, `moved`, `cancelled`, `replied`, `met`, `declined`, `stop`, `cut`, `added`,
+- `what`: `sent`, `booked`, `moved`, `cancelled`, `held`, `no_show`, `rescheduled`, `walkup`, `replied`, `met`, `declined`, `stop`, `cut`, `added`,
   `bounced` (with `new_email` when they gave one), `away`, `note_passed`, `skipped` (a step of the route they won't send, like "skip LinkedIn for Ana": the next step then goes on its day; `touch` if it isn't the next one) or `unsent` (also `undo`).
 - `away`: an out-of-office reply, never `replied` (that ends the follow-ups). `until` is the day they're back
   (`YYYY-MM-DD`). Follow-ups keep their days; the date is only noted.
@@ -408,6 +408,14 @@ Write the user's report to a file in `~/.floorboss/work/` (floorboss's data fold
 - `booked` and `moved`: `time` is the meeting's local time in the event's time zone, as `YYYY-MM-DD HH:MM`.
   Any time works, not only the user's slots; the slots it overlaps are taken so nobody else is offered
   them. When a time comes from a screenshot or an app, ask which time zone it shows before converting.
+- Meeting outcomes, once the meeting's time has come: `held` (it happened), `no_show` (they didn't come), and
+  `rescheduled` (with `time`, the new `YYYY-MM-DD HH:MM`: the same as `moved`, for a booked meeting). A meeting called
+  off is `cancelled`, as above. Said again with another outcome, the later word stands. These go into the after-show
+  report (`report`), which a client may be billed from: **run `record` with `--check` first, say back its
+  `would_record` lines, and record only on the user's yes.**
+- `walkup`: someone who stopped by with no booked time ("Tom from Acme came by the stand"), with `date` (today if
+  missing). Someone on the list is matched as usual and counts as met in person (nothing more goes to them);
+  someone not on the list is kept by name and `company` (give both), apart from the list, for the report only.
 - `said`: the user's own words, kept with the entry. For `replied`, put the reply's words in `said` (or
   `text`): a reply with a time or a day in it ("Wednesday works, can we do 10:30?") is said back as a time to
   book, and the next step asks whether it's booked. Add `date` (the day it came) and `channel` when known:

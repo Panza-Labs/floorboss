@@ -77,10 +77,14 @@ export function agendaData(c, { day = null, savedNews = false } = {}) {
     const newsDay = todayKeyIn(zone, c.now);
     const newsFile = ct.company ? (savedNews ? savedNewsPath(c.paths.dir, ct.company, newsDay) : newsPath(c.paths.dir, ct.company, newsDay)) : null;
     const news = newsFile ? readJson(newsFile, null) : null;
+    // What happened at this meeting, by the user's word (the latest for this time). Only once one is recorded, so a
+    // meeting's facts, and a saved agenda's talking points, change only when an outcome comes in.
+    const outcome = [...(p.meeting_outcomes || [])].reverse().find((o) => o.start === start)?.outcome;
     meetings.push({
       id,
       start,
       day: meetDay,
+      ...(outcome === 'held' || outcome === 'no_show' ? { outcome } : {}),
       time: new Intl.DateTimeFormat('en-GB', {
         timeZone: zone,
         weekday: 'short',
@@ -120,7 +124,13 @@ export function agendaData(c, { day = null, savedNews = false } = {}) {
     });
   }
   meetings.sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
-  return { event: { name: c.event.name, city: c.event.city, zone }, day, goal: c.settings.goal || null, meetings };
+  // On a day's agenda: that day's meetings that have ended with nothing recorded about them. Left out when there are
+  // none, so a page with nothing to mark is as it was.
+  const mins = Number(c.settings.meeting_minutes) || 30;
+  const unmarked = day
+    ? meetings.filter((m) => !m.outcome && Date.parse(m.start) + mins * 60000 <= c.now.getTime()).map((m) => ({ id: m.id, time: m.time, name: m.person.name || m.id }))
+    : [];
+  return { event: { name: c.event.name, city: c.event.city, zone }, day, goal: c.settings.goal || null, meetings, ...(unmarked.length ? { unmarked } : {}) };
 }
 
 // Claude's talking points, checked: one entry per meeting, two to four points, one question, each point naming
@@ -184,6 +194,9 @@ function forPage(data, points) {
     event: { ...data.event, name: pageLine(data.event?.name, 300) },
     day: pageLine(data.day, 20),
     goal: pageLine(data.goal),
+    ...(Array.isArray(data.unmarked) && data.unmarked.length
+      ? { unmarked: data.unmarked.map((u) => ({ id: u?.id, time: pageLine(u?.time, 80), name: pageLine(u?.name, 300) })) }
+      : {}),
     meetings: (data.meetings || []).map((m) => ({
       ...m,
       time: pageLine(m.time, 80),
@@ -253,13 +266,27 @@ const companyLine = (brief) => {
   return [s ? `Sells: ${clip(s, 200)}` : null, rel.length ? `To you: ${clip(rel.join('; '), 300)}` : null].filter(Boolean);
 };
 
+// A meeting's outcome, and the day's meetings with none yet, in the page's words.
+const OUTCOME_WORDS = { held: 'held', no_show: 'no-show' };
+// Only on a page that shows an outcome or a "not marked yet" line: any other page stays byte for byte as it was.
+const OUTCOME_CSS = '.outcome{display:inline-block;font-size:.8rem;border:1px solid var(--line);border-radius:999px;padding:0 8px;margin:0}.outcome.held{color:var(--accent)}.unmarked{border-left:3px solid var(--accent);padding-left:10px}';
+const unmarkedLine = (list) =>
+  `Not marked yet: ${list.map((u) => `${u.time} ${u.name}`).join('; ')}. Tell floorboss how each went (held, no-show, cancelled or moved).`;
+
 // note: one line under the title (the facts-only brief says so when saved talking points no longer fit).
 export function renderMarkdown(rawData, rawPoints, { note = null } = {}) {
   const [data, points] = forPage(rawData, rawPoints);
-  const L = [`# ${data.event.name}: your meetings${data.day ? ` on ${data.day}` : ''}`, '', data.goal ? `Goal: ${data.goal}` : '', '', ...(note ? [pageLine(note), ''] : [])];
+  const L = [
+    `# ${data.event.name}: your meetings${data.day ? ` on ${data.day}` : ''}`,
+    '',
+    data.goal ? `Goal: ${data.goal}` : '',
+    '',
+    ...(note ? [pageLine(note), ''] : []),
+    ...(data.unmarked ? [unmarkedLine(data.unmarked), ''] : [])
+  ];
   for (const m of data.meetings) {
     const x = points.get(m.id) || {};
-    L.push(`## ${m.time} · ${m.person.name}, ${m.person.title || ''} at ${m.person.company || ''}`, m.place ? `Where: ${m.place}` : '', '');
+    L.push(`## ${m.time} · ${m.person.name}, ${m.person.title || ''} at ${m.person.company || ''}`, m.place ? `Where: ${m.place}` : '', ...(m.outcome ? [`Outcome: ${OUTCOME_WORDS[m.outcome]}`] : []), '');
     for (const k of knowLine(m)) L.push(`- ${k}`);
     for (const k of companyLine(m.company_brief)) L.push(`- ${k}`);
     for (const n of m.news.slice(0, 3)) L.push(n.url ? `- New: ${n.text} (${n.url})` : `- New: ${n.text}`);
@@ -282,7 +309,7 @@ export function renderHtml(rawData, rawPoints, { note = null } = {}) {
     .map((m) => {
       const x = points.get(m.id) || {};
       const know = [...knowLine(m), ...companyLine(m.company_brief)];
-      return `<section class="m"><header><span class="t">${esc(m.time)}</span><h2>${esc(m.person.name)}</h2><p class="who">${esc(m.person.title || '')}${m.person.company ? ` · ${esc(m.person.company)}` : ''}${m.place ? ` · ${esc(m.place)}` : ''}</p></header>
+      return `<section class="m"><header><span class="t">${esc(m.time)}</span><h2>${esc(m.person.name)}</h2><p class="who">${esc(m.person.title || '')}${m.person.company ? ` · ${esc(m.person.company)}` : ''}${m.place ? ` · ${esc(m.place)}` : ''}</p>${m.outcome ? `<p class="outcome ${m.outcome === 'held' ? 'held' : 'noshow'}">${esc(OUTCOME_WORDS[m.outcome])}</p>` : ''}</header>
 ${know.length ? `<h3>What you know</h3><ul>${know.map((k) => `<li>${esc(k)}</li>`).join('')}</ul>` : ''}
 ${
   m.news.length
@@ -306,8 +333,8 @@ h1{font-size:1.5rem;margin:0 0 4px}.goal{color:var(--muted);margin:0 0 24px}
 h2{font-size:1.2rem;margin:2px 0}.who{color:var(--muted);margin:0 0 8px}h3{font-size:.85rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:14px 0 4px}
 ul{margin:0;padding-left:20px}.src{font-size:.75rem;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:4px}
 blockquote{margin:0;padding-left:12px;border-left:3px solid var(--line);color:var(--muted)}.ask{margin:12px 0 0}.avoid{color:var(--muted);margin:4px 0 0}
-a{color:var(--accent)}@media print{body{padding:0}}</style></head><body>
-<h1>${esc(data.event.name)}: your meetings${data.day ? ` · ${esc(data.day)}` : ''}</h1><p class="goal">${esc(data.goal || '')}</p>${note ? `<p class="goal">${esc(pageLine(note))}</p>` : ''}
+a{color:var(--accent)}${data.unmarked || data.meetings.some((m) => m.outcome) ? OUTCOME_CSS : ''}@media print{body{padding:0}}</style></head><body>
+<h1>${esc(data.event.name)}: your meetings${data.day ? ` · ${esc(data.day)}` : ''}</h1><p class="goal">${esc(data.goal || '')}</p>${note ? `<p class="goal">${esc(pageLine(note))}</p>` : ''}${data.unmarked ? `<p class="unmarked">${esc(unmarkedLine(data.unmarked))}</p>` : ''}
 ${cards || '<p>No meetings booked.</p>'}</body></html>`;
 }
 

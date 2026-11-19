@@ -16,11 +16,13 @@ import { answersFor, EVENT_SETTINGS, isMockEvent } from '../../../lib/scope.mjs'
 import { effectiveSettings } from '../../../lib/config.mjs';
 import { contextFor } from '../../../lib/event.mjs';
 import { parseInsights } from './context-check.mjs';
+import { inventoryView } from '../../../lib/harness.mjs';
 
 export function onboardingState(slug = null) {
   const dir = dirname(configPath());
   const st = readJson(join(dir, 'onboarding.json'), { rounds: {}, event: null, answers: {} });
-  const inv = readJson(join(dir, 'inventory.json'), null);
+  // Outside Claude Code nothing connected is offered (lib/harness.mjs).
+  const inv = inventoryView(readJson(join(dir, 'inventory.json'), null));
   const global = loadConfig();
   let ev = null,
     slots = 0,

@@ -7,6 +7,8 @@
 // offers first messages to people already written to. It only adds context: it never blocks a prompt, and
 // any failure is silent. On a day the morning brief built itself (scripts/scheduled.mjs), it also says once
 // where the page is; and after an unattended run put drafts in or held something, it says so once, in one line.
+// First import: floorboss's own process, which reads settings as Claude Code does (lib/harness.mjs).
+import '../lib/own-process.mjs';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { nowMs } from '../lib/clock.mjs';
 import { join, dirname } from 'node:path';

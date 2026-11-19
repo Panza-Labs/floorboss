@@ -23,6 +23,8 @@
 // This file is the entry point: it reads the hook's input and decides, and holds the rules for Bash and agents
 // during a run and the ask-once logic. The other rules are in guard/, one topic per file (SECURITY.md lists them
 // under "Reading the guard").
+// First import: floorboss's own process, which reads settings as Claude Code does (lib/harness.mjs).
+import '../lib/own-process.mjs';
 import { existsSync, unlinkSync, openSync, closeSync, mkdirSync, writeFileSync, readFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import { home, recordFile } from '../lib/paths.mjs';

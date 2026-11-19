@@ -4,6 +4,7 @@
 import { createHash } from 'node:crypto';
 import { escapeHtml as e, safeUrl, jsonForScript } from '../../../lib/escape.mjs';
 import { profileLinkAllowed, isLinkedInProfile, eventHosts } from '../../../lib/security.mjs';
+import { mailtoHref, emlText, emlName, plainAddress } from './mailto.mjs';
 
 const csp = () => `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${SCRIPT_HASH}'; img-src 'none'; base-uri 'none'; form-action 'none'`;
 
@@ -22,10 +23,38 @@ function field(label, id, value, copy = true) {
   );
 }
 
+// Nothing to copy: it can't go any more, or not today, it waits for approval, floorboss let it through and it may
+// have gone, or it is in your drafts folder already (a copy pasted by hand would be a second message).
+export const offersCopy = (c) => !(c.not_going || c.not_today) && !c.pending && !c.may_have_gone && !c.staged;
+
+// The send buttons of an email card (mailto.mjs), only where the card offers Copy and the user sends email themselves
+// (you_send: never when floorboss sends email for this event): the approved subject and body, to the address it was
+// approved to go to. null: no buttons (not an email, nothing to copy, or not one plain address).
+// file and eml: the .eml written next to the page (renderFile), so the page and the files can never disagree.
+export function mailOf(c) {
+  if (!c || c.kind === 'coordinate' || c.channel !== 'email' || c.you_send !== true || !offersCopy(c)) return null;
+  const to = plainAddress(c.send_to);
+  if (!to) return null;
+  // Text that isn't well-formed Unicode (a lone surrogate) can't be percent-encoded: no buttons, and the page still builds.
+  if (![c.subject ?? '', c.body ?? ''].every((t) => typeof t === 'string' && t.isWellFormed())) return null;
+  const eml = emlText({ to, subject: c.subject ?? '', body: c.body, id: c.id });
+  if (!eml) return null;
+  const m = mailtoHref({ to, subject: c.subject ?? '', body: c.body });
+  return { to, href: m.href, long: m.why === 'long', file: emlName(c.id, c.touch), eml };
+}
+
+function sendButtons(c) {
+  const m = mailOf(c);
+  if (!m) return '';
+  return `<div class="send" data-send="1">${m.href ? `<a class="sendbtn primary" href="${e(m.href)}">Open in your mail app</a>` : ''}<a class="sendbtn" href="mail/${e(m.file)}" download="${e(m.file)}">Download .eml</a>
+    <p class="sub">${m.href ? '' : 'Too long for a mail link: use Download .eml and open the file. '}To ${e(m.to)}. Press Send in your mail app, then tick Sent below and use Copy status, or tell floorboss "sent". Opened from here it is a new email, not a reply in your thread with them.</p></div>`;
+}
+
 // A profile link is shown (and opened by "Go") only when it points at LinkedIn, an event app floorboss knows,
 // or the event's own site: a link from a list or a CRM field pointing anywhere else shows no link.
 // app: the event's own app, when one is set up (null: none, so no card points at an app).
-function card(c, hosts = [], app = null) {
+// hand: the page is built outside Claude Code (hand-send), where floorboss's slash commands don't exist.
+function card(c, hosts = [], app = null, hand = false) {
   const raw = safeUrl(c.profile_url);
   const url = raw && profileLinkAllowed(raw, hosts) ? raw : null;
   // Where the message was approved to go (c.where) names the platform: a LinkedIn step whose link isn't shown is still
@@ -52,9 +81,7 @@ function card(c, hosts = [], app = null) {
   // page offers it to send.
   const hold = c.not_going || c.not_today;
   const li = !hold && !c.pending && !c.may_have_gone && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
-  // Nothing to copy: it can't go any more, or not today, it waits for approval, floorboss let it through and it may
-  // have gone, or it is in your drafts folder already (a copy pasted by hand would be a second message).
-  const copy = !hold && !c.pending && !c.may_have_gone && !c.staged;
+  const copy = offersCopy(c);
   const channel =
     c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
@@ -91,7 +118,8 @@ function card(c, hosts = [], app = null) {
   }
   ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject, copy) : ''}
   ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body, copy)}
-  <p class="stale" hidden>The earliest time offered here has passed. Run /floorboss:event-draft again for new times before sending.</p>
+  ${sendButtons(c)}
+  <p class="stale" hidden>The earliest time offered here has passed. ${hand ? 'Run floorboss again' : 'Run /floorboss:event-draft again'} for new times before sending.</p>
   ${
     c.kind === 'coordinate' || c.pending
       ? ''
@@ -169,6 +197,8 @@ button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 .field .k{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--bg);font:11px ui-monospace,Menlo,monospace;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 pre{margin:0;padding:10px 12px;white-space:pre-wrap;word-wrap:break-word;font:inherit}
 .ticks{display:flex;flex-wrap:wrap;gap:14px;font-size:14px}
+.send{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.send .sub{margin:0;flex-basis:100%;font-size:13px}
+.sendbtn{display:inline-block;text-decoration:none;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:7px;padding:4px 10px}.sendbtn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.send[hidden]{display:none}
 .queue{background:var(--card);border:2px solid var(--accent);border-radius:12px;padding:14px 16px;margin:16px 0;display:grid;gap:10px}
 .queue .who{font-size:17px}.queue .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.queue kbd{font:11px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:4px;color:var(--muted)}
 .queue button.primary kbd{color:#fff;border-color:rgba(255,255,255,.6)}
@@ -200,7 +230,7 @@ ${data.waiting ? `<p class="banner">${data.waiting} ${data.waiting === 1 ? 'draf
   <p class="sub" id="qDone" hidden>All LinkedIn messages here are marked sent. Use "Copy status" so floorboss records them, and "Copy CRM log" for HubSpot or a sheet.</p>
 </section>
 <h2>Messages (${msgs.length})</h2>
-${msgs.map((c) => card(c, hosts, data.event?.app_name || null)).join('\n') || '<p class="sub">Nothing to send yet.</p>'}
+${msgs.map((c) => card(c, hosts, data.event?.app_name || null, data.hand_send === true)).join('\n') || '<p class="sub">Nothing to send yet.</p>'}
 ${coords.length ? `<h2>Coordinate notes (${coords.length})</h2><p class="sub">These people's relationship is held by someone else. Pass the note on instead of reaching out yourself.</p>${coords.map((c) => card(c, hosts)).join('\n')}` : ''}
 ${slotRows ? `<h2>Who was offered each time</h2><table><thead><tr><th>Time</th><th>Offered to</th></tr></thead><tbody>${slotRows}</tbody></table>` : ''}
 ${(data.visit || []).length ? `<h2>Visit list (${data.visit.length})</h2><table><thead><tr><th>Company</th><th>Booth</th></tr></thead><tbody>${data.visit.map((v) => `<tr><td>${e(v.company)}</td><td>${e(v.booth || '—')}</td></tr>`).join('')}</tbody></table>` : ''}
@@ -236,6 +266,7 @@ const OUTBOX_SCRIPT = `
       var earliest = c.dataset.earliest;
       var stale = earliest && Date.now() > Date.parse(earliest) && !s.sent;
       c.querySelectorAll('button.copy').forEach(function(b){ b.disabled = !!stale; });
+      c.querySelectorAll('[data-send]').forEach(function(b){ b.hidden = !!stale; });
       var p = c.querySelector('.stale'); if (p) p.hidden = !stale;
     });
     document.getElementById('sentCount').textContent = sent;

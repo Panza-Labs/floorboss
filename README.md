@@ -59,6 +59,122 @@ Claude Code asks before each of floorboss's scripts runs the first time. Allowin
 own `scripts/cli.mjs` files saves a prompt per step; floorboss's commands already limit themselves to
 those scripts.
 
+## Run it in Codex
+
+floorboss also runs in OpenAI's Codex (the coding agent that comes with a ChatGPT plan). There it does the whole
+event with you (the list, who to meet, research, drafts, follow-ups, what came back, the show-day brief), and **you
+send every message yourself, from your own mail app**. In Codex floorboss uses no connected tools at all: no mailbox,
+no CRM, no calendar, no browser.
+
+**Untested so far:** Codex itself (it isn't installed where floorboss is built), Windows, and Outlook. The steps below
+come from Codex's source and documentation, not from a run. Please open an issue with what you find.
+
+### Install
+
+You need Codex, [Node.js](https://nodejs.org) 22 or later, and git.
+
+```
+git clone https://github.com/Panza-Labs/floorboss.git
+cd floorboss
+mkdir ~/.floorboss
+codex --add-dir ~/.floorboss --search
+```
+
+In PowerShell the folder is `$HOME\.floorboss`: `mkdir $HOME\.floorboss`, then
+`codex --add-dir $HOME\.floorboss --search`.
+
+- Start Codex **in the floorboss folder**. Codex then reads floorboss's `AGENTS.md` and its skill in
+  `.agents/skills/floorboss/`.
+- `--add-dir` lets floorboss's scripts write their data folder, which is outside the floorboss folder; Codex's
+  default sandbox lets commands write only the folder you started it in. To make it permanent, add the folder to
+  `sandbox_workspace_write.writable_roots` in `~/.codex/config.toml`.
+- `--search` turns on Codex's web search, which floorboss's research uses. Without it, say "skip" when floorboss asks
+  about research.
+- **Windows:** the Codex CLI's install page lists Windows 11 through WSL2; Codex's Windows sandbox page describes the
+  Codex app running natively in PowerShell. floorboss hasn't been tried either way. In WSL2, your data folder is in the Linux home, so
+  open the outbox page from Windows with `explorer.exe .` in the event's folder.
+
+Codex can also install floorboss as a plugin (`codex plugin marketplace add Panza-Labs/floorboss`, then
+`codex plugin add floorboss@floorboss`): its manifest is `.codex-plugin/plugin.json`. This way is untested too.
+
+**Lists.** floorboss reads an attendee list, a CRM export or a contacts file only from its data folder, the temp
+folder or the folder you started Codex in. Copy the file from Downloads into `~/.floorboss/work/` first (in
+PowerShell, `$HOME\.floorboss\work`), or let floorboss ask to copy it there.
+
+### First run
+
+Say "run floorboss for <the event's name or link>" (or `$floorboss`). Try the made-up event first:
+"run floorboss on the mock event, buyers". floorboss asks its questions in the chat, one at a time. In Codex the
+setup levels are the same, but even "full" never sends: it adds the order of channels and the days between
+follow-ups.
+
+### How sending works
+
+When you've approved the messages, floorboss opens the outbox page in your browser (`outbox.html`, in the event's
+folder under `~/.floorboss/events/`). Each email that may go today has two buttons:
+
+- **Open in your mail app** opens a new email in Outlook (or whatever your computer uses for email links) with the
+  address, subject and message filled in, exactly as you approved them, opt-out line included. Read it, then press
+  **Send** there.
+- **Download .eml** saves the same email as a draft file. Open it and Outlook shows it as a draft to send. Use it when
+  the first button doesn't open your mail app, when the line breaks come out wrong, or for a message too long for a
+  mail link (the page then shows only this button). The files are also in the event's `mail/` folder.
+
+Event-app and LinkedIn messages have a Copy button each, to paste where they go.
+
+**With Outlook on Windows (untested):**
+- Check which app opens email links and .eml files: Windows Settings, Apps, Default apps, then `MAILTO` and `.eml`.
+  Set classic Outlook if that's where your account is; new Outlook may not take every hosted Exchange account.
+- Outlook may add your signature to a new email. floorboss's message already ends with your sign-off and, where it
+  applies, the opt-out line, so delete the extra signature or turn auto-signatures off for new messages.
+- Check the From account before you press Send.
+- Open the .eml from the event's `mail` folder, not a copy saved to Downloads: floorboss removes a file there once
+  its message is recorded as sent, but a copy in Downloads stays, and opening it again would send it twice.
+
+Then tell floorboss it went: "sent Ana and Raj", or tick **Sent** on the page and paste its **Copy status** text into
+the chat. floorboss times each follow-up from that day. A message with no buttons isn't to be sent now, and its card
+says why (they opted out, someone at another of your events wrote to them today, the event is over). A follow-up
+opened from the page is a new email, not a reply in your thread; to keep the thread, reply to your last email and
+paste the follow-up's text.
+
+### Replies, by your word
+
+floorboss can't see your mailbox in Codex, so each time you run it, it asks what came back. Tell it in your own
+words: "Megan said yes to Tue 9:00", "Jimmy said not interested", "Lena asked me to stop", "Raj is out until the
+12th". floorboss records it, books the time, stops that person's follow-ups, and keeps an opt-out at every event.
+
+On a day follow-ups are due, run floorboss again: it drafts them, you approve them, and they appear on the outbox page
+with the same buttons. The morning of a meeting day it offers the show-day brief.
+
+After a meeting, tell it how it went ("Ana's meeting happened", "Raj didn't show", "Tom from Acme stopped by"): it
+reads each one back and records it on your yes. Ask for the after-show report for a page and a CSV in the event's
+folder. Untested in Codex.
+
+### What's different from Claude Code
+
+| | Claude Code | Codex |
+|---|---|---|
+| Who sends | you, or floorboss after a prompt you allow | you, always, from your mail app |
+| Replies | read from your mailbox or CRM, or your word | your word |
+| CRM, calendar, people-data tools, browser | used once you agree | not used |
+| The critic | a separate agent that can't open files | the same Codex conversation, so a weaker check: read every draft |
+| The guard hook | checks every tool call, fails closed | none (Codex's hooks fail open, so floorboss doesn't install any) |
+| Unattended drafts and the morning brief on its own | macOS, if you install them | no |
+
+### Don't connect mail, CRM or browser tools in Codex
+
+floorboss's guard runs only in Claude Code. In Codex nothing checks a tool call before it runs, so floorboss can't
+stop the model using a mail, CRM, calendar or browser tool you connected there, whatever floorboss's own text says.
+It tells the model never to, but an instruction is not a block. **While you run floorboss in Codex, keep those tools
+disconnected,** and don't run Codex with approvals turned off (`--yolo` or "full access").
+
+How floorboss knows it's in Codex: Codex sets `CODEX_SESSION_ID` and similar variables on the commands it runs, and
+any of them switches connected features off. With none of them and no `CLAUDECODE=1` (which Claude Code sets),
+floorboss also treats the program as unknown and stays hand-send. Nothing in floorboss's settings can switch
+connected sending on outside Claude Code. A model can still type `CLAUDECODE=1` in front of a command, and in Codex
+nothing stops it; floorboss's scripts never send anything themselves, so what that would change is what floorboss
+offers, not what can be sent. Keeping send tools disconnected is the real control.
+
 ## Text in your files is data, never instructions
 
 Prompt injection is text hidden in something an AI reads that tries to give it orders. For a tool like
@@ -259,6 +375,20 @@ companies it will look up first, and you can leave some out), and two to four
 things to talk about with one question to ask. Each talking point names the fact it rests on. It's saved
 as a page, a short version, and an `.ics` file that puts each brief into the meeting's notes in your
 calendar.
+
+**Meeting outcomes and the after-show report.** After a meeting, tell floorboss how it went, in your own words:
+"Ana's meeting happened", "Raj didn't show", "Lena moved to Wed 11:00", "Cy cancelled", or "Tom from Harbor Two
+stopped by the stand" for a walk-up with no booked time. floorboss reads it back and records it on your yes. A meeting
+can be marked held or no-show only once its time has come; a later word replaces an earlier one. Someone on your list
+who stopped by counts as met, so nothing more goes to them; someone not on your list is kept by name and company, for
+the report only. On a meeting day the agenda shows each meeting's outcome once it's recorded, and lists that day's
+earlier meetings that aren't marked yet.
+
+`/floorboss:report` writes the after-show report into the event's folder: `report.html` and `report.csv`, with the
+meetings booked, held, no-show, cancelled and rescheduled (names, companies, times, and the time a meeting moved
+from), the walk-ups listed apart, and for each person the channel and day floorboss's outreach first reached them.
+It's built from floorboss's own record of the event, so a meeting nobody marked is "not marked yet", never "held".
+Nothing leaves your machine.
 
 ### The morning brief, on its own
 

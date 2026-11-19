@@ -28,6 +28,8 @@
 // starts one Claude Code run (lib/unattended.mjs claudeRun, a pure value the tests read) whose only job is to put
 // those follow-ups in the user's drafts folder, each after the guard read the mailbox (and the CRM) for it. It never
 // passes a flag that turns the guard off or answers a prompt for the user.
+// First import: floorboss's own process, which reads settings as Claude Code does (lib/harness.mjs).
+import '../lib/own-process.mjs';
 import { readdirSync, existsSync, lstatSync, unlinkSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID, randomBytes } from 'node:crypto';

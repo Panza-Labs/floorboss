@@ -1,0 +1,4 @@
+{
+  "description": "floorboss runs no hooks in Codex. This file is named in .codex-plugin/plugin.json on purpose: with no hooks entry, Codex would load hooks/hooks.json, Claude Code's guard, which can't protect anything in Codex (its hooks fail open there).",
+  "hooks": {}
+}

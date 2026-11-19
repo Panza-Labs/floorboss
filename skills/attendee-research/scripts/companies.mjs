@@ -4,7 +4,7 @@
 // what the company sells, how it relates to the sender's company and what it would want from them; without
 // that, a note pitches the sender's own problem at a partner, or explains the reader's product back to them.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { writeText } from '../../../lib/jsonio.mjs';
 import { safeUrl } from '../../../lib/escape.mjs';
 import { companyKey, fileSlug } from '../../../lib/normalize.mjs';
@@ -31,7 +31,8 @@ export const readCompanyBrief = (dir, company) => (existsSync(companyBriefPath(d
 // meta }, newest first, or null. Briefs that weren't researched (skipped, the mock's canned ones) don't count.
 export function recentBriefElsewhere(dir, company, { days = 14 } = {}) {
   const root = join(dir, '..');
-  const here = dir.replace(/\/+$/, '').split('/').pop();
+  // basename, not a split on "/": the same on macOS and Linux, and right on Windows too.
+  const here = basename(dir);
   let best = null;
   try {
     for (const slug of readdirSync(root)) {

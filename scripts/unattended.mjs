@@ -19,6 +19,8 @@
 // Installing, removing and on run only in a real terminal (the keyboard and the screen both), never from a pipe, a
 // script or a Claude Code session; floorboss's guard refuses them from a session by name as well. off and status
 // run anywhere.
+// First import: floorboss's own process, which reads settings as Claude Code does (lib/harness.mjs).
+import '../lib/own-process.mjs';
 import { existsSync, lstatSync, mkdirSync, writeFileSync, renameSync, unlinkSync, readFileSync, statSync, realpathSync } from 'node:fs';
 import { dirname, join, isAbsolute, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -29,6 +29,7 @@ import {
   TEST_TASK
 } from './tasks.mjs';
 import { unattendedOn, unattendedStatus } from './unattended.mjs';
+import { connected, modeLine } from '../../../lib/harness.mjs';
 import { movedNow } from '../../../lib/clock.mjs';
 
 const now = () => (movedNow() ? new Date(movedNow()) : new Date()).toISOString();
@@ -40,6 +41,8 @@ const CHECK_TTL_MS = 3600 * 1000;
 // The channels the user turned sending on for: the saved setting, or, during setup before the follow-up mode is
 // chosen, their answer to the sending question (so send setup can screen and test the tool it will use).
 function chosenChannels() {
+  // Outside Claude Code there is no channel to send on (lib/harness.mjs), whatever an earlier answer says.
+  if (!connected()) return [];
   const set = loadConfig().sending?.channels;
   if (Array.isArray(set) && set.length) return set;
   const raw = readJson(join(dirname(configPath()), 'onboarding.json'), {})?.answers?.sending_channels;
@@ -370,4 +373,23 @@ function check(opts) {
   return screenTool(opts.task, opts.tool);
 }
 
-run({ 'test-allow': testAllow, tasks, screen, validate, 'save-recipe': saveRecipe, forget, status, recipe, check, 'unattended-on': unattendedOn, 'unattended-status': unattendedStatus });
+// Outside Claude Code (lib/harness.mjs) floorboss uses no connected tool: nothing that saves, tests or forgets a
+// connection runs, and nor does the unattended opt-in.
+const claudeOnly = (fn, what) => (opts) => {
+  if (!connected())
+    throw new Error(`${what} works only in Claude Code, where floorboss's guard checks every connected-tool call. ${modeLine()}`);
+  return fn(opts);
+};
+run({
+  'test-allow': claudeOnly(testAllow, 'Testing a connection'),
+  tasks,
+  screen,
+  validate,
+  'save-recipe': claudeOnly(saveRecipe, 'Saving a connection'),
+  forget: claudeOnly(forget, 'Forgetting a connection'),
+  status,
+  recipe,
+  check,
+  'unattended-on': claudeOnly(unattendedOn, 'Unattended follow-up drafts'),
+  'unattended-status': unattendedStatus
+});

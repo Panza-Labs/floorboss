@@ -64,6 +64,37 @@ The guard is split by topic, so a reviewer can take one file at a time:
 | `hooks/guard/shared.mjs` | Small helpers the rules share. |
 | `hooks/plugin-root.mjs` | The folder the plugin is installed in, which the file and shell rules compare paths against. |
 
+## Outside Claude Code (Codex)
+
+Everything above about the guard holds in Claude Code only. Outside it (Codex, or any program floorboss doesn't
+recognise), floorboss runs **hand-send**: it uses no connected tool and offers no send, CRM write or browser step, and
+the user sends each message from their own mail app. The README's [Run it in Codex](README.md#run-it-in-codex) says how.
+
+- **The mode table** (`lib/harness.mjs`). Connected features need `CLAUDECODE=1` (set by Claude Code in its shells)
+  and no Codex marker (`CODEX_SESSION_ID`, `CODEX_THREAD_ID`, `CODEX_TOOL_CALL_ID`, `CODEX_SANDBOX`,
+  `CODEX_SANDBOX_NETWORK_DISABLED`). A marker always wins. Anything else, nothing at all included, is hand-send.
+  floorboss's own processes that no model drives (the guard and remind hooks, `scripts/scheduled.mjs`,
+  `scripts/unattended.mjs`) read settings as before, by a mark in their own code (`lib/own-process.mjs`, imported
+  first); a Codex marker overrides that too. No setting, file or argument turns connected mode on.
+- **What hand-send changes.** Every reader of the settings sees no connection, no sending channel, CRM logging as a
+  CSV at most, no browser reading or CRM contact writes, whatever `config.json` or an event's settings say; saving a
+  setting there can't store a connection or a sending channel; the scan reports nothing connected; the connectors
+  commands that save, test or forget a connection, and the unattended opt-in, refuse. Tests:
+  `test/harness-mode.test.mjs`, `test/sims/codex-hand-send.test.mjs`.
+- **The send buttons** (`skills/event-outreach/scripts/mailto.mjs`, both harnesses). Only a card that offers Copy gets
+  them, so suppression, opt-outs, one message a day per person and the event's end apply as they do to Copy. The
+  `mailto:` link and the `.eml` carry the approved subject and body exactly, to one plain address (letters, digits,
+  `. _ + -` before the @; nothing that could add a recipient or a header), every part percent-encoded, no quote in the
+  link; a subject with a line break gets no buttons. The `.eml` has `X-Unsent: 1`, no From, and a base64 body. The
+  files sit in the event's `mail/` folder, which is emptied at every build and written only by floorboss's scripts
+  (the guard refuses Claude's file tools there, as for any record). Tests: `test/outbox-send-buttons.test.mjs`.
+- **What it can't do.** Codex's PreToolUse hooks fail open (openai/codex #41979, open on 2026-11-19), and some tools
+  skip them (#49736, #27833), so floorboss installs no hook there. Its Codex manifest names an empty hooks file on
+  purpose: without one, Codex would run `hooks/hooks.json`, this guard, in a place where it can't block. So in Codex
+  nothing stops the model calling a mail, CRM or browser tool the user connected, editing floorboss's records, or
+  typing `CLAUDECODE=1` before a script. floorboss's own scripts never send in any mode. The control there is the
+  user's: connect no such tool, keep Codex's approvals on, and read each message before pressing Send.
+
 ## Where your data can go
 
 floorboss's own scripts make no network calls (`npm run self-check` checks this). Your lists, CRM records and
