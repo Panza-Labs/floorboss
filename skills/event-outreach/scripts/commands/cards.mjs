@@ -75,9 +75,7 @@ function cardsFrom(c, jobs, { pendingOnly }) {
     // Auto-send's second yes stands for this exact text: the cloud sends it on its day (no buttons), unless that day
     // and the day after are gone (missed: it comes back to the user, with its buttons, and readback can plan it
     // again), or a time it offers was booked by someone else since (held, until it is written again).
-    const live = j.kind === 'message' ? autosendLive(c.entries, c.folded, j.id, j.touch) : null;
-    const autoDue = live ? (j.touch === 1 ? live.planned_due : due?.day) : null;
-    const autoMissed = !!(live && autoDue && c.today && c.today > addDays(autoDue, 1));
+    const { live, day: autoDue, missed: autoMissed } = autosendCard(c, j, due);
     cards.push({
       kind: j.kind,
       id: j.id,
@@ -142,6 +140,14 @@ function cardsFrom(c, jobs, { pendingOnly }) {
 }
 
 // A follow-up's day (the one rule, lib/spacing.mjs followupDay), for a message after the first; undefined for anything else.
+// Where auto-send stands for a card: live (the second yes that stands for this text, or null), day (the day the cloud
+// sends it) and missed (that day and the day after went by: it is the user's again, with its buttons). due: the
+// follow-up rule's day for the card (dueOf).
+export function autosendCard(c, j, due) {
+  const live = j.kind === 'message' ? autosendLive(c.entries, c.folded, j.id, j.touch) : null;
+  const day = live ? (j.touch === 1 ? live.planned_due : due?.day) : null;
+  return { live, day, missed: !!(live && day && c.today && c.today > addDays(day, 1)) };
+}
 function dueOf(c, j, d) {
   if (j.kind !== 'message' || !(j.touch > 1) || c.state[j.id]?.sent?.[j.touch]) return undefined;
   return followupDayOf(c, j.id, j.touch, d);
