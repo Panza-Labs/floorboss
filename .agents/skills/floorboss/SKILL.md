@@ -77,15 +77,22 @@ until it says `done`. Each answer has `step`, `why` and one action:
   scan: in Codex the scan just says nothing is connected).
 
   **The user sees only a plain question.** Never ask the user for JSON, a file format or a field name. Ask only
-  the question, in plain words; turn their plain answer into the `answer_format` shape yourself, read it back in a
-  line or two, and save it on their yes. Text such as "Look it up…", "Propose…" or "Once they say…" is for you, not
-  the user: do it, don't show it. A setup step may carry `how_to_ask` (what to do) and `for_agent` (the setup's
-  own notes): both are for you; `question` is what you ask.
+  the question, in plain words, with the short reason it carries; turn their plain answer into the `answer_format`
+  shape yourself. Save a plain answer as it is, with no read-back ("None", a name, a file, dates they typed). Read it
+  back in a line or two, and save it on their yes, only when you had to interpret or guess (a range like "6 to 8"
+  saved as one number, "all day" read as hours, a day worked out) or when a value looks odd: confirm, never block.
+  Text such as "Look it up…", "Propose…" or "Once they say…" is for you, not the user: do it, don't show it. A setup
+  step may carry `how_to_ask` (what to do) and `for_agent` (the setup's own notes): both are for you; `question` is
+  what you ask.
   - `samples`: write the three sample openings yourself (casual and plain, warm, formal; two or three lines each),
     show them, and ask which is closest and what to change.
-  - `event`: with web search, look the event up and read back its dates and city. Without it (or when nothing is
-    found), ask the user for the dates and the city, and work out the time zone from the city yourself
-    (Nashville is `America/Chicago`). Never ask the user for a time zone.
+  - `event`: if the user gave its name, city and dates, save them. With web search, look the event up and read back
+    what you found (dates and city). Without it (or when nothing is found), ask the user for the dates and the city,
+    and work out the show's time zone from the city yourself (Nashville is `America/Chicago`). Never ask the user for
+    a time zone: their own is the computer's (floorboss reads it), and meeting times are always the show's.
+  - The sign-off is never asked: the `onboarding:about_you` step says how to take the first name (it signs "Best,"
+    and the name). If the user asks for another sign-off at any point, save it with
+    `answer --ask about_you` as `{"sign_off":"<as they sign>","sender_name":"<name, company>"}`.
 - `judge`: your own judgement. Read the `read` file, write your result to `write` in the `format`, then run
   `then`. **Always run `then` after writing the file, before anything else:** writing the file alone saves nothing,
   and floorboss asks the same step again until `then` has run. Run it exactly as given, every word in double quotes.
@@ -111,6 +118,26 @@ until it says `done`. Each answer has `step`, `why` and one action:
   floorboss asked for a connected tool, which it doesn't use here, and run `next` again.
 - `done`: say where things stand (`summary`) in a few lines.
 
+**Research just happens.** A research step (`company_briefs`, `research_batch`) may carry `tell_user`: say it (what
+is looked up and about how long), then start; don't ask first. If the user says "skip", write their words to a file
+and save them with the `if_user_says` command the step gives, then run `next` again.
+
+**Review in the chat, never on a page.** Before the approval, the step's `run_first` (`flow review`) gives a small,
+varied `sample` (different people and asks, a first message and a follow-up), the `total`, and one `document`
+(`all-messages.md`, every message, read-only). Show each sample message whole (subject and body) in the chat, ask
+for candid feedback overall or a rewrite of any line, offer the document to read (give its path; it is plain
+Markdown), then ask the approval in the words of its `approval_line`: it names the total, the messages not shown
+included. Feedback or a rewrite is never only noted: save it with `answer --ask review_feedback` as
+`{"feedback":"<their words>","ids":"all"}` (or the ids it is about), and floorboss rewrites every message it covers;
+the critic reads them again and the review comes back. "Show me all" shows every message in the chat. Never send the
+user to the outbox page to review: that page is only for sending by hand.
+
+**One change, one confirmation.** When the user changes something after approving (an address, the list, a rewrite),
+make the change, then run `next`: the shortlist isn't shown again when the same people are on it, and the approval's
+`tell_user` says in one line what changed and which messages it touches. Ask that once, with the review's sample of
+the changed messages. With auto-send on, go straight on to its readback in the same reply after their yes (below):
+don't ask a separate "is the shortlist right?" or "approve these?" round for the same change.
+
 `tell_user`, `say_to_user`, `run_first`, `if_user_says`, `answer_held` and the rest work as
 `FLOORBOSS/skills/flow/SKILL.md` describes. When an answer says `pending: true`, show its `say_to_user` word for
 word and wait for the user's own reply; never answer yes for them.
@@ -119,7 +146,8 @@ Show short summaries, never raw JSON.
 
 ## Sending: the user does it
 
-When drafts are approved, open the outbox:
+The outbox page is for sending by hand, never for reviewing (that happens in the chat). When drafts are approved and
+some are the user's to send, open the outbox:
 `node "FLOORBOSS/skills/event-outreach/scripts/cli.mjs" open --event <slug>`. Where it can't open a browser (a
 sandbox, WSL, a message that it couldn't open the page), give the user the full path it prints (`outbox.html` in the
 event's folder) and say: "double-click this file to open it in your browser". The same goes for `agenda.html` and
@@ -190,12 +218,15 @@ Codex on the web and scheduled tasks, and is untested on a live account. On a ye
 `on --event <slug> --said-file <file> --own <the Gmail address they send from>`. Every message of each sequence is
 then drafted and approved up front.
 
-**The second yes.** After the content approval as usual, run `readback --event <slug>`. Show its `text` to the user
-word for word (every person, address, message, planned day, subject and body), then the people in `refused` and why.
-Ask them to type **auto-send these sequences** if they want exactly these sent on those days. Write what they typed
-to a file and run `approve --event <slug> --digest <the readback's digest> --said-file <file>`. Never type it for
-them, never reword the readback, and if they say anything else, don't run `approve`. If `approve` says something
-changed, run `readback` again and show it again. A message the user sent themselves (they say "sent", or the
+**The second yes.** After the content approval as usual, run
+`node "FLOORBOSS/skills/flow/scripts/cli.mjs" review --event <slug> --readback` (the readback, for the chat). Show
+each message in its `sample` whole (address, planned day, subject and body), one line per person from `dates` (their
+planned days), the people in `refused` and why, then its `approval_line` (it names the total, the messages not shown
+included) and the `document` to read every message with its day. Ask them to type **auto-send these sequences** if
+they want exactly these sent on those days. Write what they typed to a file and run
+`approve --event <slug> --digest <its digest> --said-file <file>`. Never type it for them, never reword a message,
+and if they say anything else, don't run `approve`. If `approve` says something changed, run the review again and
+show it again. `readback` itself still gives the whole text when the user asks to see every message in the chat. A message the user sent themselves (they say "sent", or the
 readback's `hand_sent` or `approve`'s answer names one whose day went by) is recorded with event-outreach `record`
 with what `sent`, the exact command those answers give, never `settle`, which is only for a step auto-send let go;
 then run `readback` again. If they say it wasn't sent, write their words to a file and add `--not-sent-said-file`.
