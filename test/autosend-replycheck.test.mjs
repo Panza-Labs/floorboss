@@ -1,7 +1,7 @@
 // U3 and U4 of auto-send: the Gmail search query and the reply decision read from the tool's answer (each accepted
 // shape, each sender field, auto-replies, bounces, the user's own mail, anything unknown stops the run), and the
-// send record from the send tool's answer (ids, or unclear). The answers are the likely shapes until M1 records the
-// real ones (test/fixtures/gmail-real/ then).
+// send record from the send tool's answer (ids, or unclear). These are the earlier likely shapes, still read; the real
+// ones, captured from a live cloud run, are in test/autosend-gmail-real.test.mjs (test/fixtures/gmail-real.mjs).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { world, ledgerLines, NOW, OWN } from './fixtures/autosend-world.mjs';
@@ -131,9 +131,10 @@ test('release: only a due step, only after a fresh reply check, then never again
   assert.throws(() => release(evDir, item, 'r1', now + 2000, { issuedMs: now }), /isn't due now|may have gone/);
 });
 
-test('sendArgs: the approved subject and body, the one address, no cc, bcc or thread', () => {
-  assert.deepEqual(sendArgs(ITEM), { to: ['ana@north.example'], subject: 'One more thought', body: 'Hi Ana' });
-  assert.deepEqual(Object.keys(sendArgs({ ...ITEM, thread_id: 't-1' })).sort(), ['body', 'subject', 'to']);
+test('sendArgs: the approved subject and body, the one address, no cc or bcc; a recorded message id threads it', () => {
+  assert.deepEqual(sendArgs(ITEM), { to: 'ana@north.example', subject: 'One more thought', payload: { mime_type: 'text/plain', charset: 'UTF-8', body: { content: 'Hi Ana' } }, response_fields: ['id', 'thread_id'] });
+  assert.deepEqual(Object.keys(sendArgs({ ...ITEM, thread_id: 't-1' })).sort(), ['payload', 'response_fields', 'subject', 'to']);
+  assert.deepEqual(Object.keys(sendArgs({ ...ITEM, thread_id: 't-1', reply_to_message_id: 'm-1' })).sort(), ['payload', 'reply_message_id', 'response_fields', 'subject', 'to']);
 });
 
 test('record: ids in each accepted shape go on the sent line (no call_result: only the guard writes one); anything else is unclear', () => {
