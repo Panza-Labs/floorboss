@@ -222,7 +222,13 @@ td,th{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);font-
 a{color:var(--accent)}textarea{width:100%;min-height:90px;font:12px ui-monospace,Menlo,monospace;margin-top:8px}
 </style></head>
 <body><div class="wrap">
-<p class="banner">You're sending these yourself. Check the rules that apply to you and your recipients before you send. floorboss never sends anything.</p>
+<p class="banner">${
+  // An event set to auto-send from the cloud (event.json autosend: lib/autosend/): floorboss does send the messages it
+  // has the user's second yes for, so "floorboss never sends anything" would be false there.
+  data.event?.autosend === true
+    ? "Auto-send is on for this event: floorboss sends each message marked for auto-send on its day, from your ChatGPT cloud task. Send the rest yourself. Check the rules that apply to you and your recipients before anything goes."
+    : "You're sending these yourself. Check the rules that apply to you and your recipients before you send. floorboss never sends anything."
+}</p>
 <h1>${e(data.event.name)}</h1>
 ${data.waiting ? `<p class="banner">${data.waiting} ${data.waiting === 1 ? 'draft is' : 'drafts are'} waiting for your approval and ${data.waiting === 1 ? 'is' : 'are'} not shown here.</p>` : ''}
 <p class="sub">${e(data.event.city || '')} · ${e(data.event.start_date)} to ${e(data.event.end_date)} · times in ${e(data.event.time_zone)} · generated ${e(data.generatedAt)}</p>

@@ -998,6 +998,8 @@ function view(opts) {
     with_two_times: Object.values(v.assignments).filter((x) => x.length === 2).length,
     with_one_time: Object.values(v.assignments).filter((x) => x.length === 1).length,
     open_ask: v.openAsk.length,
+    // Times go only on :00 or :30: said plainly when that leaves someone with fewer than two to choose from.
+    few_times_note: fewTimesNote(v),
     // No free time given yet is not "ran out": times come once it is.
     open_ask_note: v.openAsk.length
       ? v.slots.length
@@ -1449,6 +1451,7 @@ function plan(opts) {
     // The days between messages: the user's own gap, or what the lead-time table gives today.
     follow_up_spacing: routeLength(c.settings) > 1 ? spacingWords(c.settings, mode) : undefined,
     mode,
+    few_times: fewTimesNote(v),
     no_times: v.openAsk.length
       ? v.slots.length
         ? `${v.openAsk.length} of them get no time to choose from (your free slots ran out): add free time, or keep fewer.`
@@ -1751,6 +1754,14 @@ function enrichImport(opts) {
       : {}),
     next: `load --event ${c.slug}, then the gate again.`
   };
+}
+
+// Who gets fewer than two times because floorboss offers only times on the hour or the half hour: said plainly,
+// never filled with an invented time.
+function fewTimesNote(v) {
+  const short = (v.shortOfTwo || []).length + (v.openAsk || []).length;
+  if (!v.offGrid || !short) return undefined;
+  return `${short} ${short === 1 ? 'person gets' : 'people get'} fewer than two times to choose from: floorboss offers only times on the hour or the half hour, and ${v.offGrid} of your free ${v.offGrid === 1 ? 'slot starts' : 'slots start'} at another minute (after a busy block or a gap). Add free time that starts on :00 or :30, or keep fewer people.`;
 }
 
 export { mustMeetHits };

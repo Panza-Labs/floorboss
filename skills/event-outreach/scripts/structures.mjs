@@ -11,7 +11,7 @@ export const STRUCTURES = {
   'insight-first':
     'Open with one thing they may not know (an insight from the "what you know" table), tied to their situation in a clause, then what you offer in one line, then the ask.',
   'plain-request':
-    'Say plainly who you are and what you want from them, why them in one clause, and the ask. Short: under 60 words. No hook, no question for the sake of it.',
+    "Say plainly what you'd like from them and why them, tied to their situation in a clause, then who you are in one short line, and the ask. Short: the low end of 60-100 words. Never open with who you are. No hook, no question for the sake of it.",
   'peer-note':
     'Write as one practitioner to another: one observation from your own work that bears on theirs, then the ask. No pitch beyond a clause naming what you do.'
 };

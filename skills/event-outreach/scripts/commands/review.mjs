@@ -62,6 +62,8 @@ export function criticInput(opts, given = null) {
     structure: draft.structure || null,
     factSource: draft.fact_source || null,
     openingRule: OPENINGS[openingOf(voice)]?.says || null,
+    lastTouch: !!job.last_touch,
+    checkWarnings: draft.warnings || raw.warnings || [],
     voiceRules: voiceRulesOf(voice) || null
   });
 }

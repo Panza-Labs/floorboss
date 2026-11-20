@@ -12,6 +12,19 @@ Assume the person is senior, busy and getting dozens of meeting requests before 
 subject and the first line, and only go further if that line gave them something. Every sentence has to
 earn its place.
 
+**Open with them, never with you.** Follow Becc Holland's order: their situation, then why it's relevant to
+them, then the value. The first sentence is about the reader's world (a development in their market, a
+pattern in work like theirs, a question about it), never about the sender: not "I'm Gary from…", "My name
+is…", "I build…", "We build…", "We help…", "I work with…" or "Gary here". Who you are fits in one short
+clause later. The checks fail a first sentence that starts with the sender, unless the user's own voice rule
+says to open that way. Write "you" and "your" more than "I" and "we": the checks warn when the sender's words
+outnumber the reader's.
+
+**A conversation between peers, not a demo.** The ask is for a senior, unhurried conversation about their
+business: never "show you how", "walk you through", a "walkthrough" or "demo", "I've set aside" or "a quick
+call to show". The checks fail those words (a demo the CRM already has, "ahead of our demo", is fine). Not
+needy: no "set aside time for you", no pleading.
+
 **Never tell them facts about their own company or job as if they were news.** "Your new Rotterdam hub
 means new carriers" or "with 250 trucks you'll be vetting subcontractors" tells them what they already
 know, and reads as automated research. The fact you found is the reason you're writing, not the content
@@ -103,8 +116,9 @@ same one, and a follow-up never repeats the person's last.
   they get now (a proof point or an insight), then the ask with the two times.
 - **insight-first**: one thing they may not know (an insight from the table, declared in `insight`), tied to
   their situation in a clause, then what you offer in one line, then the ask.
-- **plain-request**: who you are, what you want from them, why them in one clause, and the ask. Under 60
-  words, no hook.
+- **plain-request**: what you'd like from them and why them, tied to their situation in a clause, then who
+  you are in one short line, and the ask. The short end of the length range, no hook. It never opens with who
+  you are.
 - **peer-note** (warm or known readers only): one observation from your own work that bears on theirs, then
   the ask, with what you do in a clause.
 
@@ -135,8 +149,9 @@ Hi,
 Once a reader picks a recipe on your site, where do they go to buy what's in it?
 
 A baking blog added Pantrybox's ingredient widget to 40 recipe pages and earned €11,000 in commission
-in its first year. I can walk you through how that was set up. Would 20 minutes at Wayline work, Thu
-12th at 10:00 or Fri 13th at 14:30?
+in its first year, from readers who were already on the page. Your recipes likely send that money
+elsewhere today. Could we take 20 minutes at Wayline to compare notes on it, Thu 12th at 10:00 or Fri
+13th at 14:30?
 
 Best,
 Maya
@@ -154,9 +169,10 @@ Subject: Monday dock queues
 
 Hi Ana,
 
-Across the 3PLs we work with, the worst dock queues land on Monday mornings, when the weekend's inbound
-meets the thinnest shift. Lanecraft schedules docks and shifts together, which is how Veldhuis cut its
-wait from 52 to 31 minutes. Could we take 20 minutes at FreightWeek, Tue 17th at 12:00 or Wed 18th at 10:30?
+Monday mornings are when most 3PL dock queues peak: the weekend's inbound meets the thinnest shift.
+Lanecraft schedules docks and shifts together, which is how Veldhuis cut its wait from 52 to 31 minutes,
+and the same could free up your Monday crew. Could we take 20 minutes at FreightWeek to compare notes on
+your docks, Tue 17th at 12:00 or Wed 18th at 10:30?
 
 Best,
 Priya
@@ -170,14 +186,15 @@ Subject: Payroll rules at Pagora
 
 Hi Nora,
 
-I'm Tomás, founder of Velantra: we keep payroll rules checked through one API for fintechs in Spain and
-Mexico. I'd like 20 minutes with whoever owns payroll compliance at Pagora. Thu 12th at 10:00 or Fri
-13th at 10:00 at Cumbre Sur?
+Paying staff in Spain and Mexico means two sets of payroll rules to keep checked, and whoever owns that
+at Pagora is who I'd like 20 minutes with at Cumbre Sur. I run Velantra, which checks both through one
+API. Would Thu 12th at 10:00 or Fri 13th at 10:00 work for you or your payroll lead?
 
 Tomás
 ```
 
-plain-request: no hook, no invented question; who, what, why them, and the times.
+plain-request: no hook, no invented question; their situation and what's wanted first, then who in one
+line, then the times.
 
 ## The tie-in when there's no research
 
@@ -189,13 +206,14 @@ you own" or "the deals you sign" is a guess the critic will fail. A plain, true 
 
 - **Stay under the job's `char_limit`** when it has one: a first LinkedIn message to someone not connected
   goes as an invitation note, capped at about 300 characters, opt-out line and signature included.
-- **40–80 words for a first email.** Two or three short paragraphs. Shorter is better.
-- **The first line carries the new thing**, or the question. It never starts with "Saw you're at",
-  "I noticed", "Congratulations", or a restatement of their news.
+- **About 60–100 words for a first email** (the opt-out line doesn't count; the checks fail one over 100).
+  Two or three short paragraphs. Every follow-up is shorter than the message before it.
+- **The first line carries the new thing**, or the question, about them. It never starts with the sender
+  ("I'm…", "We build…"), "Saw you're at", "I noticed", "Congratulations", or a restatement of their news.
 - **The ask is short: the length, the event and the two times.** "Could we take 30 minutes at GreenRift,
-  Tue 27th at 10:00 or Wed 28th at 14:30?" Name the event once, by its short name (the
+  Tue 27th at 10:00 or Wed 28th at 14:30?" Use the event's short name everywhere (the
   event's `aliases`, or its name without the year or edition: "GreenRift", not "GreenRift Climate Forum
-  2027"). It's how you know they'll be there. Never mention the attendee list, who else is attending, or
+  2027"), and never the full long name more than once (the checks warn). It's how you know they'll be there. Never mention the attendee list, who else is attending, or
   what anyone registered for.
 - **No meeting place before they say yes,** even if the segment's ask names one ("20 minutes at booth 512"
   becomes "20 minutes at <event>"). Where to find you (a stand, a table, a lounge) is for the
@@ -204,8 +222,10 @@ you own" or "the deals you sign" is a guess the critic will fail. A plain, true 
   10:00 Berlin time" and "Tue 27 Oct, 14:30 Berlin time"; the draft says "would Tue 27th at 10:00 or
   14:30 work?". The day once when both times share it, the weekday and date without the month
   (the event is the reference), no time zone or city (they're at the event, so it's local time), no
-  "or Tue 27 Oct" repeated. Two different days: "Tue 27th at 10:00 or Wed 28th at 14:30". With no times
-  (`open_ask`), ask to find a time at the event.
+  "or Tue 27 Oct" repeated. Two different days: "Tue 27th at 10:00 or Wed 28th at 14:30". Times are only ever
+  on the hour or the half hour: floorboss offers only slots that start on :00 or :30, and the checks fail a
+  message that names any other time (11:10, 9:45). When too few such slots are left, floorboss says so;
+  never make a time up. With no times (`open_ask`), ask to find a time at the event.
 - **Quote insights and proof faithfully.** Keep their numbers, hedges ("about", "usually") and scope
   ("across our 14 customers") exactly, but say where a number comes from the way the reader would ("the
   300 tenders we ran for customers", not "300 runs on our platform"), and use the reader's words, not the
@@ -285,11 +305,23 @@ someone they know, not a cold intro:
 
 ## Follow-ups
 
-A follow-up (`followup: true`) is two or three sentences. When its channel changes from the last message (the route: email, event app, LinkedIn, email unless the user set another), `followup_note` says so: it isn't the same thread, and the reader may not have seen the earlier one, so it has to stand alone. Otherwise it's in the same thread. It stays on the first
-message's topic and adds one new thing about it: a detail, a number, a peer's experience, or a question
-(not a different insight on a new topic, and never the same proof point again). It offers the times in
-`slot_labels` and ends with the opt-out sentence when the job has one. It never says "just following up" or "bumping this".
-`previous_message` shows what was sent.
+A follow-up (`followup: true`) is two or three sentences, and shorter than the one before it (the checks fail one
+that isn't). When its channel changes from the last message (the route: email, event app, LinkedIn, email unless the user set another), `followup_note` says so: it isn't the same thread. Otherwise it's in the same thread.
+
+Either way, **assume the reader never read the earlier email.** Every follow-up stands alone:
+
+1. Restate in one short clause what's offered and why it matters to them ("Counterline cuts closing
+   paperwork to minutes for stores like yours").
+2. Then one new thing on the same topic: a detail, a number, a peer's experience, or a question (not a
+   different insight on a new topic, and never the same proof point again).
+3. Then the times in `slot_labels`, and the opt-out sentence when the job has one.
+
+It never opens by pointing back: "For the walkthrough", "As I mentioned", "Following up on", "Further to",
+"Per my last", "just following up" or "bumping this" fail the checks. `previous_message` shows what was sent.
+
+**The last touch** (`last_touch: true`) is a short closing note: it says it's the last ("Last note from me on
+this"), names the days the user is at the show ("I'm at GreenRift Tue 27th to Thu 29th"), and asks only yes
+or no ("worth 20 minutes there, yes or no?"). No times: if they say yes, the user agrees one with them.
 
 If the job has `times_changed`, say which earlier time is no longer free (`no_longer_free`) and offer the new
 ones plainly ("Wed 14:00 is taken now; would Thu 10:00 work?"), so the reader isn't confused.
@@ -320,9 +352,10 @@ makes and keep what it doesn't touch. Never send back the same text.
 
 ## Subject lines
 
-Under 50 characters, specific to them, not to the product: the angle in a few words ("Insurance certs
-on new lanes", "Inherited carrier lists"). No questions, no clickbait, no first names. Paste messages have
-no subject.
+About 40 characters at most (the checks warn above 40), specific to them, not to the product: the angle in
+a few words ("Insurance certs on new lanes", "Inherited carrier lists"). A statement, never a question (the
+checks fail a "?"), no clickbait, and never the reader's first name (the checks fail it). Paste messages have
+no subject; a follow-up keeps its thread's.
 
 ## Language
 
