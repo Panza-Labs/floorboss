@@ -184,11 +184,13 @@ user's words in a file in `<project>/floorboss/work/` and pass it with `--said-f
 **Turning it on.** Ask only when the user wants floorboss to send for them, before the drafts of that event:
 "Should floorboss send these on its own from the cloud?" Before they answer, say in your own words what the README's
 "Auto-send from the cloud" says they are trusting: in Codex nothing checks a tool call, so the cloud run's model holds
-their Gmail send tool and floorboss can only ask it to follow its steps; it can't see replies from another address,
-LinkedIn, the event app or Spam; their data moves to a private GitHub repo of theirs; it needs a ChatGPT plan with
+their Gmail send tool and floorboss can only ask it to follow its steps; it sees a colleague's answer only in the
+same thread (not a new email from another address), and nothing on LinkedIn, the event app or in Spam; their data moves to a private GitHub repo of theirs; it needs a ChatGPT plan with
 Codex on the web and scheduled tasks, and is untested on a live account. On a yes, run
-`on --event <slug> --said-file <file> --own <the Gmail address they send from>`. Every message of each sequence is
-then drafted and approved up front.
+`on --event <slug> --said-file <file> --own <the Gmail address they send from>`. `--own` is required: ask for the
+address of the Gmail account they connect in ChatGPT. The second yes records it, and every cloud run checks the
+connected account against it first and stops if they differ. Every message of each sequence is then drafted and
+approved up front.
 
 **The second yes.** After the content approval as usual, run `readback --event <slug>`. Show its `text` to the user
 word for word (every person, address, message, planned day, subject and body), then the people in `refused` and why.
@@ -223,8 +225,9 @@ to the user's repo themselves; when one refuses, tell the user its words and cha
 `status`. For each step in `to_settle` (and when the cloud holds the lock), tell the user the person, the address and
 the subject, and ask them to look in Gmail's Sent folder. Record what they say with
 `settle --event <slug> --id <c…> --touch <n> --went yes|no --said-file <file>`: "it went" is `yes`, "it didn't go"
-is `no` (that message is never auto-sent again; it comes back to the outbox page for them to send). Never settle on
-a guess. floorboss refuses to settle a send, or unlock, within 30 minutes of the run that let it go (it may still be
+is `no` (that message is never auto-sent again; it comes back to the outbox page for them to send). With `yes`, if
+the user can give the message's Gmail ids, add `--message-id <id> --thread-id <id>`: a follow-up goes only in its
+first message's thread, so without them auto-send holds the follow-up for them to send. Never settle on a guess. floorboss refuses to settle a send, or unlock, within 30 minutes of the run that let it go (it may still be
 going): say so and try later. A lock left by a cloud run: `sync unlock` shows it; only after the user has checked Sent mail and says to,
 run `sync unlock --said-file <file>`, then `sync start` again.
 

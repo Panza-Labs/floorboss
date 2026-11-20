@@ -176,8 +176,13 @@ You approve twice in Codex: the messages, as usual, then floorboss reads back ea
 is planned for, and you type "auto-send these sequences". That approval is for that exact text to that exact address.
 Change a message and it waits for you again.
 
-Each run, before each message, floorboss searches your Gmail for anything from that person (or a bounce) since your
-first email to them. A reply, a bounce or an out-of-office stops their sequence. Messages go only on their day or the
+Each run first asks Gmail which account is connected; if it isn't the address you gave when you turned auto-send on
+(recorded with your yes), the run stops before it searches or sends anything. Before each follow-up, floorboss reads
+the thread of your first email to that person: any message there from someone else (them, a colleague who answered
+for them, an out-of-office, a bounce) stops their sequence. Then, before each message, it searches your Gmail for
+anything from that person, or a bounce naming their address, since your first email to them. A reply, a bounce or an
+out-of-office stops their sequence. Two sends in one run are 20 to 40 seconds apart, so a new sender account doesn't
+send a burst. Messages go only on their day or the
 day after, on weekdays from 09:00 to 17:00 in the event's time zone, never after the event, and never more than one a
 day to a person. The first thing that goes wrong stops the run, and a send whose result isn't clear is never tried
 again: floorboss waits for you to check your Sent folder.
@@ -186,7 +191,8 @@ again: floorboss waits for you to check your Sent folder.
 tool, and floorboss can only ask it to follow its steps. A model that doesn't could send other text, to other people,
 from your account. Turn this on only for a mailbox you accept that for, and read the run log.
 
-**What it can't see:** replies from another address, LinkedIn or the event app, and mail Gmail puts in Spam. Keep
+**What it can't see:** a new email (not in the thread) from another address, LinkedIn or the event app, and mail
+Gmail puts in Spam. Keep
 telling floorboss what came back.
 
 **Your data** moves to a private GitHub repo of yours, so the cloud run can read and update it. It holds your lists
@@ -237,7 +243,13 @@ The run log is `autosend/log-<day>.md` in the data repo.
 The pinned commit means a change to floorboss can't change what a running schedule does: update the pin to get fixes.
 An hourly task is 24 cloud runs a day, most of them doing nothing; narrow the schedule if you like (floorboss decides
 the hours itself). A follow-up goes as a reply to the first email auto-send sent them, so it lands in that thread,
-with its approved subject; when auto-send didn't send the first one (you sent it yourself), it goes as a new email.
+with its approved subject (a changed subject is a changed message: it needs a fresh yes). When floorboss has no
+record of that first email's Gmail ids (you sent it yourself, or settled it without them), the follow-up is held for
+you to send; it never goes as a new email. If Gmail puts a follow-up in another thread anyway, it is recorded as sent
+and the run log flags it. A send step expires a few minutes after its reply check: the model is told not to send
+past it, and an answer written after it counts as unclear. Each run clones into a new temporary folder, since the
+cloud workspace keeps files between runs. The body goes as plain HTML built from your approved text (paragraphs and
+line breaks only): Gmail's tool wrapped plain text mid-sentence.
 The data repo holds personal data (attendee lists, CRM exports): where that data may sit, under GDPR and similar laws,
 is your call.
 

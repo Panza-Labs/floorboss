@@ -111,9 +111,16 @@ its own approvals into the data repo.
 
 What floorboss's code decides, if the model follows its steps: who is due and when (due day or the day after,
 weekdays 09:00 to 17:00 event time, not after the event, one message a day per person, opt-outs at every event); the
-exact subject, body and single address, bound by hash to both of the user's approvals; whether the Gmail search shows
-a reply, bounce or auto-reply; that a send is marked in the user's repo before it happens, so it is never sent twice;
-and that the run stops at the first error and never retries an unclear send.
+exact subject, body and single address, bound by hash to both of the user's approvals (the HTML body sent is built
+from that approved text alone); that the connected Gmail account (the profile tool, first step of every run) is the
+sending address recorded at the second yes, or the run stops before any search or send; whether the follow-up's
+thread (read by its recorded thread id; with none recorded the follow-up is held) holds any message not from that
+address, and whether the Gmail search shows a reply, bounce or auto-reply, any of which stops that person; that an
+answer missing its list, or carrying an error or failed status at any level, is never read as a clean inbox or a
+send; that a send is marked in the user's repo before it happens, and claimed with an exclusive file create, so two
+overlapping steps never both get it and it is never sent twice; that a send step expires a few minutes after its
+reply check, and an answer written after that is unclear; and that the run stops at the first error and never
+retries an unclear send.
 
 What it can't decide: that the model called the tool it was told to, with those arguments; that the search and send
 answers it saved are the tools' own; that nobody edited the data repo. The user's controls: the Gmail connection's
