@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { drive, simplePersona, ROOT } from './lib/driver.mjs';
 import { remoteFor, cloneOf, commitsOf, remoteFile, git } from '../fixtures/autosend-world.mjs';
+import { email, searchResult, sendResult } from '../fixtures/gmail-real.mjs';
 
 const SLUG = 'mock-harbour-haul';
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
@@ -97,8 +98,11 @@ function fresh(keep = null) {
   return { HOME, bare, items: b.items.filter((x) => !keep || keep.includes(x.id)) };
 }
 
-// The fake Gmail: an in-memory mailbox. search filters by the query's from: and after:, and finds a bounce from
-// mailer-daemon or postmaster that names the quoted address; send stores the message and answers { id, threadId }.
+// The fake Gmail: an in-memory mailbox, answering in the real tools' shapes (a live ChatGPT/Codex cloud run,
+// 2026-11-20; test/fixtures/gmail-real.mjs): an MCP CallToolResult with the data in structuredContent. search filters by
+// the query's from: and after:, and finds a bounce from mailer-daemon or postmaster that names the quoted address,
+// answering { emails: [{ id, thread_id, from_, ... }], next_page_token }; send takes the send tool's own input, stores
+// the message (reply_message_id puts it in that message's thread) and answers the response_fields asked for.
 class FakeGmail {
   constructor() {
     this.inbox = [];
@@ -115,23 +119,30 @@ class FakeGmail {
     assert.deepEqual(Object.keys(args).sort(), ['max_results', 'query']);
     if (this.mode.search === 'throws') throw new Error('the Gmail tool is not available');
     if (this.mode.search === 'garbage') return 'Error: something went wrong reading the mailbox';
-    if (this.mode.search === 'error') return { error: { code: 429, message: 'rate limited' } };
+    if (this.mode.search === 'error') return { content: [{ type: 'text', text: 'Rate limit exceeded' }], isError: true };
     const after = Number(/after:(\d+)/.exec(args.query)[1]) * 1000;
     const froms = [...args.query.matchAll(/from:([^\s()]+)/g)].map((m) => m[1].toLowerCase()).filter((f) => !['mailer-daemon', 'postmaster'].includes(f));
     const quoted = /"([^"]+)"/.exec(args.query)?.[1]?.toLowerCase();
     const addr = (f) => (/<([^>]+)>/.exec(f)?.[1] || f).toLowerCase();
     const hits = this.inbox.filter((m) => Date.parse(m.date) > after && (froms.includes(addr(m.from)) || (/^(mailer-daemon|postmaster)@/.test(addr(m.from)) && quoted && String(m.body).toLowerCase().includes(quoted))));
-    const out = { messages: hits.slice(0, args.max_results).map(({ id, threadId, from, subject, date, labels }) => ({ id, threadId, from, subject, date, labels })) };
-    if (this.mode.search === 'incomplete') out.next_page_token = 'page-2';
-    return out;
+    const emails = hits.slice(0, args.max_results).map((m) => email({ id: m.id, thread_id: m.threadId, from_: m.from, subject: m.subject, snippet: String(m.body || '').slice(0, 80), labels: m.labels, email_ts: m.date }));
+    return searchResult(emails, { next_page_token: this.mode.search === 'incomplete' ? 'page-2' : null });
   }
   send(args) {
-    assert.deepEqual(Object.keys(args).sort(), ['body', 'subject', 'to'], 'no cc, bcc or anything else');
+    const keys = ['payload', 'response_fields', 'subject', 'to'];
+    assert.deepEqual(Object.keys(args).filter((k) => k !== 'reply_message_id').sort(), keys, 'no cc, bcc, sender or anything else');
+    assert.equal(typeof args.to, 'string');
+    assert.deepEqual(Object.keys(args.payload).sort(), ['body', 'charset', 'mime_type']);
+    assert.deepEqual([args.payload.mime_type, args.payload.charset, Object.keys(args.payload.body)], ['text/plain', 'UTF-8', ['content']]);
+    assert.deepEqual(args.response_fields, ['id', 'thread_id']);
     if (this.mode.send === 'throws') throw new Error('no answer from the tool');
-    const m = { id: `out${++this.n}`, threadId: `ot${this.n}`, ...args };
+    const replied = 'reply_message_id' in args ? this.sentMail.find((x) => x.id === args.reply_message_id) : null;
+    if ('reply_message_id' in args) assert.ok(replied, `reply_message_id ${args.reply_message_id} is a message this mailbox sent`);
+    const id = `out${++this.n}`;
+    const m = { id, threadId: replied ? replied.threadId : `ot${this.n}`, to: [args.to], subject: args.subject, body: args.payload.body.content, reply_message_id: args.reply_message_id ?? null };
     this.sentMail.push(m);
-    if (this.mode.send === 'noids') return { status: 'queued' };
-    return { id: m.id, threadId: m.threadId, labelIds: ['SENT'] };
+    if (this.mode.send === 'noids') return sendResult({});
+    return sendResult({ id: m.id, thread_id: m.threadId });
   }
 }
 
@@ -149,7 +160,7 @@ function cloudRun(bare, at, gmail, { onStep = null, extraEnv = {} } = {}) {
     if (onStep && onStep(s, { dir, env, id }) === 'halt') return { last: s, steps, id, dir, env };
     if (s.step === 'stop' || s.step === 'done') return { last: s, steps, id, dir, env };
     if (s.step === 'search') {
-      assert.ok(s.tool_names.includes('search_emails') && s.tool_names.includes('mcp__codex_apps__gmail_search_emails'));
+      assert.equal(s.tool, 'mcp__codex_apps__gmail_search_emails');
       let ans;
       try {
         ans = gmail.search(s.args);
@@ -158,7 +169,7 @@ function cloudRun(bare, at, gmail, { onStep = null, extraEnv = {} } = {}) {
       }
       writeFileSync(s.write, typeof ans === 'string' ? ans : JSON.stringify(ans));
     } else if (s.step === 'send') {
-      assert.ok(s.tool_names.includes('send_email') && s.tool_names.includes('mcp__codex_apps__gmail_send_email'));
+      assert.equal(s.tool, 'mcp__codex_apps__gmail_send_email');
       let ans;
       try {
         ans = gmail.send(s.args);
@@ -250,6 +261,13 @@ test('cases 1, 2, 4, 11: a whole sequence across cloud runs and the laptop: firs
     const got = sentTo(gmail, x.to).filter((m) => m.subject === x.subject && m.body === x.body);
     const quiet = ![a.id, b.id, c.id, d.id].includes(x.id);
     assert.equal(got.length, quiet ? 1 : 0, `${x.id} follow-up`);
+    // The follow-up replies to their first message, so it goes in that thread.
+    if (quiet) {
+      const firstMail = sentTo(gmail, x.to)[0];
+      assert.equal(got[0].reply_message_id, firstMail.id, `${x.id} follow-up threads`);
+      assert.equal(got[0].threadId, firstMail.threadId);
+      assert.equal(firstMail.reply_message_id, null, 'a first message is a new email');
+    }
   }
   assert.equal(gmail.sentMail.length, people + second.length - 4);
   led = remoteLedger(bare);
