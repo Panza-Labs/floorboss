@@ -180,6 +180,10 @@ function config(opts) {
     for (const k of ['touches', 'max_offers', 'per_slot', 'meeting_minutes', 'warm_months', 'paste_limit']) {
       if (k in patch && !(Number.isFinite(+patch[k]) && +patch[k] > 0)) throw new Error(`${k} must be a positive number.`);
     }
+    if ('buffer_minutes' in patch && !(Number.isInteger(Number(patch.buffer_minutes)) && Number(patch.buffer_minutes) >= 0 && Number(patch.buffer_minutes) <= 240))
+      throw new Error('buffer_minutes is a whole number of minutes between meetings (0 for none).');
+    if ('max_in_row' in patch && patch.max_in_row !== null && !(Number.isInteger(Number(patch.max_in_row)) && Number(patch.max_in_row) >= 1))
+      throw new Error('max_in_row is a whole number of meetings (1 or more), or null for no cap.');
     if ('company_caps' in patch && patch.company_caps !== null) {
       const cc = patch.company_caps;
       const okMode = (m) => ['scale', 'one', 'teams', 'off'].includes(m);

@@ -181,6 +181,9 @@ export function rangesFromDays(raw, event) {
   return { ranges: out, errors, except, notes: (Array.isArray(raw?.notes) ? raw.notes : []).map((n) => String(n).slice(0, 200)) };
 }
 
+// The user's scheduling rules (settings: buffer_minutes between meetings, max_in_row meetings at most in a row).
+const rules = (settings) => ({ bufferMinutes: Number(settings.buffer_minutes) || 0, maxInRow: settings.max_in_row ?? null });
+
 function build(opts) {
   need(opts, 'event');
   if (opts['days-file']) {
@@ -210,7 +213,7 @@ function build(opts) {
     if (zone === event.time_zone || !/(^|[^\d:])([1-9]|1[0-1])(?::\d{2})?\s*[-–]/.test(opts.free)) return first;
     const asWritten = parseFreeTimes(opts.free, { eventDays: eventDays(event), hours: settings.hours, bareAsAfternoon: false });
     const inHours = (rs) =>
-      buildSlots(rs, { eventZone: event.time_zone, sourceZone: zone, hours: settings.hours, meetingMinutes: settings.meeting_minutes, now: nowFrom(opts) })
+      buildSlots(rs, { eventZone: event.time_zone, sourceZone: zone, hours: settings.hours, meetingMinutes: settings.meeting_minutes, ...rules(settings), now: nowFrom(opts) })
         .slots.length;
     const a1 = inHours(first.ranges),
       a2 = inHours(asWritten.ranges);
@@ -261,6 +264,7 @@ function build(opts) {
     sourceZone: zone,
     hours: settings.hours,
     meetingMinutes: settings.meeting_minutes,
+    ...rules(settings),
     now: nowFrom(opts),
     keepOutside: !!opts['keep-outside']
   });
