@@ -178,7 +178,7 @@ give the user the path of `agenda.html` in the event's folder (`<project>/floorb
 
 ## Auto-send through Gmail drafts (Gmail only)
 
-This is the default way to auto-send in Codex. There is no data repo and no cloud environment. Every command below is
+Offer this way first in Codex (`on ... --mode drafts`): there is no data repo and no cloud environment. Every command below is
 `node "FLOORBOSS/skills/autosend/scripts/cli.mjs" <command> ...`.
 
 **What happens, in plain words (say this to the user before they turn it on):**

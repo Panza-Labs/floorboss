@@ -273,3 +273,11 @@ test('the CLI: status gives the overdue search first, and overdue-checked says d
   const o = autosend(w.HOME, st.overdue_check.then.slice(st.overdue_check.then.indexOf('overdue-checked')), { now: '2026-10-21T09:00:00Z' });
   assert.equal(o.say, "Daily sending looks paused: 1 email is overdue. Open chatgpt.com, go to Scheduled, and resume 'floorboss daily sending'.");
 });
+
+test('the cloud planner never sends from an event that goes through Gmail drafts', async () => {
+  const { dueNow } = await import('../lib/autosend/plan.mjs');
+  const w = setup();
+  const p = dueNow(w.HOME, w.nowMs);
+  assert.deepEqual(p.due, []);
+  assert.match(p.waits[0].why, /Gmail drafts/);
+});
