@@ -40,3 +40,18 @@ export const sendResult = (structuredContent = { id: '19a2b3c4d5e6f708', thread_
 
 // What the cloud model writes to the answer file.
 export const written = (result) => JSON.stringify(result);
+
+// The profile tool's whole result (mcp__codex_apps__gmail_get_profile, called with {}): the connected account.
+export const profileResult = (fields = {}, { isError = false } = {}) => ({
+  content: [{ type: 'text', text: 'Action completed.' }],
+  structuredContent: { id: 'u1', name: 'Sam Lane', email: 'sam@lanecraft.example', nickname: 'sam', picture: null, workspace_id: 'w1', workspace_name: 'Lanecraft', workspace_picture: null, ...fields },
+  isError
+});
+
+// The thread tool's whole result (mcp__codex_apps__gmail_read_email_thread). Its shape wasn't captured yet: assumed
+// to hold the thread's messages in the search's item shape, under messages.
+export const threadResult = (messages = [], { isError = false } = {}) => ({
+  content: [{ type: 'text', text: 'Action completed.' }],
+  structuredContent: { messages },
+  isError
+});

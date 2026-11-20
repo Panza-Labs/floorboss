@@ -17,6 +17,8 @@ import { dueNow } from '../lib/autosend/plan.mjs';
 import { query, decide, MAX_RESULTS } from '../lib/autosend/replycheck.mjs';
 import * as sync from '../lib/autosend/sync.mjs';
 import { next, checked } from '../skills/autosend/scripts/driver.mjs';
+import { nextNewWith } from './fixtures/autosend-world.mjs';
+const nextNew = nextNewWith({ next, checked });
 import { sentOrGoingToday, addressBusyToday, homeSends, verifySend } from '../lib/sendcheck.mjs';
 import { fold, legacyState } from '../lib/ledger.mjs';
 
@@ -66,7 +68,7 @@ test('F2: the run log is a link to a file outside the data folder: the run stops
   const dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
   const now = at('2026-10-12T09:00:00Z');
-  const s = next(dir, { run: 'new', nowMs: now });
+  const s = nextNew(dir, { nowMs: now });
   assert.equal(s.step, 'search');
   const outside = join(mkdtempSync(join(tmpdir(), 'fb-as-outside-')), 'target.txt');
   writeFileSync(outside, 'untouched\n');
@@ -179,7 +181,7 @@ test('needs-validation 1: a search answer at the page size asked for is incomple
   const { bare } = pushedWorld({ people: [PEOPLE[0]] });
   const dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
-  const s = next(dir, { run: 'new', nowMs: at('2026-10-12T09:00:00Z') });
+  const s = nextNew(dir, { nowMs: at('2026-10-12T09:00:00Z') });
   assert.equal(s.args.max_results, MAX_RESULTS);
   assert.equal(MAX_RESULTS, 20);
 });
@@ -189,7 +191,7 @@ test('needs-validation 2: the query asks for the exact and the base address, fro
   assert.match(q, /from:\(ana\+expo@north\.example OR ana@north\.example\)/);
   assert.match(q, /"ana\+expo@north\.example" OR "ana@north\.example"/);
   // An address with no tag: one of each.
-  assert.equal(query({ to: 'ana@north.example', since_ms: at(NOW) }), `in:anywhere after:${Math.floor(at(NOW) / 1000) - 86400} (from:ana@north.example OR ((from:mailer-daemon OR from:postmaster) "ana@north.example"))`);
+  assert.equal(query({ to: 'ana@north.example', since_ms: at(NOW) }), `in:anywhere after:${Math.floor(at(NOW) / 1000) - 86400} (from:ana@north.example OR ((from:mailer-daemon OR from:postmaster OR subject:("Delivery Status Notification" OR "Undeliverable" OR "Mail delivery failed" OR "Returned mail")) "ana@north.example"))`);
 });
 
 // ---- Hardening.
@@ -223,7 +225,7 @@ test('hardening b: a link, or a file floorboss would read as control data outsid
     });
     const dir = cloneOf(bare);
     process.env.FLOORBOSS_HOME = dir;
-    const s = next(dir, { run: 'new', nowMs: at('2026-10-12T09:00:00Z') });
+    const s = nextNew(dir, { nowMs: at('2026-10-12T09:00:00Z') });
     assert.equal(s.step, 'stop', String(plant));
     assert.match(s.why, /isn't floorboss's|link/, String(plant));
     // The laptop refuses it before it reaches its folder.
@@ -265,7 +267,7 @@ test('hardening d: the pin needs a clean floorboss tree; a data repo written by 
   });
   const dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
-  const s = next(dir, { run: 'new', nowMs: at('2026-10-12T09:00:00Z') });
+  const s = nextNew(dir, { nowMs: at('2026-10-12T09:00:00Z') });
   assert.equal(s.step, 'stop');
   assert.match(s.why, /newer floorboss/);
 });

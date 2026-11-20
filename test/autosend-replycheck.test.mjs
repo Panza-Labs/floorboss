@@ -15,14 +15,16 @@ const ITEM = { slug: 'harbor-expo', id: 'c001', name: 'Ana Ito', touch: 2, to: '
 const J = JSON.stringify;
 
 test('query: everything from them, and any bounce naming them, since a day before the first send', () => {
-  assert.equal(query(ITEM), `in:anywhere after:${Math.floor(at('2026-10-12T09:01:00Z') / 1000) - 86400} (from:ana@north.example OR ((from:mailer-daemon OR from:postmaster) "ana@north.example"))`);
+  assert.equal(query(ITEM), `in:anywhere after:${Math.floor(at('2026-10-12T09:01:00Z') / 1000) - 86400} (from:ana@north.example OR ((from:mailer-daemon OR from:postmaster OR subject:("Delivery Status Notification" OR "Undeliverable" OR "Mail delivery failed" OR "Returned mail")) "ana@north.example"))`);
   // A crafted address never reaches the query: plainAddress first.
   for (const to of ['ana@north.example OR from:*', 'ana@north.example"', 'Ana <ana@north.example>', 'a b@north.example', 'ana@north.example\n'])
     assert.throws(() => query({ ...ITEM, to }), /plain address/);
 });
 
 test('decide: no match in each empty shape is go', () => {
-  for (const a of ['[]', '{}', J({ messages: [] }), J({ emails: [] }), J({ results: [] }), J({ threads: [] }), J({ messages: [], next_page_token: null }), J({ content: [{ type: 'text', text: '{"messages":[]}' }] })])
+  // A bare {} isn't an empty inbox any more (it is what a failed Codex answer looks like): it stops the run.
+  assert.ok(decide(ITEM, '{}', { own: OWN }).error);
+  for (const a of ['[]', J({ messages: [] }), J({ emails: [] }), J({ results: [] }), J({ threads: [] }), J({ messages: [], next_page_token: null }), J({ content: [{ type: 'text', text: '{"messages":[]}' }] })])
     assert.deepEqual(decide(ITEM, a, { own: OWN }), { go: true }, a);
 });
 
@@ -87,7 +89,7 @@ test("decide: the user's own mail is ignored; another sender, an incomplete or u
 });
 
 test('readAnswer unwraps one tool-content wrapper and nothing else', () => {
-  assert.deepEqual(readAnswer(J({ content: [{ type: 'text', text: '{"a":1}' }] })), { ok: true, value: { a: 1 } });
+  assert.deepEqual(readAnswer(J({ content: [{ type: 'text', text: '{"a":1}' }] })), { ok: true, value: { a: 1 }, envelope: false });
   assert.equal(readAnswer('not json').ok, false);
   assert.equal(readAnswer(J({ content: [{ type: 'text', text: '{"content":[{"type":"text","text":"{}"}]}' }] })).value.content.length, 1, 'one level only');
 });
