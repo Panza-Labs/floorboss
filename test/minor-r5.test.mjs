@@ -25,7 +25,7 @@ test('save-drafts on an unchanged draft uses up no try', () => {
   triage(H);
   const { t, jobs } = todoJobs(H);
   const j = jobs.find((x) => x.kind === 'message');
-  const d = JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, a plain ask about Test Expo. Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x', structure: 'plain-request', fact_source: 'list' });
+  const d = JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, a plain ask about Test Expo. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w+) (\d+) \w+, (\d\d:\d\d).*/, (m, wd, d, tm) => `${wd} ${d}th at ${tm.replace(/^0/, '')}`)).join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x', structure: 'plain-request', fact_source: 'list' });
   const save = () => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', d]);
   assert.equal(save().attempts, 1);
   assert.equal(save().attempts, 1, 'the same text again');
@@ -82,7 +82,7 @@ test('record: a send dated before its approval is recorded, and said', () => {
   triage(H);
   const { t, jobs } = todoJobs(H, '2026-10-14T08:00:00Z');
   const j = jobs.find((x) => x.kind === 'message');
-  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, a plain ask about Test Expo. Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x', structure: 'plain-request', fact_source: 'list' })], '2026-10-14T08:00:00Z');
+  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, a plain ask about Test Expo. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w+) (\d+) \w+, (\d\d:\d\d).*/, (m, wd, d, tm) => `${wd} ${d}th at ${tm.replace(/^0/, '')}`)).join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x', structure: 'plain-request', fact_source: 'list' })], '2026-10-14T08:00:00Z');
   cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--text', 'PASS'], '2026-10-14T08:00:00Z');
   assert.ok(!cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all'], '2026-10-14T08:00:00Z').ERROR);
   const f = join(H.dir, 'sent.json'); writeFileSync(f, JSON.stringify({ items: [{ who: 'Ana Berg', what: 'sent', date: '2026-10-12' }] }));

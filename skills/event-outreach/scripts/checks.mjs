@@ -140,6 +140,40 @@ const ANY_TIME = /(?<![\d.,:$€£])\d{1,2}(?::|h(?=\d)|\.(?=\d{2}\s?[ap]\.?m))\
 const WD = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const WD_FULL = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
+const WISH_OPENER = /^(?:i['’]d like\b|i would like\b|let['’]s\b|let us\b)/i;
+// A meeting place belongs in the confirmation: booth 42037, Hall G, stand 12, table 4, or the event's own meeting_place.
+const PLACE = [/\bbooth\s*(?:no\.?\s*|number\s*|#\s*)?\d/i, /\bhall\s+(?:\d+|[A-HJ-Z]\b)/i, /\bstand\s*(?:no\.?\s*|#\s*)?\d/i, /\btable\s*(?:no\.?\s*|#\s*)?\d/i];
+const ZONE = /(?<![\p{L}\d])(?:PT|PST|PDT|ET|EST|EDT|UTC|GMT|CET|CEST|CST|CDT|MST|MDT)(?![\p{L}\d])/u;
+const MONTHS = 'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
+const MONTH_DAY = new RegExp(`(?<![\\p{L}])(?:${MONTHS})\\.?,?\\s+(?:the\\s+)?\\d{1,2}(?:st|nd|rd|th)?(?![\\d:])|(?<![\\d:])\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:${MONTHS})(?![\\p{L}])`, 'iu');
+const MAY_DAY = /(?<![\p{L}])May\s+\d{1,2}(?:st|nd|rd|th)?(?![\d:])|(?<![\d:])\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?May(?![\p{L}])/u;
+const AMPM = /(?<![\p{L}])[ap]\.m\b\.?|(?<![\d.,:$€£])\d{1,2}(?::\d{2})?\s?[ap]m(?![\p{L}])/i;
+const OFFERS_TIME = /(?<![\d.,:$€£])\d{1,2}(?::|h(?=\d))\d{2}(?!\d)|(?<![\d.,:$€£])\d{1,2}\s?[ap]\.?m\b/i;
+// Places a time zone might be named by ("New York time", the event's city, the zone in a slot label).
+function placeAndTimeProblems(text, ctx) {
+  const out = [];
+  const place = [ctx.meetingPlace && String(ctx.meetingPlace).trim()].filter((p) => p && p.length >= 3);
+  const hit = PLACE.map((r) => r.exec(text)).find(Boolean) || place.map((p) => new RegExp(esc(p), 'i').exec(text)).find(Boolean);
+  if (hit)
+    out.push(`names a meeting place ("${hit[0].trim()}") before they say yes: ask for the time at the event; where to find you goes in the confirmation`);
+  const zone = ZONE.exec(text);
+  if (zone) out.push(`names a time zone ("${zone[0]}"): they are at the event, so say the time as a person would, "9:00" or "14:30"`);
+  const cities = [
+    ctx.eventCity,
+    ...(ctx.slotLabels || []).map((l) => (/\d{2}:\d{2}\s+(.+?)\s+time\b/i.exec(String(l)) || [])[1])
+  ].filter(Boolean);
+  const cityTime =
+    cities.map((c) => new RegExp(`(?<![\\p{L}])${esc(c)}\\s+time\\b`, 'iu').exec(text)).find(Boolean) ||
+    /(?<=[a-z,;] )(?:[A-Z][\p{L}.'’-]+ ){1,3}time\b/u.exec(text);
+  if (cityTime) out.push(`says "${cityTime[0].trim()}": leave the city or zone out, they are at the event and it is their local time`);
+  const ap = AMPM.exec(text);
+  if (ap) out.push(`writes "${ap[0].trim()}": write times as 9:00 or 14:30, not a.m. or p.m. or am/pm`);
+  const offering = text.split(/(?<=[.?!])\s+|\n+/).filter((s) => OFFERS_TIME.test(s));
+  const md = offering.map((s) => MONTH_DAY.exec(s) || MAY_DAY.exec(s)).find(Boolean);
+  if (md) out.push(`puts a month by the day ("${md[0].trim()}") in the sentence with the times: the event is the reference, write "Tue 1st at 9:00"`);
+  return out;
+}
+
 export function writingProblems(draft, ctx) {
   const out = [];
   const body = String(draft.body || '');
@@ -157,6 +191,10 @@ export function writingProblems(draft, ctx) {
     out.push(
       `pitches a demo ("${demo[0]}"): ask for a conversation between peers about their business, not a showing of your product`
     );
+  // A first message that opens on the sender's wish ("I'd like to compare...", "Let's...") instead of the reader.
+  if (WISH_OPENER.test(first))
+    out.push(`opens with a wish ("${first.slice(0, 40)}"): open with their situation, not "I'd like", "I would like", "Let's" or "Let us"`);
+  out.push(...placeAndTimeProblems(text, ctx));
   if (draft.channel === 'email' && !ctx.followup) {
     if (subject.includes('?')) out.push('its subject asks a question: say it as a short statement');
     const name = fold(firstName(ctx.contact?.name || '').toLowerCase());

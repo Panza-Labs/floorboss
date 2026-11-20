@@ -41,6 +41,7 @@ function checkCtx(c, job, id, channel, others, lang = null) {
     slotLabels: app && c.settings.app_note_times === 'in_app' ? [] : job.slot_labels,
     eventName: app && c.settings.app_note_event_name === false ? null : c.event.name,
     eventCity: c.event.city || null,
+    meetingPlace: c.settings.meeting_place || null,
     eventAliases: app && c.settings.app_note_event_name === false ? [] : c.event.aliases,
     optout: app && c.settings.app_note_optout === false ? null : optoutForReader(c.settings, lang, knownReader(c, id)),
     // The user chose to leave the line off emails to people they know: one that carries it anyway is refused.
