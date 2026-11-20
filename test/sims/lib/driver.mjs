@@ -203,7 +203,10 @@ export function draftFor(todo, j, attempt = 0) {
   let body = `Hi ${first},\n\n${open} ${ask}${sign}`;
   // A follow-up is shorter than the message before it; the last one is a closing note: it says it's the last, names
   // the days at the show and asks only yes or no.
-  if (j.followup && j.last_touch) body = `Hi ${first},\n\nWorth 20 minutes at ${ev} while I'm there, ${todo.event?.dates || 'the show days'}, yes or no? This is my last note on it.${sign}`;
+  if (j.followup && j.last_touch) {
+    const d = /^(\w{3})\b.* to (\w{3})\b/.exec(todo.event?.dates || '');
+    body = `Meet at ${ev}, yes or no? Last note; I'm there ${d ? `${d[1]} to ${d[2]}` : todo.event?.dates || 'all week'}.\n\nSam\n\n${todo.optout_sentence || "If this isn't relevant, say so and I won't follow up."}`;
+  }
   else if (j.followup) {
     // Short openings, so it is always shorter than the first message (which also says "Would 20 minutes at … work").
     const few = (n) => b.split(' ').slice(0, n).join(' ');
