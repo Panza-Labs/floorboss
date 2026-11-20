@@ -1,7 +1,7 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Deterministic checks on a draft before the critic sees it.
-import { relativeWordsIn } from './leadtime.mjs';
+import { relativeFlag } from './leadtime.mjs';
 import { CONSTANTS } from '../../../lib/config.mjs';
 
 export function wordCount(text) {
@@ -68,8 +68,8 @@ export function checkDraft(draft, ctx) {
   // Only languages the sender can hold the meeting in.
   if (ctx.language && (ctx.languages || []).length && !ctx.languages.some((l) => l.toLowerCase() === String(ctx.language).toLowerCase()))
     problems.push(`written in ${ctx.language}, which isn't one of the languages you meet in (${ctx.languages.join(', ')})`);
-  const rel = relativeWordsIn(`${draft.subject || ''} ${body}`);
-  if (rel.length) problems.push(`uses relative time words (${rel.join(', ')}); write the day and date`);
+  const rel = relativeFlag(`${draft.subject || ''} ${body}`);
+  if (rel) problems.push(rel);
   if (/\{\{|\}\}|\[(?:name|company|first name|title)\]/i.test(`${draft.subject || ''} ${body}`)) problems.push('has an unfilled placeholder');
   const greet =
     /^\s*(hi|hello|hey|dear|good (?:morning|afternoon)|hallo|liebe|lieber|guten tag|hola|estimad[oa]|olá|ola|caro|cara|bonjour|cher|chère)\s+([\p{L}\p{M}'’.-]+)(?:\s+([\p{L}\p{M}'’-]+))?/iu.exec(
@@ -138,6 +138,9 @@ export function controlProblems(draft) {
   if (/[^\P{Cc}\n]|[\u2028\u2029]/u.test(body))
     out.push('its body has a control character other than a plain line break (a carriage return, a tab, a bell…): write it without');
   if (/[\p{Cc}\u2028\u2029\u0085]/u.test(subject)) out.push('its subject has a line break or a control character: one plain line');
+  // An RFC 2047 encoded word (=?UTF-8?B?…?=): a mail app may show it decoded, as text nobody approved.
+  if (/=\?[^?\s]*\?[bq]\?[^?\s]*\?=/i.test(subject))
+    out.push('its subject has an encoded word (=?…?=), which a mail app may show as other text: write it out plainly');
   return out;
 }
 

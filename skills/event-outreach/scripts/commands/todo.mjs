@@ -19,7 +19,7 @@ import { touchBefore } from '../../../../lib/route.mjs';
 import { assignStructures, factSources, STRUCTURES, openingOf, OPENINGS, warmReader, FROM_RELATIONSHIP } from '../structures.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { whereAt, writtenInApp, routeOf, whereMoved, messageFields, channelChangeNote } from './routes.mjs';
-import { ctxOf, skillsOf, takenTest, isOut, lastSentTouch, segmentInfo, knownReader, sameSlots, labelOf, sendingOn } from './context.mjs';
+import { ctxOf, skillsOf, takenTest, isOut, lastSentTouch, segmentInfo, knownReader, sameSlots, labelOf, wholeSequence } from './context.mjs';
 import { readTodo, staleFor, savedDraft, draftFile, ledgerTouch, criticFails, earlierDraft, resolveInsight, touchBatch, followupDayOf } from './saved-drafts.mjs';
 
 // What a rewrite answers to, on the job the drafter gets: the user's words (an outreach revise, or the note on a
@@ -101,6 +101,9 @@ export function todo(opts) {
   // The last gate wrote down what the user passed over ("approve all except c012"); those wait for the user.
   const leftOutKeys = new Set(readTodo(c, null)?.left_out || []);
   const jobs = [],
+    // With auto-send on (Codex), a first message approved before it was turned on still brings its follow-ups: it is
+    // read here as for a job (anchors), never drafted again, and only its follow-ups are asked for.
+    anchors = [],
     skipped = [],
     heldForUser = [];
   // The app's meeting-request limit: first messages already sent in the app use it up; new ones go in
@@ -181,10 +184,15 @@ export function todo(opts) {
     }
     const lastSent = lastSentTouch(st);
     let touch = null,
-      followup = false;
+      followup = false,
+      anchorOnly = false;
     const t1 = st.touches[1]?.status;
     if (!lastSent) {
       if (t1 !== 'outboxed' || redraft.has(id) || whereMoved(c, id, 1)) touch = 1;
+      else if (wholeSequence(c) && c.event?.autosend === true) {
+        touch = 1;
+        anchorOnly = true;
+      }
     } else {
       let next = lastSent + 1;
       while (st.touches?.[next]?.skipped) next++;
@@ -198,7 +206,7 @@ export function todo(opts) {
     }
     if (!touch) continue;
     if (steps) channel = steps[touch - 1] === 'email' ? 'email' : 'paste';
-    if (touch === 1 && channel === 'paste' && isApp(id)) {
+    if (touch === 1 && channel === 'paste' && isApp(id) && !anchorOnly) {
       if (appLeft <= 0) {
         skipped.push({ id, reason: `backup: the app's request limit (${limit}) is used up by people already written to, or planned to be written to, in the app` });
         continue;
@@ -221,8 +229,8 @@ export function todo(opts) {
     // Left out at the last gate ("approve all except c012"): it waits for the user, it isn't redrafted.
     // (Left out stays left out when their times change: the user decided about the person, not the times.)
     const leftOut = !held && !!priorV && leftOutKeys.has(`${id}:${touch}`) && st.touches?.[touch]?.status === 'drafted';
-    if (held) heldForUser.push({ id, touch, reasons: priorV.reasons });
-    if (leftOut) heldForUser.push({ id, touch, reasons: ['left out at the last gate'] });
+    if (held && !anchorOnly) heldForUser.push({ id, touch, reasons: priorV.reasons });
+    if (leftOut && !anchorOnly) heldForUser.push({ id, touch, reasons: ['left out at the last gate'] });
     // In time order (slot ids are their times), so a rebuild that assigns the same times never reads as a change.
     const sids = (assignments[id] || []).filter((x) => slotById[x]).sort();
     const labels = sids.map((x) => slotLabel(slotById[x], c.event.time_zone, null, c.event.city));
@@ -231,7 +239,7 @@ export function todo(opts) {
     const before = touchBefore(st, touch);
     const prevDraft = followup ? earlierDraft(c, id, before) : null;
     const prevBody = st.sent_text?.[before] || prevDraft?.body || null;
-    jobs.push({
+    (anchorOnly ? anchors : jobs).push({
       id,
       touch,
       kind: 'message',
@@ -300,8 +308,8 @@ export function todo(opts) {
   }
   // With sending on, the whole sequence is written and approved up front: each first message brings its
   // follow-ups, planned on the days they'd go (each one only if there's still no reply, booking or stop).
-  if (sendingOn(c.settings)) {
-    for (const j of jobs.filter((x) => x.kind === 'message' && x.touch === 1)) {
+  if (wholeSequence(c)) {
+    for (const j of [...jobs.filter((x) => x.kind === 'message' && x.touch === 1), ...anchors]) {
       const steps = routeOf(c, j.id);
       // Each follow-up's day, the user's gap or the table's apart, off the weekend, until one would land after the
       // event's last day (that one and the rest are dropped, never moved closer).
@@ -487,6 +495,8 @@ export function todo(opts) {
     ledger_lines: readLedger(c.paths.ledger).entries.length,
     built_for_day: today,
     run: sessionRun(),
+    // Auto-send turned on since (event.json): the follow-ups of every sequence are asked for, so it is worked out again.
+    ...(c.event?.autosend === true ? { autosend: true } : {}),
     event_name: c.event.name,
     mode,
     insights: insights.map(({ id, insight, segments }) => ({ id, insight, segments })),

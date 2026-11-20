@@ -21,7 +21,7 @@ for what the sender sells); what it would realistically want from the sender; an
 explain back to them (their own product, their own news). Search queries name only the two companies and
 the product area, never the people or CRM data. Say where a line rests on a search snippet only. If nothing
 public exists about the company at all (a small private firm), reply `{"nothing_found": true, "searched": [<the
-queries you tried>]}` rather than citing an unrelated page; a company with a similar name is not this company.
+queries you tried>]}` (when web search is off: `{"nothing_found": true, "searched": [], "search_off": true}`) rather than citing an unrelated page; a company with a similar name is not this company.
 When the input gives `domain` (from the attendees' email addresses), that is the company: its own site is that
 domain, and a company of the same name on another domain (another country, another market) is a different one.
 If nothing public ties to that domain, it is `nothing_found`.

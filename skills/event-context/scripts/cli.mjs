@@ -21,7 +21,7 @@ import { planQuestions, NODES, ROUNDS, CHOICES, choiceValue, defaultsFor } from 
 import { onboardingPlan as planOnboarding, onboardingState } from './onboarding-state.mjs';
 import { allowedPath } from '../../../lib/paths.mjs';
 import { instructionsPath } from '../../event-outreach/scripts/drafter.mjs';
-import { connected, inventoryView, modeLine } from '../../../lib/harness.mjs';
+import { connected, inventoryView, modeLine, handSendPatch } from '../../../lib/harness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +41,9 @@ function ack(opts = {}) {
 // The mock event (mock: its slug) keeps every setting in its own event.json: nothing set during the demo
 // reaches the user's setup.
 function saveScoped(patch, { mock = null } = {}) {
+  // Outside Claude Code no connection, sending or CRM-write key is saved, on an event as in the setup (saveConfig does
+  // the same for config.json): the mock event's settings and an event's own part went straight to event.json.
+  if (!connected()) patch = handSendPatch(patch);
   if (mock) {
     const e = loadEvent(mock);
     saveEvent(mock, { ...e.event, settings: { ...(e.event.settings || {}), ...patch } });

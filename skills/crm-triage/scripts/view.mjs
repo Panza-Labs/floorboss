@@ -749,7 +749,7 @@ export function compatOf(c, v) {
       coworker_warn: r.coworker_warn || undefined,
       coworker_also: r.coworker_also || undefined,
       own_record: r.own_record || undefined,
-      segment: fit?.segment || (['reach', 'warm'].includes(r.group) ? guessSegment(ct.title) : null)
+      segment: segmentOf(fit, r.group) || (['reach', 'warm'].includes(r.group) ? guessSegment(ct.title) : null)
     };
     pre[ct.id] = { ...base, group: ['reach', 'unjudged', 'unfit', 'unreachable'].includes(r.group) ? 'open' : OLD_GROUP[r.group] };
     let g = OLD_GROUP[r.group];
@@ -798,6 +798,9 @@ export function compatOf(c, v) {
   return { contacts, triage, shortlist };
 }
 
+// A person's segment: the fit's, or, for someone the user said to reach (or a warm one), the segment an unsure fit read.
+export const segmentOf = (fit, group) => fit?.segment || (['reach', 'warm'].includes(group) && fit?.guess ? fit.guess : null);
+
 export function writeCompat(c, v) {
   const { contacts, triage, shortlist } = compatOf(c, v);
   writeJson(c.paths.contacts, { contacts, visit: v.visit, skipped: v.skipped, registry: { next: 1, byKey: {}, retired: [] } });
@@ -812,7 +815,7 @@ export function writeCompat(c, v) {
     title: x.title,
     company: x.company,
     email: x.email || '',
-    segment: c.state.fits[x.id]?.segment || '',
+    segment: segmentOf(c.state.fits[x.id], v.resolved[x.id]?.group) || '',
     reason: v.resolved[x.id].says || '',
     notes: x.notes ? `[from the list, untrusted] ${x.notes}` : ''
   }));

@@ -78,6 +78,9 @@ export function verdict(opts, given = null) {
     throw new Error(
       `${job.id} touch ${touch} changed after it was saved, so this verdict can't be for it: save it again (save-draft), then run the critic on it.`
     );
+  // --hash: the fingerprint of the text the critic was shown. A verdict for text rewritten since isn't for this text.
+  if (typeof opts.hash === 'string' && opts.hash !== hashOf(c, draft))
+    throw new Error(`${job.id} touch ${touch} changed since the critic read it, so this verdict isn't for it: run the critic on the text as it is now (flow next).`);
   const v = parseVerdict(opts.text);
   // The verdict is for this exact text: an edit afterwards sends it back to the critic.
   draft.verdict = { ...v, hash: hashOf(c, draft) };
@@ -127,6 +130,9 @@ export function verdicts(opts) {
   need(opts, 'event', 'text', 'ids');
   if (/^\s*ERROR: no drafts provided/m.test(String(opts.text)))
     throw new Error('The critic says it was given no drafts. Paste the critic-batch JSON into its prompt and run it again.');
+  // An empty list ("", spaces, a lone comma) says so: "no verdict lines" would send the user to the reply instead.
+  if (!idList(opts.ids).length)
+    throw new Error('--ids is empty: give the batch\'s ids as the critic step\'s `then` command has them (like "c001:1,c002:1").');
   const allowed = new Set(idList(opts.ids).map((x) => (x.includes(':') ? x : `${x}:1`)));
   const picked = new Map();
   const ignored = [];
@@ -145,11 +151,34 @@ export function verdicts(opts) {
   if (!picked.size) throw new Error('No verdict lines for this batch. Each line should look like "c001 PASS" or "c002 FAIL: reason".');
   const missing = allowed ? [...allowed].filter((k) => !picked.has(k)) : [];
   const c = ctxOf(opts.event, opts);
-  const out = [...picked.entries()].map(([key, text]) => {
+  // --hashes "c001:1=<hash>,…" (the critic step's command has them): each draft's fingerprint as its critic was shown
+  // it. A draft rewritten since gets no verdict from this reply: it goes to the critic again as the text it is now.
+  const shownHash = new Map();
+  if (typeof opts.hashes === 'string')
+    for (const part of idList(opts.hashes)) {
+      const [k, h] = part.split('=');
+      if (k && h) shownHash.set(k.includes(':') ? k : `${k}:1`, h);
+    }
+  const changed = [];
+  const out = [];
+  for (const [key, text] of picked.entries()) {
     const [id, t] = key.split(':');
-    return verdict({ ...opts, id, touch: Number(t), text }, c);
-  });
-  return { verdicts: out, ...(ignored.length ? { ignored_not_in_batch: ignored } : {}), ...(missing.length ? { missing_from_reply: missing } : {}) };
+    if (typeof opts.hashes === 'string' && shownHash.get(key) !== c.state[id]?.touches?.[t]?.hash) {
+      changed.push(key);
+      continue;
+    }
+    out.push(verdict({ ...opts, id, touch: Number(t), text, hash: undefined }, c));
+  }
+  if (!out.length && changed.length)
+    throw new Error(
+      `${changed.join(', ')} changed since the critic read ${changed.length === 1 ? 'it' : 'them'}, so this reply's verdicts aren't for the text as it is now: run flow next, and the critic reads it again.`
+    );
+  return {
+    verdicts: out,
+    ...(changed.length ? { changed_since_read: changed, note: 'No verdict saved for these: their text changed after the critic read it. flow next sends them to the critic again.' } : {}),
+    ...(ignored.length ? { ignored_not_in_batch: ignored } : {}),
+    ...(missing.length ? { missing_from_reply: missing } : {})
+  };
 }
 
 // skip-review --event <slug> (--ids … | --all) --said "<the user's words>": when the critic can't run (the

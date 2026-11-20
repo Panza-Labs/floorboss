@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { companySlug } from '../../../../lib/normalize.mjs';
 import { plural } from '../../../../lib/plural.mjs';
-import { cli, step, node } from './shared.mjs';
+import { cli, step, node, handSend } from './shared.mjs';
 import { earlierLine } from './counts.mjs';
 
 // Research: company briefs, fit doubts, how much to research, the research itself, and writing samples.
@@ -76,7 +76,7 @@ export function researchSteps(x) {
     const fileOf = (co) => join(e.paths.work, `company-${companySlug(co)}.json`);
     return step(
       'company_briefs',
-      `Before any draft: what each of ${todo.length} companies sells, how it relates to ${companies.sender_company || 'your company'} and what it would want from you. Run every researcher at once (in parallel, one message), then save each.${todo.length > 15 ? ` Tell the user first, in one line: ${todo.length} company researches, a few web searches each, a few minutes in all.` : ''}`,
+      `Before any draft: what each of ${todo.length} companies sells, how it relates to ${companies.sender_company || 'your company'} and what it would want from you. ${handSend() ? 'Run each researcher in turn, then save each.' : 'Run every researcher at once (in parallel, one message), then save each.'}${todo.length > 15 ? ` Tell the user first, in one line: ${todo.length} company researches, a few web searches each, a few minutes in all.` : ''}`,
       {
         agents: todo.map((co) => ({
           name: 'floorboss:attendee-researcher',
@@ -148,7 +148,7 @@ export function researchSteps(x) {
     if (todo.length)
       return step(
         'research_batch',
-        `Research ${plural(todo.length, 'person', 'people')} on the web, all at once (in parallel, one message): public sources only, a URL on every claim. Then save each.`,
+        `Research ${plural(todo.length, 'person', 'people')} on the web, ${handSend() ? 'one after another' : 'all at once (in parallel, one message)'}: public sources only, a URL on every claim. Then save each.`,
         {
           agents: todo.map((p) => ({
             name: 'floorboss:attendee-researcher',

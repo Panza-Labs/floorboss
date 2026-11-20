@@ -12,7 +12,7 @@ import { companyWords } from '../../../../lib/gate.mjs';
 import { approvalHash } from '../../../../lib/sendcheck.mjs';
 import { inOneGo } from '../../../../lib/ledger.mjs';
 import { toOf, sendRoute, whereAt } from './routes.mjs';
-import { ctxOf, sameSlots, sendingOn, isOut, led } from './context.mjs';
+import { ctxOf, sameSlots, wholeSequence, isOut, led } from './context.mjs';
 import { readTodo, savedDraft, ledgerTouch, staleFor, savedBeforeIt } from './saved-drafts.mjs';
 import { rebuildOutbox } from './cards.mjs';
 
@@ -360,7 +360,7 @@ function gateAnswer(opts) {
   // while a follow-up of its sequence is unwritten, held or failing ("approve all" never sends first messages
   // alone).
   const seqOk = {};
-  if (sendingOn(c.settings))
+  if (wholeSequence(c))
     for (const id of new Set(t.jobs.filter((j) => j.kind === 'message' && approve.has(j.id)).map((j) => j.id))) {
       // A follow-up dropped in this same answer is out of the sequence.
       const seq = t.jobs.filter((j) => j.id === id && j.kind === 'message' && !dropTouch.includes(`${j.id}:${j.touch}`)).sort((a, b) => a.touch - b.touch);

@@ -1,13 +1,13 @@
 // Copyright 2026 Potrero Ventures LLC
 // SPDX-License-Identifier: Apache-2.0
 // Phase 6 of nextStep.
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { readJson } from '../../../../lib/jsonio.mjs';
+import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { asRule } from '../../../event-outreach/scripts/sameness.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
-import { mtime, step, node, cli, SKIP_REVIEW_HINT } from './shared.mjs';
+import { mtime, step, node, cli, SKIP_REVIEW_HINT, handSend } from './shared.mjs';
 import { rewrittenSince, countFails, failCounts, draftFormat, ratingsCarry } from './counts.mjs';
 
 // Drafting: the list of drafting jobs, the drafts, the batch check, the critic, and the ratings.
@@ -22,7 +22,8 @@ export function draftSteps(x) {
   const todoNow = existsSync(todoFile) ? readJson(todoFile, {}) : {};
   const todoLines = todoNow.ledger_lines ?? null;
   const runNow = sessionRun();
-  const todoOld = todoNow.built_for_day !== e.today || (runNow && todoNow.run !== runNow);
+  // And when auto-send was turned on (or off) since: every planned follow-up is then asked for up front.
+  const todoOld = todoNow.built_for_day !== e.today || (runNow && todoNow.run !== runNow) || (todoNow.over !== true && (todoNow.autosend === true) !== (e.event?.autosend === true));
   if (!existsSync(todoFile) || todoOld || (todoLines == null ? mtime(todoFile) < lastLedgerAt : todoLines < e.entries.length))
     return step('todo', 'Work out what needs drafting now: first messages, planned follow-ups, confirmations and notes to colleagues.', {
       run: node('event-outreach', 'todo', '--event', e.event.slug)
@@ -74,7 +75,9 @@ export function draftSteps(x) {
         run_first: node('event-outreach', 'briefs', '--event', e.event.slug, '--ids', byUser.map((j) => `${j.id}:${j.touch}`).join(',')),
         judge: {
           read: join(e.paths.dir, 'briefs'),
-          how: `For each brief listed by the briefs command (by_drafter), give its whole text to ${d.invoke}: ${d.type === 'agent' ? `the Agent tool with subagent_type "${d.invoke}"` : `the Skill tool with skill "${d.invoke}"`}, one brief per call, nothing else from this conversation. Take each message exactly as it wrote it, and write them all to the file.`,
+          how: handSend()
+            ? `For each brief listed by the briefs command (by_drafter), give its whole text to the user's own ${d.type === 'agent' ? 'agent' : 'skill'} "${d.invoke}", one brief at a time, nothing else from this conversation. Take each message exactly as it wrote it, and write them all to the file.`
+            : `For each brief listed by the briefs command (by_drafter), give its whole text to ${d.invoke}: ${d.type === 'agent' ? `the Agent tool with subagent_type "${d.invoke}"` : `the Skill tool with skill "${d.invoke}"`}, one brief per call, nothing else from this conversation. Take each message exactly as it wrote it, and write them all to the file.`,
           ids: byUser.map((j) => `${j.id}:${j.touch}`),
           write: join(e.paths.work, 'drafts-batch.json'),
           format:
@@ -219,23 +222,30 @@ export function draftSteps(x) {
   if (needCritic.length) {
     // Every batch of five at once: floorboss writes each batch file now; Claude runs one critic per batch in
     // parallel (one message), pasting each file whole, then records each verdict.
-    const batches = [];
-    for (let k = 0; k < needCritic.length; k += 5) batches.push(needCritic.slice(k, k + 5).map((j) => `${j.id}:${j.touch}`));
-    const agents = batches.map((b, k) => {
+    const jobOf = (k) => needCritic.find((j) => `${j.id}:${j.touch}` === k);
+    const batches = criticBatches(e, needCritic, touchOf);
+    const agents = batches.map(({ n, ids: b, fresh }) => {
       // In the event's work folder: a script's --out writes nowhere else.
-      const file = join(e.paths.work, `critic-batch-${k + 1}.json`);
+      const file = join(e.paths.work, `critic-batch-${n}.json`);
+      const reply = join(e.paths.work, `critic-reply-${n}.txt`);
+      // A batch numbered now (not kept from before) starts with no reply: one left from an earlier batch with this
+      // number is removed, so it can't be read as this batch's critic's.
+      if (fresh) removeFile(reply);
       cli('event-outreach', ['critic-batch', '--event', e.event.slug, '--ids', b.join(','), '--compact', '--out', file], c);
       return {
         name: 'floorboss:outreach-critic',
         input_file: file,
         paste: true,
-        write: join(e.paths.work, `critic-reply-${k + 1}.txt`),
-        then: node('event-outreach', 'verdicts', '--event', e.event.slug, '--ids', b.join(','), '--text-file', join(e.paths.work, `critic-reply-${k + 1}.txt`))
+        write: reply,
+        // Each draft's fingerprint as the critic is shown it: a verdict for text rewritten since doesn't count.
+        then: node('event-outreach', 'verdicts', '--event', e.event.slug, '--ids', b.join(','), '--hashes', b.map((k) => `${k}=${touchOf(jobOf(k))?.hash || ''}`).join(','), '--text-file', reply)
       };
     });
     return step(
       'critic',
-      `${plural(needCritic.length, 'draft')} for the separate critic: ${agents.length} ${agents.length === 1 ? 'critic' : 'critics'} at once (in parallel, one message). Paste each critic its whole batch file, exactly as written; never summarise it.`,
+      handSend()
+        ? `${plural(needCritic.length, 'draft')} for the critic: ${plural(agents.length, 'batch', 'batches')}. Give each batch its whole file, exactly as written, one batch after another; never summarise it.`
+        : `${plural(needCritic.length, 'draft')} for the separate critic: ${agents.length} ${agents.length === 1 ? 'critic' : 'critics'} at once (in parallel, one message). Paste each critic its whole batch file, exactly as written; never summarise it.`,
       { ...stuckNote, agents, if_user_says: SKIP_REVIEW_HINT, accepts: ['skip_review'] }
     );
   }
@@ -275,7 +285,9 @@ export function draftSteps(x) {
         run_first: node('event-outreach', 'rate-set', '--event', e.event.slug),
         ask: {
           id: 'rate',
-          question: `Show ${join(e.paths.derived, 'rate-set.md')}. For each, how likely is that reader to reply, 1 to 10? A few words if something stands out. Or skip.`,
+          question: handSend()
+            ? `Show the user every draft in ${join(e.paths.derived, 'rate-set.md')}, whole. Then: for each, how likely is that reader to reply, 1 to 10? A few words if something stands out. Or skip.`
+            : `Show ${join(e.paths.derived, 'rate-set.md')}. For each, how likely is that reader to reply, 1 to 10? A few words if something stands out. Or skip.`,
           answer_format: 'lines like "1: 6 too salesy", or the word skip'
         }
       }
@@ -293,10 +305,55 @@ export function draftSteps(x) {
       ask: {
         id: 'rate_notes',
         notes: rateNotes,
-        question: `Your notes: ${rateNotes.map((n) => `"${n}"`).join('; ')}. Apply them to every draft, so each is written again to them (and they become rules in your voice file)? Or only the ones you rated: each draft with a note is written again to its own note (anything rated 3 or less already is), and the rest stay as they are?`,
+        question: rateNotesQuestion(rateNotes),
         options: ['yes, every draft', 'only the ones I rated (those with a note, or rated 3 or less)'],
         answer_format: 'yes | only'
       }
     });
   Object.assign(x, { jobs, touchOf, staleWhy, mine, stuck, stuckNote, heldNow, lastHeldFail, toldSince, withHeld, heldCount, carried });
+}
+
+// The rate_notes question. In hand-send it says what the rules are in plain words; Claude Code's words stay as they
+// were at 8e9f440.
+export const rateNotesQuestion = (rateNotes) =>
+  `Your notes: ${rateNotes.map((n) => `"${n}"`).join('; ')}. Apply them to every draft, so each is written again to them (${handSend() ? 'and floorboss keeps them as rules for how you write, so later drafts follow them too' : 'and they become rules in your voice file'})? Or only the ones you rated: each draft with a note is written again to its own note (anything rated 3 or less already is), and the rest stay as they are?`;
+
+// The critic's batches, numbered once and kept: a draft waiting for the critic stays in the batch it was first put in,
+// under the same number, until its verdict is in or its text changes. So a batch's file, reply file and `then` command
+// from an earlier step still match after verdicts for another batch are saved and the flow is asked again (they used
+// to be numbered afresh each time, and batch 3's command then named batch 4's drafts). Drafts not in a kept batch
+// (new, or new text) go into new batches, numbered after every kept one. Kept in the event's derived folder, by
+// id:touch and the text's hash; once no batch is left, the numbers start at 1 again.
+function criticBatches(e, needCritic, touchOf) {
+  const file = join(e.paths.derived, 'critic-batches.json');
+  const keyOf = (j) => `${j.id}:${j.touch}`;
+  const hashNow = new Map(needCritic.map((j) => [keyOf(j), String(touchOf(j)?.hash || '')]));
+  const saved = readJson(file, null);
+  const placed = new Set();
+  const kept = [];
+  for (const b of Array.isArray(saved?.batches) ? saved.batches : []) {
+    if (!Number.isInteger(b?.n) || b.n < 1 || b.n > 100000 || kept.some((x) => x.n === b.n) || !Array.isArray(b.drafts)) continue;
+    const ids = b.drafts
+      .filter((d) => typeof d?.key === 'string' && hashNow.get(d.key) === d.hash && !placed.has(d.key))
+      .map((d) => d.key);
+    if (!ids.length) continue;
+    ids.forEach((k) => placed.add(k));
+    kept.push({ n: b.n, ids });
+  }
+  let n = Math.max(0, ...kept.map((b) => b.n)) + 1;
+  const rest = needCritic.map(keyOf).filter((k) => !placed.has(k));
+  for (let k = 0; k < rest.length; k += 5) kept.push({ n: n++, ids: rest.slice(k, k + 5), fresh: true });
+  kept.sort((a, b) => a.n - b.n);
+  writeJson(file, { batches: kept.map((b) => ({ n: b.n, drafts: b.ids.map((key) => ({ key, hash: hashNow.get(key) })) })) });
+  return kept;
+}
+
+// A plain file removed; a link is removed, never followed; a folder or anything else is left alone.
+function removeFile(p) {
+  try {
+    const st = lstatSync(p);
+    if (st.isFile() || st.isSymbolicLink()) unlinkSync(p);
+  } catch {
+    /* not there */
+  }
 }

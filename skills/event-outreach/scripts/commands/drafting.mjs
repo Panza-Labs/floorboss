@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Drafting: saving a draft with its checks, the batch check, briefs for the drafter, revising and redrafting.
 import { optoutFor, optoutForReader } from '../../../../lib/config.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { allowedPath, realPath, readChecked } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson, writeText } from '../../../../lib/jsonio.mjs';
 import { insightCap, parseProof } from '../../../event-context/scripts/context-check.mjs';
-import { relativeWordsIn, modeFor, daysUntilEvent } from '../leadtime.mjs';
+import { relativeFlag, modeFor, daysUntilEvent } from '../leadtime.mjs';
 import { gapKey, gapFor, nextDue, offWeekend } from '../../../../lib/spacing.mjs';
 import { planFor } from '../../../../lib/sendcheck.mjs';
 import { checkDraft, timeMentioned, controlProblems, wordCount, confirmationLinks } from '../checks.mjs';
@@ -204,7 +205,7 @@ export function saveDraft(opts, given = null) {
     const bodyLow = draft.body.toLowerCase();
     if (placeWords.length && placeWords.filter((w) => bodyLow.includes(w)).length < Math.ceil(placeWords.length * 0.6))
       problems.push(`doesn't say where to meet (${job.meeting_place})`);
-    if (relativeWordsIn(draft.body).length) problems.push(`uses relative time words (${relativeWordsIn(draft.body).join(', ')}); write the day and date`);
+    if (relativeFlag(draft.body)) problems.push(relativeFlag(draft.body));
   }
   draft.checks = problems;
   // Log first: a crash between the two leaves a "drafted" entry with the old file, never new text in a card
@@ -473,9 +474,7 @@ export function briefs(opts) {
   return {
     briefs: out.length,
     by_drafter: out,
-    next: out.length
-      ? 'Give each brief to its drafter (the Skill tool for a skill, the Agent tool for an agent), then save each answer with save-draft --json, adding "drafted_by": "<drafter>". The checks and the critic read it like any draft.'
-      : "No jobs for the user's drafter in this run."
+    next: out.length ? briefsNext() : "No jobs for the user's drafter in this run."
   };
 }
 
@@ -567,3 +566,9 @@ export function redraft(opts) {
   }
   return { fresh_attempt: done, next: "Run flow next again: these are drafted again from scratch, with the critic's last reasons as a guide." };
 }
+
+// What to do with the user's own drafter's briefs. In hand-send, no Claude Code tool by name.
+export const briefsNext = () =>
+  handSend()
+    ? 'Give each brief to its drafter (the user\'s own skill or agent), one brief at a time and nothing else, then save each answer with save-draft --json, adding "drafted_by": "<drafter>". The checks and the critic read it like any draft.'
+    : 'Give each brief to its drafter (the Skill tool for a skill, the Agent tool for an agent), then save each answer with save-draft --json, adding "drafted_by": "<drafter>". The checks and the critic read it like any draft.';

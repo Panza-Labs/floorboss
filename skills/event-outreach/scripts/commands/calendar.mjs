@@ -13,6 +13,7 @@ import { readJson, writeJson, writeText } from '../../../../lib/jsonio.mjs';
 import { agendaData, validatePoints, renderHtml, renderMarkdown, renderIcs, newsPath } from '../agenda.mjs';
 import { validateEvents } from '../../../connectors/scripts/tasks.mjs';
 import { ctxOf, led, labelOf } from './context.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 
 // Meetings in the calendar with a shortlisted person count as booked, whatever channel the yes came on; a
 // cancelled one frees the time again.
@@ -275,6 +276,9 @@ const pointsOk = (x) =>
   !!x.ask &&
   (x.avoid == null || typeof x.avoid === 'string');
 export const STALE_POINTS_NOTE = 'Talking points were built before these facts changed: run /floorboss:agenda to rebuild them.';
+// In hand-send, the same without the slash command: the agenda is rebuilt with flow next --agenda.
+export const stalePointsNote = () =>
+  handSend() ? 'Talking points were built before these facts changed: build the agenda again (flow next --agenda) to rebuild them.' : STALE_POINTS_NOTE;
 // A plain file's text, or null (missing, a link, a folder, a pipe, too large): never a reason to stop.
 const plain = (p) => {
   try {
@@ -325,7 +329,7 @@ export function buildFactsBrief(opts) {
       if (was && was.facts === factsOf(m) && pointsOk(was.points)) carried.set(m.id, was.points);
     }
   const stale = applies && data.meetings.some((m) => !carried.has(m.id));
-  const note = stale ? STALE_POINTS_NOTE : null;
+  const note = stale ? stalePointsNote() : null;
   // Always rendered here, from the facts and the marker's talking points: a file on disk is never the source of
   // what is opened, whatever its fingerprint says (the marker that holds the fingerprint is a file too).
   const html = renderHtml(data, carried, { note });

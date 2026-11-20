@@ -34,7 +34,7 @@ import { modeFor, daysUntilEvent } from '../../event-outreach/scripts/leadtime.m
 import { plannedDays, followupDay, spacingWords } from '../../../lib/spacing.mjs';
 import { HARD_HOLDS } from './resolve.mjs';
 import { plainOwnerValue, ownerQuoted, ownerSaid } from '../../../lib/names.mjs';
-import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
+import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, segmentOf, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
 import { inventoryView } from '../../../lib/harness.mjs';
 
 // A list file named on the command line: in a folder floorboss reads from, not a key place, a list's kind of
@@ -479,6 +479,8 @@ function fit(opts) {
       who: 'floorboss',
       id: f.id,
       segment: f.unsure ? null : f.segment || null,
+      // An unsure fit keeps the segment it read as a guess: a "reach … because" from the user then has it.
+      ...(f.unsure && f.segment ? { guess: f.segment } : {}),
       reason: String(f.reason || '').trim(),
       score: f.score == null || f.score === '' ? null : Number(f.score),
       unsure: !!f.unsure,
@@ -840,10 +842,12 @@ function view(opts) {
       name: x.name,
       title: x.title,
       company: x.company,
-      to: x.email,
+      // Where a message would go: the email, else (a reach person with only a LinkedIn link) the link, as todo.json's
+      // job has it; with neither, no "to" at all rather than an empty one.
+      ...(x.email || x.profile_url ? { to: x.email || x.profile_url } : {}),
       group: r.group,
       says: r.says,
-      segment: c.state.fits[id]?.segment || null,
+      segment: segmentOf(c.state.fits[id], r.group),
       ...(r.account_note ? { account_note: r.account_note } : {}),
       ...(r.coworker ? { coworker: `${r.coworker}'s contact${r.coworker_warn ? ": you're warned before sending" : ''}` } : {}),
       ...(r.coworker_also ? { coworker_also: `${r.coworker_also} also works this company` } : {}),

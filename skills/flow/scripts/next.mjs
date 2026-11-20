@@ -13,6 +13,7 @@ import { nowFrom } from '../../../lib/event.mjs';
 import { dirname } from 'node:path';
 import { refreshOutbox } from '../../event-outreach/scripts/commands/cards.mjs';
 import { unattendedNext } from './steps/unattended.mjs';
+import { handSend } from './steps/shared.mjs';
 
 // Steps that only run one of floorboss's own commands (no judgement, no question, no send): next runs them
 // itself and moves on, so Claude gets a turn only where it has something to do. What each reported comes back
@@ -54,8 +55,14 @@ function nextStepOut(opts) {
   if (!opts.event) {
     const sess = sessionEvent(nowMs);
     const evs = listEvents(nowMs);
-    if (!sess && evs.length && readJson(join(dirname(configPath()), 'config.json'), {}).disclaimer_ack) {
-      const live = evs.filter((x) => !x.over);
+    const live = evs.filter((x) => !x.over);
+    // Hand-send, a later day: plain `next` with one event on this computer that isn't over goes on with it, as a new
+    // run (so its first step asks what came back). --new-run still asks, so a new event can be started.
+    if (!sess && !opts['new-run'] && handSend() && live.length === 1 && readJson(join(dirname(configPath()), 'config.json'), {}).disclaimer_ack) {
+      touchSession(undefined, nowMs, { clear: true });
+      clearStall();
+      opts = { ...opts, event: live[0].slug };
+    } else if (!sess && evs.length && readJson(join(dirname(configPath()), 'config.json'), {}).disclaimer_ack) {
       return {
         step: 'which_event',
         why: 'There are events on this device already: this run is for one of them, or a new one.',
@@ -144,7 +151,7 @@ function finishNext(opts, ran) {
       stalled_step: s.step,
       why: `floorboss kept re-running its automatic "${s.step}" step: it ran, and the next step was the same one again.`,
       run_by_hand: cmd,
-      tell_user: `floorboss got stuck on its "${s.step}" step (${s.why ? s.why.replace(/[.\s]+$/, '') : 'an automatic step'}): it ran it and was asked for it again${count > 1 ? `, ${count} times now` : ''}. Run it once by hand: ${cmd}. Then start again with /floorboss:start (a new run tries the step afresh).`,
+      tell_user: `floorboss got stuck on its "${s.step}" step (${s.why ? s.why.replace(/[.\s]+$/, '') : 'an automatic step'}): it ran it and was asked for it again${count > 1 ? `, ${count} times now` : ''}. Run it once by hand: ${cmd}. Then ${handSend() ? 'start a new floorboss run' : 'start again with /floorboss:start'} (a new run tries the step afresh).`,
       ran: ran.slice(-6),
       event: c.slug || null
     };

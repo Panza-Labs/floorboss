@@ -30,7 +30,13 @@ const SPAWN = "    const child = spawn(cmd, [page], { stdio: 'ignore', detached:
 const RUN = "  return spawnSync(LAUNCHCTL, args, { encoding: 'utf8' });";
 const CP = "import { spawn } from 'node:child_process';";
 
+const GITRUN = "  const r = spawnSync(GIT, [...FIXED, ...args], { cwd: home, encoding: 'utf8', env: gitEnv(), timeout: GIT_TIMEOUT_MS });";
 const EVASIONS = {
+  "auto-send's git run given a shell": (d) => change(d, 'lib/autosend/sync.mjs', GITRUN, GITRUN.replace('encoding:', 'shell: true, encoding:')),
+  "auto-send's git swapped for another program": (d) => change(d, 'lib/autosend/sync.mjs', "const GIT = 'git';", "const GIT = '/usr/bin/curl';"),
+  "auto-send's git given a second process start": (d) => change(d, 'lib/autosend/sync.mjs', GITRUN, `${GITRUN}\n  spawnSync('/usr/bin/true', []);`),
+  "auto-send's git allowed to run the data repo's hooks": (d) => change(d, 'lib/autosend/sync.mjs', "'-c', 'core.hooksPath=/dev/null', ", ''),
+  'a process started from another lib file than the sync': (d) => change(d, 'lib/autosend/plan.mjs', "import { join, resolve } from 'node:path';", "import { join, resolve } from 'node:path';\nimport { spawnSync } from 'node:child_process';"),
   'the opener\'s name shadowed just before it is started': (d) => change(d, 'scripts/scheduled.mjs', SPAWN, `    const cmd = '/usr/bin/osascript';\n${SPAWN}`),
   'the opener\'s name taken from somewhere else': (d) => change(d, 'scripts/scheduled.mjs', '  const cmd = openerFor();', "  const cmd = process.env.OPENER || openerFor();"),
   'launchctl\'s name shadowed inside the one function that starts it': (d) => change(d, 'scripts/unattended.mjs', RUN, `  const LAUNCHCTL = '/usr/bin/osascript';\n${RUN}`),
@@ -46,7 +52,10 @@ const EVASIONS = {
   'the test switch set by the install script, another spelling': (d) => change(d, 'scripts/unattended.mjs', 'const PLATFORM = platformFor();', "process.env['FLOORBOSS_TEST'] = '1';\nconst PLATFORM = platformFor();"),
   'a choice defined a second time': (d) => change(d, 'scripts/unattended.mjs', 'const LAUNCHCTL = launchctlFor();', "const launchctlFor = () => '/usr/bin/osascript';\nconst LAUNCHCTL = launchctlFor();"),
   'the terminal test taken off switching back on': (d) => change(d, 'scripts/unattended.mjs', "  if (notYours('turning unattended runs back on')) return;\n", ''),
-  'the terminal test made to pass': (d) => change(d, 'scripts/unattended.mjs', '  if (!claude && terminalPresent()) return false;', '  if (!claude) return false;'),
+  'the terminal test made to pass': (d) => change(d, 'scripts/unattended.mjs', '  if (!claude && !codex && terminalPresent()) return false;', '  if (!claude && !codex) return false;'),
+  'the Codex half of the gate removed (const codex = false)': (d) => change(d, 'scripts/unattended.mjs', '  const codex = CODEX_MARKERS.some((k) => k in process.env);', '  const codex = false;'),
+  'the Codex half of the gate read from one marker only': (d) => change(d, 'scripts/unattended.mjs', '  const codex = CODEX_MARKERS.some((k) => k in process.env);', "  const codex = 'CODEX_SESSION_ID' in process.env;"),
+  'the Codex markers list shortened': (d) => change(d, 'lib/harness.mjs', "'CODEX_TOOL_CALL_ID', 'CODEX_SANDBOX', ", "'CODEX_TOOL_CALL_ID', "),
   'a terminal that is always there': (d) => change(d, 'lib/unattended.mjs', '  return !!stdin.isTTY && !!stdout.isTTY;', '  return true;'),
   'another opener than /usr/bin/open': (d) => change(d, 'lib/unattended.mjs', "platform === 'darwin' ? '/usr/bin/open'", "platform === 'darwin' ? '/usr/bin/osascript'"),
   'launchctl named in another script': (d) => writeFileSync(join(d, 'lib', 'extra.mjs'), "export const run = ['launchctl', 'load'];\n"),
@@ -58,7 +67,7 @@ const EVASIONS = {
   'the network through a built name, import("node:ht" + "tps")': (d) => change(d, 'scripts/scheduled.mjs', CP, `${CP}\nconst net = await import('node:ht' + 'tps');`),
   'the opener handed another file than the page': (d) => change(d, 'scripts/scheduled.mjs', '      const opened = await openPage(out.page);', "      const opened = await openPage('/tmp/x.command');"),
   'the page runBrief returns made another file': (d) => change(d, 'scripts/scheduled.mjs', '  return { built: fresh.map((r) => r.slug), page: todayPage(), results };', "  return { built: fresh.map((r) => r.slug), page: '/tmp/x.command', results };"),
-  'the gate made to answer "yours" always (its body, not its call sites)': (d) => change(d, 'scripts/unattended.mjs', '  if (!claude && terminalPresent()) return false;\n  refused(what, claude);\n  return true;', '  if (!claude && terminalPresent()) return false;\n  return false;'),
+  'the gate made to answer "yours" always (its body, not its call sites)': (d) => change(d, 'scripts/unattended.mjs', "  if (!claude && !codex && terminalPresent()) return false;\n  refused(what, claude ? 'Claude Code' : codex ? 'Codex' : null);\n  return true;", '  if (!claude && !codex && terminalPresent()) return false;\n  return false;'),
   'the Claude Code half of the gate removed (const claude = false)': (d) => change(d, 'scripts/unattended.mjs', "  const claude = 'CLAUDECODE' in process.env;", '  const claude = false;'),
   'the watchdog made to do nothing': (d) => change(d, 'lib/watchdog.mjs', "setTimeout(() => process.kill(process.pid, 'SIGKILL'), workerData.ms);", 'setTimeout(() => {}, workerData.ms);'),
   'the watchdog made to write something before it stops the run': (d) => change(d, 'lib/watchdog.mjs', "setTimeout(() => process.kill(process.pid, 'SIGKILL'), workerData.ms);", "setTimeout(() => { console.log('late'); process.kill(process.pid, 'SIGKILL'); }, workerData.ms);"),

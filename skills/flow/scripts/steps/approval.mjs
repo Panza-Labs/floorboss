@@ -4,7 +4,7 @@
 import { join } from 'node:path';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { plural } from '../../../../lib/plural.mjs';
-import { step, node, pendingLine, pendingAsk } from './shared.mjs';
+import { step, node, pendingLine, pendingAsk, handSend } from './shared.mjs';
 
 // Approval: drafts that are stuck, what the user should know before approving, and the approval itself.
 export function approvalSteps(x) {
@@ -116,7 +116,9 @@ export function approvalSteps(x) {
   if (needApprove.length)
     return step(
       'approve',
-      `${plural(needApprove.length, 'message')} ${needApprove.length === 1 ? 'is' : 'are'} ready for the user's yes. With sending on, each person's whole sequence and its planned days are shown.`,
+      handSend()
+        ? `${plural(needApprove.length, 'message')} ${needApprove.length === 1 ? 'is' : 'are'} ready for the user's yes. Each is shown in full; once approved, the user sends each one from their own mail app or copies it.`
+        : `${plural(needApprove.length, 'message')} ${needApprove.length === 1 ? 'is' : 'are'} ready for the user's yes. With sending on, each person's whole sequence and its planned days are shown.`,
       {
         ...(() => {
           const full = lastHeldFail && !toldSince(lastHeldFail);

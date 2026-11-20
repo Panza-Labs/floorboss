@@ -8,6 +8,8 @@ import { writeText } from '../../../../lib/jsonio.mjs';
 import { context, nextStep, appOutcomeTarget } from '../steps.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { join } from 'node:path';
+import { repliesAsked } from '../replies-asked.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 import { asRule } from '../../../event-outreach/scripts/sameness.mjs';
 import { isAgreement } from '../../../../lib/reading.mjs';
 import { INTERPRETED, gateWords, EDIT_WITH_TEXT, editWithText, SKIP_REVIEW, skipReview, cli, withSubject, writeWork, isNo, ledger, writeWorkText, answers, pathOf, config, windowYes, noReplySaid } from './helpers.mjs';
@@ -293,13 +295,23 @@ export const DRAFTS_SAVERS = {
         'Record what they told you first: write it as items and run outreach record (the event-outreach skill, "Recording what happened"), read the recorded lines back, then answer "recorded". If nothing came in, answer "none".'
       );
     // "recorded" stands only on a record actually made after the question was shown: something outreach record
-    // wrote past the step's ledger_lines.
+    // wrote past the count the step showed. That count is kept when the step is shown (work/replies-asked.json, the
+    // step's own note), so the answer needs no number: one given may be the step's or any later count, and is only
+    // read when the note is missing.
     if (value === 'recorded') {
-      if (!Number.isInteger(from) || from < 0)
-        throw new Error('Answer {"answer":"recorded","ledger_lines":<the number the step gave>}, after running outreach record.');
+      const all = readLedger(c.event.paths.ledger).entries;
+      // Claude Code reads the step's number, as it always did; hand-send reads the count kept when it was shown.
+      const asked = handSend() ? repliesAsked(c.event.paths, all) : null;
+      if (asked == null && !(Number.isInteger(from) && from >= 0))
+        throw new Error(
+          handSend()
+            ? 'Run flow next to be asked again, record what came in with outreach record, then answer {"answer":"recorded"}.'
+            : 'Answer {"answer":"recorded","ledger_lines":<the number the step gave>}, after running outreach record.'
+        );
+      const start = asked ?? from;
       if (
-        !readLedger(c.event.paths.ledger)
-          .entries.slice(from)
+        !all
+          .slice(start)
           .some((x) => x.via === 'user' && x.type !== 'answered')
       )
         throw new Error(

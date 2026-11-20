@@ -6,7 +6,8 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { setup, cli, triage, idOf, NOW } from './fixtures/harness.mjs';
 import { readLedger } from '../lib/ledger.mjs';
-import { buildReport, renderReport } from '../skills/event-outreach/scripts/report.mjs';
+import { buildReport, renderReport, reportCsvRows, CSV_HEADERS } from '../skills/event-outreach/scripts/report.mjs';
+import { toCsv, parse } from '../lib/csv.mjs';
 import { renderHtml, renderMarkdown } from '../skills/event-outreach/scripts/agenda.mjs';
 
 const LIST =
@@ -176,6 +177,11 @@ test('the report page and CSV: list text is escaped and can\'t run as a formula'
   const html = renderReport(r, { event: { name: 'Expo <b>' } });
   assert.ok(!html.includes('<script>alert') && !html.includes('<img src=x>') && !html.includes('Expo <b>'));
   assert.match(html, /default-src 'none'/);
+  // The CSV as the report command writes it: no cell a spreadsheet would run as a formula.
+  const csv = toCsv(CSV_HEADERS, reportCsvRows(r));
+  assert.ok(csv.includes(`'=HYPERLINK(""http://x"")`), csv);
+  assert.ok(csv.includes("'+cmd"), csv);
+  for (const v of parse(csv, ',').slice(1).flat()) assert.doesNotMatch(v, /^[\s\u3000]*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20]/, v);
   // An outcome for an earlier booking time doesn't count for a later one.
   const moved = buildReport(
     [

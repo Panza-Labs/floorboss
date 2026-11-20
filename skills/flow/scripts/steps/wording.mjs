@@ -124,3 +124,61 @@ export const ANSWER_FORMAT = {
   send_setup: '{"own_email":"…"} then run discovery; or "skip"',
   drafter: '{"name","invoke","type":"skill|agent|instructions","covers":{"channels":[…],"kinds":[…]},"gaps":[…]}'
 };
+
+// Hand-send (Codex and the rest): a setup question's text in the onboarding tree is written to the agent ("Look it
+// up…", "Propose…", "Once they say…"). There the step carries a plain question for the user (question) and the tree's
+// text with a note on what to do with the answer (how_to_ask); Claude Code's step is as it was. question(s) gets the
+// onboarding state; null keeps the tree's own text as the question (it is already the user's: "That's 64 meetings
+// back to back…").
+const SHAPE = 'Ask the user only the question, in plain words. Never ask them for JSON, a time zone or a file format: turn their plain answer into the answer_format shape yourself, read it back in one or two plain lines, and save it on their yes. The text in "for_agent" is for you, never for the user.';
+export const HAND_SEND_ASKS = {
+  event: {
+    question: (s) =>
+      s.ans?.event_hint
+        ? `Is it ${s.ans.event_hint}? If you know its dates and city, say them; otherwise I'll look them up and read them back to you.`
+        : 'Which event is this for? Its name, or a link to its site.',
+    how: `${SHAPE} With web search, look the event up and read back its dates, city and app for a yes. Without web search, or when nothing is found, ask the user for its dates and city in plain words, and work out the time zone from the city yourself (Nashville is America/Chicago): never ask the user for a zone.`
+  },
+  goal: {
+    question: () => 'Who do you want to meet there, and about how many meetings? Anyone in particular? In your own words.',
+    how: `${SHAPE} Then propose one to three groups of people from what they said (roles and kind of company, one line each) and ask if that's right.`
+  },
+  offer: {
+    question: (s) =>
+      `What does ${s.cfg?.own_company || 'your company'} sell, and to whom? One result you can name, and may a message name that customer? Anything a message must never say? A link to your site works too.`,
+    how: `${SHAPE} From a link, read it and propose the lines for a yes.`
+  },
+  free_time: {
+    question: (s) => (s.slots > 40 ? null : 'When are you free to meet during the event? Say it the way you would, like "mornings, not Thursday".'),
+    how: `${SHAPE} Times are the event's own unless they say otherwise.`
+  },
+  dnc: {
+    question: () => 'Is there anyone, or any company, floorboss must never contact (a competitor, a partner)? Names, companies or a file, or "none".',
+    how: SHAPE
+  },
+  team: {
+    question: () => 'Is it just you, or is your team working this event too? If a team, who? (They are never contacted.)',
+    how: SHAPE
+  },
+  company: {
+    question: () => 'What is your company, and the email domain you use there? Nobody there gets contacted. "No company" is fine.',
+    how: `${SHAPE} If the list or their words already show it, say it and ask only for a yes.`
+  },
+  crm_name: {
+    question: () => 'Which owner in your CRM is you? You can say "none of these" if you are not in it.',
+    how: `${SHAPE} Show the owners for_agent lists, numbered and quoted exactly as written there, so "2" means that one.`
+  },
+  samples: {
+    question: () =>
+      'Here are three ways your first message could open. Which is closest, and what would you change? If you have two to five emails you sent that got replies, paste them too, or say "none".',
+    how: `${SHAPE} Write the three sample openings yourself (casual and plain, warm, formal: two or three lines each, in the user's language) and show them with the question.`
+  },
+  about_you: {
+    question: () => 'How do you sign your messages (your name, and your company if you add it), and which city do you live in?',
+    how: `${SHAPE} If for_agent names where to propose the sign-off or the city from, propose it and ask only to confirm; if it names nothing, ask plainly and never suggest a name.`
+  },
+  coworker_contacts: {
+    question: () => 'Some people on the list belong to a coworker in your CRM. How careful should floorboss be with them? It can differ per coworker.',
+    how: `${SHAPE} Say first how many people each coworker owns (the counts in for_agent).`
+  }
+};

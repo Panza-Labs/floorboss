@@ -3,7 +3,7 @@
 // What came back: status pasted by the user, replies read from the inbox or CRM, and the summary.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { allowedPath } from '../../../../lib/paths.mjs';
+import { allowedPath, home } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { todayKeyIn, addDays } from '../../../../lib/tz.mjs';
@@ -15,10 +15,14 @@ import { planRecord } from '../record.mjs';
 import { planSync } from '../sync.mjs';
 import { validateSync } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig } from '../../../../lib/config.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { kindAt, routeOf } from './routes.mjs';
 import { ctxOf, led, sinceOf, idList, crmIdOf, awayNote, isOut, colleagueTold, sendingOn } from './context.mjs';
 import { readTodo, savedDraft, criticFails, followupDayOf } from './saved-drafts.mjs';
+import { laptopWrite, PAUSE_STEPS } from '../../../../lib/autosend/sync.mjs';
+import { autosendEvents, autosendLive, takenTimes, readEvent } from '../../../../lib/autosend/common.mjs';
+import { nowMs } from '../../../../lib/clock.mjs';
 
 export function status(opts) {
   need(opts, 'event');
@@ -64,7 +68,20 @@ export function status(opts) {
 // record --event <slug> --file <report.json> [--check]: what the user says happened, in their words, turned
 // into log entries. Claude writes the report ({"items":[{who, what, …}]}); --check shows what would be
 // recorded without writing. All or nothing.
+// record --event <slug> --file <f>: what the user says came back. With auto-send on for any event in a data folder
+// that is a checkout of the user's repo, it goes through the sync (lib/autosend/sync.mjs laptopWrite): the remote
+// pulled, the lock taken, the lines written and pushed, so a stop or a reply reaches the cloud task before its next
+// run. A pull or push that fails refuses with nothing recorded, and says how to pause the scheduled task meanwhile.
 export function record(opts) {
+  if (opts.check || !autosendEvents(home()).length) return recordHere(opts);
+  try {
+    return laptopWrite({ home: home(), nowMs: nowMs(), what: `record ${String(opts.event || '').slice(0, 64)}` }, () => recordHere(opts)).result;
+  } catch (e) {
+    if (/Nothing was changed\.$/.test(e.message)) throw new Error(`${e.message} If the user told you to stop someone, the cloud task doesn't know yet: ${PAUSE_STEPS}.`);
+    throw e;
+  }
+}
+function recordHere(opts) {
   need(opts, 'event', 'file');
   const c = ctxOf(opts.event, opts);
   const report = readJson(allowedPath(opts.file));
@@ -80,6 +97,7 @@ export function record(opts) {
     state: c.state,
     slots,
     zone: c.event.time_zone,
+    city: c.event.city || null,
     now: c.now,
     minutes: Number(c.settings.meeting_minutes) || 30,
     eventDays,
@@ -96,7 +114,19 @@ export function record(opts) {
   for (const id of new Set(entries.map((e) => e.id))) if (c.state[id]?.unclear?.length) led(c, { type: 'unclear_resolved', id });
   // The views (contacts, groups, shortlist) are rewritten so the next reader sees the new address or the cut.
   ctxOf(opts.event, opts);
-  return { applied: true, recorded: plan.lines, notes: plan.notes, ...(repeats ? { already_recorded: repeats } : {}) };
+  // A booking takes its time from everyone else offered it: an auto-send message offering it is held (never sent
+  // offering a taken time) until it is written again with free times, approved, and given a fresh auto-send yes.
+  const held = [];
+  if (c.event.autosend === true && entries.some((e) => e.type === 'booked')) {
+    const now = readEvent(c.paths.dir);
+    for (const [pid, p] of Object.entries(now.folded.people))
+      for (const t of Object.keys(p.touches || {}).map(Number).filter((n) => n > 0)) {
+        const a = autosendLive(now.entries, now.folded, pid, t);
+        if (a && takenTimes(now.entries, now.folded, pid, t, a.hash).length) held.push(`${p.name || pid} (message ${t})`);
+      }
+  }
+  const heldNote = held.length ? [`held: ${held.join(', ')}: their auto-send message offered a time that is now booked. floorboss writes it again with free times on the next flow next; approve it, then give auto-send a fresh yes (readback).`] : [];
+  return { applied: true, recorded: plan.lines, notes: [...plan.notes, ...heldNote], ...(repeats ? { already_recorded: repeats } : {}) };
 }
 
 // sync-list --event <slug>: who to check in the mailbox or CRM (email.messages, crm.activity), and from when.
@@ -303,7 +333,14 @@ export function summary(opts) {
       if ((st.replied || st.booked) && Number(t) !== 0) continue; // after a yes, only the confirmation is left
       if (Number(t) !== 0 && awayOf(id)) listAway(id);
       if (!waiting.some((w) => w.id === id && w.touch === Number(t)))
-        waiting.push({ id, name: c.byId[id]?.name, touch: Number(t), coordinate_note: kind === 'coordinate' || undefined });
+        waiting.push({
+          id,
+          name: c.byId[id]?.name,
+          touch: Number(t),
+          // Touch 0 is the meeting confirmation: said as one, not as a step of the sequence.
+          ...(Number(t) === 0 ? { what: 'meeting booked: confirmation ready' } : {}),
+          coordinate_note: kind === 'coordinate' || undefined
+        });
     }
   }
   // One message a day to a person across all your events: a message whose address another event wrote to today says
@@ -351,7 +388,7 @@ export function summary(opts) {
         ? `${c.event.name}: ${dayState.why}. Nothing is sent for it until then.`
         : `${c.event.name} is over: nothing more is sent for it, and no follow-up is due.`
       : due.length
-      ? `Run /floorboss:start again on or after ${due[0].due}.`
+      ? `${handSend() ? 'Run floorboss again' : 'Run /floorboss:start again'} on or after ${due[0].due}.`
       : sendingOn(c.settings)
         ? 'floorboss sends the approved messages on the channels you turned on (step 6c); anything on another channel is in the outbox for you to send and tick.'
         : 'Tick Sent in the outbox as you send; follow-ups are timed from those dates.'

@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { planQuestions, NODES, defaultsFor } from '../../../event-context/scripts/onboarding-tree.mjs';
 import { crmReaderHint } from '../../../connectors/scripts/tasks.mjs';
 import { plural } from '../../../../lib/plural.mjs';
-import { step, node } from './shared.mjs';
-import { ANSWER_FORMAT, helpFor, DISCLAIMER } from './wording.mjs';
+import { step, node, handSend } from './shared.mjs';
+import { ANSWER_FORMAT, helpFor, DISCLAIMER, HAND_SEND_ASKS } from './wording.mjs';
 import { coworkerCounts, customerCounts, lostCounts } from './counts.mjs';
 
 // The next onboarding question of one phase, or null when that phase is done.
@@ -33,13 +33,17 @@ export function onboardingAsk(c, phase) {
     if (lost)
       q.ask = `${q.ask} The count: ${lost.length ? `${plural(lost.length, 'person', 'people')} on the list: ${lost.map((x) => `${x.name} (${x.why}${x.at ? `, last in touch ${x.at}` : ', no date'})`).join('; ')}` : 'nobody on the list has a lost deal or a rejection in the CRM'}.`;
   }
+  // Hand-send: the user's question apart from the notes for the agent (wording.mjs HAND_SEND_ASKS).
+  const hs = handSend() ? HAND_SEND_ASKS[q.id] : null;
+  const plain = hs ? hs.question({ ...c.ob, ans: c.ob.ans || {}, cfg: c.ob.cfg || {} }) : null;
   return step(
     `onboarding:${q.id}`,
     `Onboarding (${phase === 'first' ? 'before the first look at the list' : phase === 'triage' ? (c.ob.ans.crm_choice && c.ob.ans.crm_choice !== 'none' ? 'now the CRM is read' : 'now the list is read') : 'after the shortlist'}): ${q.id.replace(/_/g, ' ')}.`,
     {
       ask: {
         id: q.id,
-        question: q.ask,
+        question: plain || q.ask,
+        ...(hs ? { how_to_ask: hs.how, ...(plain ? { for_agent: q.ask } : {}) } : {}),
         options: q.options || undefined,
         answer_format: ANSWER_FORMAT[q.id] || (q.options ? "one of the options, or the user's own words" : "the user's words"),
         saves: n?.saves
@@ -162,6 +166,7 @@ export function setupSteps(x) {
       ask: {
         id: 'event',
         question: 'Which event is this for? A name or a link.',
+        ...(handSend() ? { how_to_ask: HAND_SEND_ASKS.event.how } : {}),
         answer_format: '{"name","city","start":"YYYY-MM-DD","end":"YYYY-MM-DD","zone":"Area/City"}'
       }
     });

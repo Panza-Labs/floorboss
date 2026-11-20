@@ -9,10 +9,19 @@ import { readCsv } from '../../../../lib/csv.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { listEvents } from '../../../../lib/scope.mjs';
 import { mtime, lastInputAt, step, node, answersFor, onToolError, cli, TASK_FORMAT_ENRICH, toolDown, pendingLine, pendingAsk } from './shared.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 import { onboardingAsk } from './setup.mjs';
 
 // Triage: who is who (resolve), who fits, the people to check, the shortlist the user approves, free time,
 // and looking up missing contact details.
+// The check_these question: as it always was in Claude Code and with a CRM; in hand-send with no CRM, the plain
+// choices (there is no CRM row to name).
+export function checkTheseQuestion(c, env = process.env) {
+  const OLD = 'For each person in check-these: same-person (name the CRM row), different-person, not-in-crm (the CRM lookup gave no answer and the CRM has nobody for them), reach, warm or skip, with a word on why.';
+  if (!handSend(env) || (c.ob?.ans?.crm_choice && c.ob.ans.crm_choice !== 'none')) return OLD;
+  return 'For each person below: is it the same person as the one shown beside them (say which), or someone else? And should floorboss write to them, write warmly, or skip them? A word on why.';
+}
+
 export function triageSteps(x) {
   const { c, cfg, mock, e } = x;
   const resolvedFile = join(e.paths.derived, 'resolved.json');
@@ -97,8 +106,7 @@ export function triageSteps(x) {
         show: ['derived/resolved.json: the people whose group is check, each with says and alternatives'],
         ask: {
           id: 'check_these',
-          question:
-            'For each person in check-these: same-person (name the CRM row), different-person, not-in-crm (the CRM lookup gave no answer and the CRM has nobody for them), reach, warm or skip, with a word on why.',
+          question: checkTheseQuestion(c),
           answer_format:
             'one line per person: "<id> same-person crm:<row>" | "<id> different-person" | "<id> not-in-crm" (only where the CRM lookup gave no answer) | "<id> reach|warm|skip because <why>" | "<id> same-person crm:<row> reach|warm because <why>" (an uncertain match settled and decided on one line); or per group, to save a line per person: "all of <coworker>\'s: hold|reach|skip" (everyone that coworker holds) | "all <words in their title>: reach|warm|skip because <why>" | "all at <company>: …" | "everyone else: …" (a line for one person beats a group line; group these by title when there are many)',
           people: checks.map(([id, r]) => ({

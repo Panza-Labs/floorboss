@@ -23,6 +23,9 @@ import { hashOf, pickAt, whereAt } from './routes.mjs';
 import { isOut, labelOf, ctxOf, colleagueTold, takenTest } from './context.mjs';
 import { savedDraft, readTodo, draftFiles, ledgerTouch, followupDayOf, laterSent } from './saved-drafts.mjs';
 import { addressBusyToday, busyWhy, homeSends } from '../../../../lib/sendcheck.mjs';
+import { autosendLive, stepMark } from '../../../../lib/autosend/common.mjs';
+import { sessionWhy } from '../../../../lib/autosend/sync.mjs';
+import { addDays } from '../../../../lib/tz.mjs';
 
 function cardsFrom(c, jobs, { pendingOnly }) {
   const cards = [];
@@ -66,7 +69,15 @@ function cardsFrom(c, jobs, { pendingOnly }) {
     // floorboss let this message through to send and no receipt says what happened (the call may have timed out,
     // failed, or the session ended): it may have gone, so it is never offered to copy (the send check refuses it too).
     const tc = c.state[j.id]?.touches?.[j.touch];
-    const mayHaveGone = j.kind !== 'coordinate' && tc?.released && !c.state[j.id]?.sent?.[j.touch] ? tc.released_at || true : null;
+    // The same for a step the cloud's auto-send let go (lib/autosend/): released, or its send unclear, and not settled.
+    const autoMark = j.kind !== 'coordinate' && !c.state[j.id]?.sent?.[j.touch] ? stepMark(c.entries, j.id, j.touch) : null;
+    const mayHaveGone = j.kind !== 'coordinate' && tc?.released && !c.state[j.id]?.sent?.[j.touch] ? tc.released_at || true : autoMark ? true : null;
+    // Auto-send's second yes stands for this exact text: the cloud sends it on its day (no buttons), unless that day
+    // and the day after are gone (missed: it comes back to the user, with its buttons, and readback can plan it
+    // again), or a time it offers was booked by someone else since (held, until it is written again).
+    const live = j.kind === 'message' ? autosendLive(c.entries, c.folded, j.id, j.touch) : null;
+    const autoDue = live ? (j.touch === 1 ? live.planned_due : due?.day) : null;
+    const autoMissed = !!(live && autoDue && c.today && c.today > addDays(autoDue, 1));
     cards.push({
       kind: j.kind,
       id: j.id,
@@ -99,6 +110,10 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       // Not today, and why: another event wrote to that address today.
       not_today: notToday,
       may_have_gone: mayHaveGone ? (typeof mayHaveGone === 'string' ? mayHaveGone : 'yes') : undefined,
+      // The user's second yes stands for this exact text and address: the cloud run sends it on its day (no buttons).
+      autosend: live && !autoMissed && !j.time_taken ? true : undefined,
+      autosend_missed: live && autoMissed && !j.time_taken ? autoDue : undefined,
+      time_taken: j.time_taken ? true : undefined,
       // An event-app note whose times live in the app's request: the card says which time to pick.
       pick_in_app:
         (j.kind === 'message' || j.kind === 'confirmation') &&
@@ -155,8 +170,13 @@ export function renderFile(c, cards) {
   const nameOf = (id) => c.byId[id]?.name || id;
   const counts = {};
   for (const g of Object.values(c.triage.final || {})) counts[g.group] = (counts[g.group] || 0) + 1;
+  // The bar's "N of M sent": every message floorboss has a send recorded for at this event counts as sent, and stays
+  // in the total. A recorded send's card leaves the page, so counting only the cards read "0 of 20" after two sends
+  // where it had read "0 of 22".
+  const recordedSent = Object.values(c.state).reduce((n, p) => n + Object.keys(p.sent || {}).length, 0);
   const html = renderOutbox({
     hand_send: c.settings.hand_send === true,
+    recorded_sent: recordedSent,
     event: c.event,
     generatedAt: `${c.now.toISOString().slice(0, 16).replace('T', ' ')} UTC`,
     counts: { coordinate: counts.coordinate || 0, suppressed: counts.suppressed || 0, not_drafted: (counts.not_drafted || 0) + (counts.check || 0) },
@@ -200,8 +220,15 @@ function writeMailFiles(outboxPath, cards) {
 
 // The review page (drafts waiting for a yes, nothing to copy) or the final one, written through the page's lock like
 // every rebuild, so a page read before a change can never land after that change's rebuild.
+// The outbox page on the laptop with auto-send on: only while this session holds the data folder (sync start).
+function heldForAutosend() {
+  const why = sessionWhy();
+  if (why) throw new Error(why);
+}
+
 export function render(opts) {
   need(opts, 'event');
+  heldForAutosend();
   const review = !!opts.review;
   const r = rebuildOutbox(opts.event, opts, { force: true, review });
   return { outbox: r.rebuilt, cards: r.cards, review };
@@ -263,7 +290,13 @@ export function allOutboxCards(c) {
     const d = savedDraft(c, confirmations[i].id, confirmations[i].touch) || {};
     if (d.booked_slot && d.booked_slot !== c.state[confirmations[i].id]?.booked) confirmations.splice(i, 1);
   }
-  for (const [id, j] of latest) if (stale(j)) latest.delete(id);
+  // An auto-send message offering a time someone else booked stays on the page, held (time_taken), so it isn't lost
+  // from sight; the rest that offer a taken time are out until redrafted.
+  for (const [id, j] of latest)
+    if (stale(j)) {
+      if (!c.state[j.id]?.sent?.[j.touch] && j.kind === 'message' && autosendLive(c.entries, c.folded, j.id, j.touch)) latest.set(id, { ...j, time_taken: true });
+      else latest.delete(id);
+    }
   return cardsFrom(
     c,
     [...confirmations.filter((j) => !c.blocked(j.id)), ...[...latest.values()].filter((j) => !sentOrDone(j.id) && !c.blocked(j.id, j.kind))],
@@ -406,6 +439,7 @@ export function refreshOutbox(slug, opts = {}, { force = false, retryFailed = fa
 // Opens this event's outbox in the browser. Only this file: the command needs no general "open" permission.
 export function openOutbox(opts) {
   need(opts, 'event');
+  heldForAutosend();
   // Rendered again right before opening, through the page's lock: whatever sat at outbox.html is replaced by
   // floorboss's own page.
   const paths = files(opts.event);

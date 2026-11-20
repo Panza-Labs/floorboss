@@ -8,7 +8,8 @@ import { readJson } from '../../../../lib/jsonio.mjs';
 import { parseInsights } from '../../../event-context/scripts/context-check.mjs';
 import { readDraft } from '../../../../lib/drafts.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { followupDay, isDateKey, stateOf } from '../../../../lib/spacing.mjs';
+import { followupDay, isDateKey, stateOf, backAfterAway } from '../../../../lib/spacing.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 import { planFor } from '../../../../lib/sendcheck.mjs';
 import { hashOf } from './routes.mjs';
 import { skillsOf, isOut } from './context.mjs';
@@ -277,7 +278,7 @@ export function followupDayOf(c, id, t, d = savedDraft(c, id, t), prevSent = und
   const st = c.state[id] || {};
   const b = touchBefore(st, t);
   const p = b > 1 ? savedDraft(c, id, b) : null;
-  return followupDay(c.settings, c.event, {
+  const r = followupDay(c.settings, c.event, {
     prevSent: prevSent !== undefined ? prevSent : st.sent?.[b] || null,
     touch: t,
     planned_due: d?.planned_due,
@@ -291,6 +292,17 @@ export function followupDayOf(c, id, t, d = savedDraft(c, id, t), prevSent = und
     // A later step already went (recorded by hand or found in the mailbox): this one is passed over.
     laterSent: laterSent(st, t)
   });
+  return handSend() ? awayHold(c, id, r) : r;
+}
+// Hand-send: someone who sent an out-of-office gets no follow-up on or before the day they're back (paused_until);
+// one due by then waits for the first working day after it, or is dropped when that is past the event's last day.
+// Claude Code keeps the follow-ups' days through an out-of-office (the CHANGELOG's choice): its mailbox read says
+// when they write back.
+function awayHold(c, id, r) {
+  const until = c.folded?.people?.[id]?.paused_until;
+  if (!r?.day || !isDateKey(until) || r.day > until) return r;
+  const back = backAfterAway(until);
+  return back && back <= c.event.end_date ? { ...r, day: back, away_until: until } : { ...r, day: null, why: 'away', until };
 }
 // The latest day any message to this person was recorded as sent (any step, any channel), or null. Only plain dates
 // count: a malformed one is left out of the search (its own step still fails closed at the guard).
