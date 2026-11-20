@@ -21,7 +21,13 @@ import { refusedHere, eventDirOf, eventJson, autosendEvents, readEvent, unsettle
 import { readback, approve, revoke } from '../../../lib/autosend/approval.mjs';
 import { dueNow } from '../../../lib/autosend/plan.mjs';
 import { start, end, unlock, repair, laptopWrite, initRepo, publishedWhy, readLock, isRepo, remoteUrl, headOf, pinWhy, redact, repoConfigWhy, LOCK_LIVE_MS, PAUSE_STEPS } from '../../../lib/autosend/sync.mjs';
-import { next, checked, sent } from './driver.mjs';
+import { next, checked, sent, sendGapMs } from './driver.mjs';
+import { draftsNext, draftsAnswer, overdueDays, overdueQuery, overdueFrom, TOOLS as DRAFT_TOOLS, MODE as DRAFTS_MODE, Refused as DraftsRefused } from '../../../lib/autosend/drafts.mjs';
+import { dailyTaskText, chatgptLink, dayTime, DEFAULT_TIME, TASK_NAME } from '../../../lib/autosend/dailytask.mjs';
+import { MAX_RESULTS } from '../../../lib/autosend/replycheck.mjs';
+import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 
 const FLOORBOSS = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -71,19 +77,24 @@ async function on(opts) {
     throw new Error('Claude Code sends email for this data folder (its sending setting is on): auto-send can\'t be on as well. Turn Claude Code\'s email sending off first, in Claude Code.');
   // The Gmail account it sends from is required: the approval records it, and every cloud run checks the connected
   // account against it first (gmail_get_profile).
+  // --mode drafts: through Gmail drafts and one daily ChatGPT task (lib/autosend/drafts.mjs), no data repo. Without
+  // it, the cloud task with the data repo (0.1.4).
+  const mode = opts.mode === undefined || opts.mode === true ? ev.autosend_mode || 'cloud' : String(opts.mode);
+  if (!['cloud', DRAFTS_MODE].includes(mode)) throw new Error('--mode is drafts or cloud.');
   const own = opts.own == null || opts.own === true ? ev.autosend_own || null : String(opts.own).trim().toLowerCase();
   if (own == null) throw new Error("Missing --own: the Gmail address auto-send sends from (the account connected in ChatGPT). Ask the user for it.");
   if (!plainAddress(own)) throw new Error('--own is the user\'s own address (the Gmail account it sends from), one plain address.');
   const w = synced('autosend on', false, () => {
     const now = eventJson(dir) || ev;
-    writeJson(join(dir, 'event.json'), { ...now, autosend: true, autosend_said: String(opts.said).slice(0, 200), autosend_own: own });
+    writeJson(join(dir, 'event.json'), { ...now, autosend: true, autosend_said: String(opts.said).slice(0, 200), autosend_own: own, autosend_mode: mode });
   });
   return {
     autosend: true,
     event: opts.event,
     own,
     ...pushWords(w),
-    ...(w.pushed === null ? { say: "Your data isn't in a repo yet: do setup step 1 first (init, then setup). Auto-send can't run until then." } : {}),
+    mode,
+    ...(w.pushed === null && mode !== DRAFTS_MODE ? { say: "Your data isn't in a repo yet: do setup step 1 first (init, then setup). Auto-send can't run until then." } : {}),
     next: 'Run flow next: every planned follow-up of each sequence is drafted, read by the critic and approved before the readback.'
   };
 }
@@ -113,6 +124,8 @@ async function approveCmd(opts) {
   const notSentSaid = typeof opts['not-sent-said'] === 'string' ? opts['not-sent-said'] : null;
   const w = synced(`autosend approve ${opts.event}`, false, () => approve(dir, { digest: opts.digest, said: opts.said, notSentSaid }, nowOf()));
   await rebuild(opts.event);
+  if (eventJson(dir)?.autosend_mode === DRAFTS_MODE)
+    return { ...w.result, ...pushWords(w), next: `Now run drafts next --event ${opts.event} --run new and follow each step: the first emails due today are sent now, every other message becomes a labelled Gmail draft that the daily task sends on its day.` };
   return { ...w.result, ...pushWords(w), next: w.pushed === null ? 'The data folder is not a checkout of your repo yet: the README setup, step 1.' : 'It is in your repo: the cloud task sends from its next run on.' };
 }
 
@@ -175,7 +188,26 @@ async function status() {
   } catch (err) {
     plan = { blocked: err.message, due: [], waits: [] };
   }
+  // Through Gmail drafts: drafts whose day went by and are still drafts mean the daily task isn't running.
+  const days = [...new Set(autosendEvents(h).filter((e) => eventJson(e.dir)?.autosend_mode === DRAFTS_MODE).flatMap((e) => overdueDays(e.dir, nowOf())))].sort();
+  const oq = overdueQuery(days);
+  let overdue_check = null;
+  if (oq) {
+    const d = join(tmpdir(), 'floorboss-overdue');
+    mkdirSync(d, { recursive: true, mode: 0o700 });
+    const f = join(d, `${randomBytes(6).toString('hex')}.json`);
+    overdue_check = {
+      step: 'search',
+      tool: DRAFT_TOOLS.search[0],
+      tool_names: DRAFT_TOOLS.search,
+      args: { query: oq, max_results: MAX_RESULTS },
+      write: f,
+      then: ['env', `FLOORBOSS_HOME=${h}`, 'node', join(FLOORBOSS, 'skills', 'autosend', 'scripts', 'cli.mjs'), 'overdue-checked', '--file', f],
+      say: `Before anything else: call the Gmail search tool ${DRAFT_TOOLS.search[0]} (or the one whose name ends in gmail_search_emails) with exactly these args, write its whole result object as JSON to the write file, then run then. If it says say, tell the user that first, word for word.`
+    };
+  }
   return {
+    ...(overdue_check ? { overdue_check } : {}),
     lock: isRepo(h) ? readLock(h) : null,
     repo: isRepo(h) ? redact(remoteUrl(h)) || null : null,
     events,
@@ -333,7 +365,65 @@ async function sentCmd(opts) {
   return sent(home(), { run: String(opts.run), file: String(opts.file), nowMs: nowOf() });
 }
 
-export const HANDLERS = { init, on, readback: readbackCmd, approve: approveCmd, revoke: revokeCmd, status, settle, setup, sync, next: nextCmd, checked: checkedCmd, sent: sentCmd };
+// drafts next --event <slug> --run new|<id> | drafts answer --run <id> --file <f>: auto-send through Gmail drafts,
+// in Codex on the laptop (lib/autosend/drafts.mjs), right after the approval.
+async function drafts(opts, argv) {
+  laptopOnly('Auto-send through Gmail drafts');
+  const verb = argv[1];
+  const cli = ['env', `FLOORBOSS_HOME=${home()}`, 'node', join(FLOORBOSS, 'skills', 'autosend', 'scripts', 'cli.mjs')];
+  try {
+    if (verb === 'next') {
+      need(opts, 'run');
+      if (opts.run === 'new') need(opts, 'event');
+      return draftsNext(home(), { event: opts.event, run: String(opts.run), nowMs: nowOf(), cli, gapOf: sendGapMs });
+    }
+    if (verb === 'answer') {
+      need(opts, 'run', 'file');
+      return draftsAnswer(home(), { run: String(opts.run), file: resolve(String(opts.file)), nowMs: nowOf() });
+    }
+  } catch (e) {
+    if (e instanceof DraftsRefused) throw new Error(`${e.message}. Nothing was changed.`);
+    throw e;
+  }
+  throw new Error('drafts next or drafts answer.');
+}
+
+// overdue-checked --file <f>: the overdue search's answer (status's overdue_check).
+async function overdueChecked(opts) {
+  laptopOnly('The overdue check');
+  need(opts, 'file');
+  const f = resolve(String(opts.file));
+  if (dirname(f) !== join(tmpdir(), 'floorboss-overdue')) throw new Error('--file is the write file the overdue check named.');
+  const o = overdueFrom(existsSync(f) ? readFileSync(f, 'utf8') : null);
+  if (o.why) return { overdue: null, say: `floorboss couldn't check whether daily sending is running (${o.why}). Look in Gmail's Drafts for floorboss/due drafts whose day has passed.` };
+  return { overdue: o.overdue, ...(o.say ? { say: o.say } : {}) };
+}
+
+// daily-task [--time 9:00] --zone <IANA zone>: the text that sets up the daily ChatGPT task, as a chatgpt.com link
+// with it typed in, and a file with the same text to copy.
+async function dailyTask(opts) {
+  laptopOnly('The daily task setup');
+  const zone = opts.zone === undefined || opts.zone === true ? Intl.DateTimeFormat().resolvedOptions().timeZone : String(opts.zone);
+  const time = dayTime(opts.time === undefined || opts.time === true ? DEFAULT_TIME : String(opts.time));
+  const text = dailyTaskText({ time, zone });
+  const link = chatgptLink(text);
+  const dir = join(home(), 'autosend');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'daily-task-setup.txt');
+  writeFileSync(file, text + '\n');
+  return {
+    task: TASK_NAME,
+    time,
+    zone,
+    link: link.url,
+    ...(link.warn ? { warn: link.warn } : {}),
+    file,
+    text,
+    show: `Tell the user, in plain words: 1. Open this link in the browser where you're signed in to ChatGPT: it opens chatgpt.com with the setup already typed. Press send. (If the box is empty, copy everything in ${file} and paste it into a new chat at chatgpt.com.) 2. ChatGPT confirms the task "${TASK_NAME}" every day at ${time} (${zone}). Check that time. 3. Keep that chat: deleting or archiving it pauses the task. If the task ever shows Paused (chatgpt.com, Scheduled), click Resume. 4. The first time it sends, ChatGPT asks permission to send an existing Gmail draft: click "Always allow". It must be a chatgpt.com chat: a Codex desktop chat only makes a local task, which needs the laptop on.`
+  };
+}
+
+export const HANDLERS = { drafts, 'daily-task': dailyTask, 'overdue-checked': overdueChecked, init, on, readback: readbackCmd, approve: approveCmd, revoke: revokeCmd, status, settle, setup, sync, next: nextCmd, checked: checkedCmd, sent: sentCmd };
 
 export async function main(argv = process.argv.slice(2)) {
   const no = refusedHere();

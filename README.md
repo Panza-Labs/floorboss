@@ -166,6 +166,36 @@ folder. Untested in Codex.
 | Unattended drafts and the morning brief on its own | macOS, if you install them | no |
 | Auto-send with nobody there | drafts only, macOS | sends, Gmail only, in your ChatGPT cloud, no guard |
 
+### Auto-send through Gmail drafts (Codex, Gmail only)
+
+The simpler way to auto-send, with no data repo. You approve twice in Codex as below. Right after your second yes:
+
+- each first email due today is sent at once, from your Codex chat, after a check for a reply or a bounce;
+- every other approved message becomes a Gmail draft labelled `floorboss/due-<day>`, the day in the event's time
+  zone. A follow-up of an email sent now sits in that email's thread. If the first email is planned for a later day,
+  it waits as a draft too, and its follow-ups arrive as separate emails, each with its own subject;
+- floorboss reads every draft back and checks the recipient, subject and body against what you approved. If one
+  differs, or Gmail's answer can't be read, it stops and tells you which draft to delete.
+
+Then one scheduled ChatGPT task sends the drafts on their days, once a day at a fixed time you pick (9:00 by default).
+`autosend daily-task --zone <your time zone>` gives you a chatgpt.com link with the setup already typed in, and a file
+with the same text in case the link comes up empty. Use a chatgpt.com chat in the browser: a Codex desktop chat can
+only make a local task, which needs your laptop on. Before each draft the task checks for a reply from that person
+and for a bounce naming them; either one holds the draft (`floorboss/held-replied`, `floorboss/held-bounced`). A
+check can only hold, never send. The task never writes, edits or deletes a draft, and never emails you a summary.
+
+- **Always allow.** The first time the task sends, ChatGPT asks to "send an existing Gmail draft". Click "Always
+  allow". That lets this task send drafts from then on without asking you. It covers that one permission, nothing
+  more.
+- **Keep the task running.** Keep the chat that created the task: deleting or archiving it pauses the task. ChatGPT
+  also pauses a task when an action needs approval. If the task ever shows Paused (chatgpt.com, Scheduled), click
+  Resume. When you start floorboss in Codex, it looks for drafts whose day has passed and tells you if daily sending
+  looks paused.
+- **The risks.** Anyone with access to your mailbox can edit a queued draft, and it goes as edited. A draft you make
+  by hand with a `floorboss/due-` label is sent too.
+- **Stop everything.** Pause the task in chatgpt.com, or delete the floorboss drafts. Tell floorboss "stop
+  auto-send" too.
+
 ### Auto-send from the cloud (Codex, Gmail only)
 
 floorboss can send an approved sequence for you on its days, first message included, from a ChatGPT scheduled task
@@ -255,7 +285,7 @@ is your call.
 
 ### Don't connect mail, CRM or browser tools in Codex on your laptop
 
-Auto-send uses the Gmail connector in the cloud task only (below), never in your Codex chat on the laptop.
+Auto-send from the cloud uses the Gmail connector in the cloud task only (below), never in your Codex chat on the laptop. Auto-send through Gmail drafts (above) is the one exception: right after your second yes, the Codex chat calls only the Gmail steps floorboss names (one send per first email due now, then create, label and read back each draft).
 
 floorboss's guard runs only in Claude Code. In Codex nothing checks a tool call before it runs, so floorboss can't
 stop the model using a mail, CRM, calendar or browser tool you connected there, whatever floorboss's own text says.
