@@ -212,8 +212,12 @@ empty), then `show` in plain words. It must be a chatgpt.com chat in the browser
 a local task, which needs the laptop on. They keep that chat: deleting or archiving it pauses the task. If the task
 ever shows Paused, they click Resume.
 
-**Every session.** Run `status` first. If it has an `overdue_check`, run that search step and its `then`; if the
-answer has `say`, tell the user that first, word for word.
+**Every session.** Run `status` first. If it has an `overdue_check` or a `held_check`, run each search step and its
+`then`; if an answer has `say`, tell the user that first, word for word.
+
+**Risks to say plainly, accepted:** the approval ends when the draft is made (a draft edited in the mailbox goes as
+edited); the task sees replies only from the address it wrote to, so a colleague's reply from another address is
+recorded only when the user tells floorboss here; a reply can land seconds before a send and miss it.
 
 ## Auto-send from the cloud (Gmail only)
 

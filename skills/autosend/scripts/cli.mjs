@@ -22,7 +22,7 @@ import { readback, approve, revoke } from '../../../lib/autosend/approval.mjs';
 import { dueNow } from '../../../lib/autosend/plan.mjs';
 import { start, end, unlock, repair, laptopWrite, initRepo, publishedWhy, readLock, isRepo, remoteUrl, headOf, pinWhy, redact, repoConfigWhy, LOCK_LIVE_MS, PAUSE_STEPS } from '../../../lib/autosend/sync.mjs';
 import { next, checked, sent, sendGapMs } from './driver.mjs';
-import { draftsNext, draftsAnswer, overdueDays, overdueQuery, overdueFrom, TOOLS as DRAFT_TOOLS, MODE as DRAFTS_MODE, Refused as DraftsRefused } from '../../../lib/autosend/drafts.mjs';
+import { draftsNext, draftsAnswer, overdueDays, overdueQuery, overdueFrom, heldQuery, heldFrom, TOOLS as DRAFT_TOOLS, MODE as DRAFTS_MODE, Refused as DraftsRefused } from '../../../lib/autosend/drafts.mjs';
 import { dailyTaskText, chatgptLink, dayTime, DEFAULT_TIME, TASK_NAME } from '../../../lib/autosend/dailytask.mjs';
 import { MAX_RESULTS } from '../../../lib/autosend/replycheck.mjs';
 import { tmpdir } from 'node:os';
@@ -189,25 +189,28 @@ async function status() {
     plan = { blocked: err.message, due: [], waits: [] };
   }
   // Through Gmail drafts: drafts whose day went by and are still drafts mean the daily task isn't running.
-  const days = [...new Set(autosendEvents(h).filter((e) => eventJson(e.dir)?.autosend_mode === DRAFTS_MODE).flatMap((e) => overdueDays(e.dir, nowOf())))].sort();
-  const oq = overdueQuery(days);
-  let overdue_check = null;
-  if (oq) {
+  const draftEvents = autosendEvents(h).filter((e) => eventJson(e.dir)?.autosend_mode === DRAFTS_MODE);
+  const days = [...new Set(draftEvents.flatMap((e) => overdueDays(e.dir, nowOf())))].sort();
+  const checkStep = (query, verb) => {
     const d = join(tmpdir(), 'floorboss-overdue');
     mkdirSync(d, { recursive: true, mode: 0o700 });
     const f = join(d, `${randomBytes(6).toString('hex')}.json`);
-    overdue_check = {
+    return {
       step: 'search',
       tool: DRAFT_TOOLS.search[0],
       tool_names: DRAFT_TOOLS.search,
-      args: { query: oq, max_results: MAX_RESULTS },
+      args: { query, max_results: MAX_RESULTS },
       write: f,
-      then: ['env', `FLOORBOSS_HOME=${h}`, 'node', join(FLOORBOSS, 'skills', 'autosend', 'scripts', 'cli.mjs'), 'overdue-checked', '--file', f],
+      then: ['env', `FLOORBOSS_HOME=${h}`, 'node', join(FLOORBOSS, 'skills', 'autosend', 'scripts', 'cli.mjs'), verb, '--file', f],
       say: `Before anything else: call the Gmail search tool ${DRAFT_TOOLS.search[0]} (or the one whose name ends in gmail_search_emails) with exactly these args, write its whole result object as JSON to the write file, then run then. If it says say, tell the user that first, word for word.`
     };
-  }
+  };
+  const oq = overdueQuery(days);
+  const overdue_check = oq ? checkStep(oq, 'overdue-checked') : null;
+  const held_check = draftEvents.length ? checkStep(heldQuery(), 'held-checked') : null;
   return {
     ...(overdue_check ? { overdue_check } : {}),
+    ...(held_check ? { held_check } : {}),
     lock: isRepo(h) ? readLock(h) : null,
     repo: isRepo(h) ? redact(remoteUrl(h)) || null : null,
     events,
@@ -399,13 +402,32 @@ async function overdueChecked(opts) {
   return { overdue: o.overdue, ...(o.say ? { say: o.say } : {}) };
 }
 
+// held-checked --file <f>: the held-drafts search's answer (status's held_check).
+async function heldChecked(opts) {
+  laptopOnly('The held check');
+  need(opts, 'file');
+  const f = resolve(String(opts.file));
+  if (dirname(f) !== join(tmpdir(), 'floorboss-overdue')) throw new Error('--file is the write file the held check named.');
+  const o = heldFrom(existsSync(f) ? readFileSync(f, 'utf8') : null);
+  if (o.why) return { held: null, say: `floorboss couldn't check for held drafts (${o.why}). Look in Gmail's Drafts for floorboss/held labels.` };
+  return { held: o.held, ...(o.say ? { say: o.say } : {}) };
+}
+
 // daily-task [--time 9:00] --zone <IANA zone>: the text that sets up the daily ChatGPT task, as a chatgpt.com link
 // with it typed in, and a file with the same text to copy.
 async function dailyTask(opts) {
   laptopOnly('The daily task setup');
   const zone = opts.zone === undefined || opts.zone === true ? Intl.DateTimeFormat().resolvedOptions().timeZone : String(opts.zone);
   const time = dayTime(opts.time === undefined || opts.time === true ? DEFAULT_TIME : String(opts.time));
-  const text = dailyTaskText({ time, zone });
+  // The searches start the day before the first auto-send yes of any drafts event (today, before any yes).
+  const yes = autosendEvents(home())
+    .filter((e) => eventJson(e.dir)?.autosend_mode === DRAFTS_MODE)
+    .flatMap((e) => readEvent(e.dir).entries.filter((x) => x?.type === 'autosend_approved').map((x) => String(x.at || '').slice(0, 10)))
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  const firstDay = yes[0] || new Date(nowOf()).toISOString().slice(0, 10);
+  const after = new Date(Date.parse(`${firstDay}T00:00:00Z`) - 86400000).toISOString().slice(0, 10);
+  const text = dailyTaskText({ time, zone, after });
   const link = chatgptLink(text);
   const dir = join(home(), 'autosend');
   mkdirSync(dir, { recursive: true });
@@ -414,6 +436,7 @@ async function dailyTask(opts) {
   return {
     task: TASK_NAME,
     time,
+    searches_after: after,
     zone,
     link: link.url,
     ...(link.warn ? { warn: link.warn } : {}),
@@ -423,7 +446,7 @@ async function dailyTask(opts) {
   };
 }
 
-export const HANDLERS = { drafts, 'daily-task': dailyTask, 'overdue-checked': overdueChecked, init, on, readback: readbackCmd, approve: approveCmd, revoke: revokeCmd, status, settle, setup, sync, next: nextCmd, checked: checkedCmd, sent: sentCmd };
+export const HANDLERS = { drafts, 'daily-task': dailyTask, 'overdue-checked': overdueChecked, 'held-checked': heldChecked, init, on, readback: readbackCmd, approve: approveCmd, revoke: revokeCmd, status, settle, setup, sync, next: nextCmd, checked: checkedCmd, sent: sentCmd };
 
 export async function main(argv = process.argv.slice(2)) {
   const no = refusedHere();

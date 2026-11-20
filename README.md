@@ -180,8 +180,8 @@ The simpler way to auto-send, with no data repo. You approve twice in Codex as b
 Then one scheduled ChatGPT task sends the drafts on their days, once a day at a fixed time you pick (9:00 by default).
 `autosend daily-task --zone <your time zone>` gives you a chatgpt.com link with the setup already typed in, and a file
 with the same text in case the link comes up empty. Use a chatgpt.com chat in the browser: a Codex desktop chat can
-only make a local task, which needs your laptop on. Before each draft the task checks for a reply from that person
-and for a bounce naming them; either one holds the draft (`floorboss/held-replied`, `floorboss/held-bounced`). A
+only make a local task, which needs your laptop on. Before each draft the task checks for a reply from that address
+and for a bounce naming it; either one holds the draft (`floorboss/held-replied`, `floorboss/held-bounced`). A
 check can only hold, never send. The task never writes, edits or deletes a draft, and never emails you a summary.
 
 - **Always allow.** The first time the task sends, ChatGPT asks to "send an existing Gmail draft". Click "Always
@@ -191,8 +191,18 @@ check can only hold, never send. The task never writes, edits or deletes a draft
   also pauses a task when an action needs approval. If the task ever shows Paused (chatgpt.com, Scheduled), click
   Resume. When you start floorboss in Codex, it looks for drafts whose day has passed and tells you if daily sending
   looks paused.
-- **The risks.** Anyone with access to your mailbox can edit a queued draft, and it goes as edited. A draft you make
-  by hand with a `floorboss/due-` label is sent too.
+- **What the daily task checks.** It fixes today's date once per run and takes the due drafts oldest first, at most
+  one send per address per run. Right before each send it searches all of Gmail (Spam and Trash included) for
+  anything from that address since your first auto-send yes, and for a bounce naming it; any result holds the draft,
+  an auto-reply too. A follow-up goes only when Sent already has an earlier email to that address, at least a day
+  old; otherwise it waits a day. A draft more than 3 days overdue is held (`floorboss/held-late`), so a resumed task
+  never sends a backlog at once. An address that isn't exactly one plain address, or a send that fails, is held
+  (`floorboss/held-check`), never retried. A search that errors or comes back incomplete sends nothing for that draft
+  that day. When you start floorboss in Codex, it tells you about drafts that are overdue or held, and what to do.
+- **The risks, accepted.** Your approval ends when the draft is made: anyone with access to your mailbox can edit a
+  queued draft, and it goes as edited. A draft you make by hand with a `floorboss/due-` label is sent too. The task
+  sees replies only from the address it wrote to: a colleague who answers from another address isn't seen (tell
+  floorboss on the laptop, and it records it). A reply that lands seconds before the send can still miss it.
 - **Stop everything.** Pause the task in chatgpt.com, or delete the floorboss drafts. Tell floorboss "stop
   auto-send" too.
 

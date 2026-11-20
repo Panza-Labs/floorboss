@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs';
 import { world, ledgerLines, addLines, draftText, PEOPLE, NOW, OWN, EVENT, SLUG } from './fixtures/autosend-world.mjs';
 import { readback, approve } from '../lib/autosend/approval.mjs';
 import { SENTENCE } from '../lib/autosend/common.mjs';
-import { draftsNext, draftsAnswer, draftIds, verifyDraft, labelCreated, dueLabel, sendsAtApproval, draftArgs, overdueDays, overdueQuery, overdueFrom, overdueWords } from '../lib/autosend/drafts.mjs';
+import { heldQuery, heldFrom, draftsNext, draftsAnswer, draftIds, verifyDraft, labelCreated, dueLabel, sendsAtApproval, draftArgs, overdueDays, overdueQuery, overdueFrom, overdueWords } from '../lib/autosend/drafts.mjs';
 import { htmlBody } from '../lib/autosend/sendrecord.mjs';
 import { dailyTaskText, chatgptLink, STOP_CHECKS, LINK_WARN_AT, dayTime } from '../lib/autosend/dailytask.mjs';
 
@@ -209,27 +209,47 @@ test('the overdue check: drafts whose day went by, still drafts and not held, me
 });
 
 test('the daily task: one fixed time, the Part B rules, the stop checks as a list, no summary email, Always allow, Resume', () => {
-  const t = dailyTaskText({ time: '9:00', zone: 'America/New_York' });
+  const t = dailyTaskText({ time: '9:00', zone: 'America/New_York', after: '2026-11-19' });
   assert.match(t, /^Create a scheduled task named "floorboss daily sending" that repeats EVERY DAY at 9:00 \(America\/New_York time\)\. Keep that one fixed time; never move or reschedule it\. Confirm the time/);
   assert.ok(!/<TIME>|<ZONE>|<STOP_CHECKS>/.test(t));
-  assert.match(t, /Today is the current date in America\/New_York/);
+  // One date per run.
+  assert.match(t, /fix TODAY as the current date in America\/New_York, as YYYY-MM-DD\. Use that one date for the whole run/);
   assert.match(t, /has no label starting floorboss\/held/);
-  assert.match(t, /exactly one recipient in To and none in Cc or Bcc/);
+  // Pagination and errors: every page, an error or an incomplete answer never sends, only a successful empty result is clear.
+  assert.match(t, /List the Gmail drafts, following every page/);
+  assert.match(t, /Follow every page of each search/);
+  assert.match(t, /If a search errors or looks incomplete, do not send this draft: skip it this run, with no label, and report it\. Only a successful, empty result counts as clear/);
+  // Order, one send per address, the checks right before each send.
+  assert.match(t, /in order: due date, then step \(a first email before its follow-ups\), oldest first/);
+  assert.match(t, /At most one send per address per run/);
+  assert.match(t, /Immediately before sending, run every stop check/);
+  assert.match(t, /never open or read any email, body or snippet/);
+  // Lateness.
+  assert.match(t, /more than 3 days before TODAY, apply the label floorboss\/held-late and do not send/);
+  // Recipients.
+  assert.match(t, /To must be exactly one plain email address, with none in Cc or Bcc\. Anything else .* floorboss\/held-check/);
+  // The previous email.
+  assert.match(t, /search in:sent to:<that address>\. It sends only if there is an earlier sent email to that address and the latest one went out at least 1 calendar day before TODAY\. Otherwise skip it for today, with no label, and report it as deferred/);
+  // Send failure.
+  assert.match(t, /If the send fails, do not retry: apply floorboss\/held-check/);
   assert.match(t, /send this exact draft with the send-draft tool, unchanged/);
   assert.match(t, /never create or delete drafts/);
   assert.match(t, /Never send a summary or report email/);
-  assert.match(t, /STOP CHECKS \(each only holds\):\n1\. Reply: search Gmail for from:<that recipient> -in:sent -in:drafts newer_than:30d.*floorboss\/held-replied\.\n2\. Bounce: .*mailer-daemon.*floorboss\/held-bounced\./);
+  // The stop checks, a list: reply (anywhere, since the first send, auto-replies too) and bounce.
+  assert.match(t, /STOP CHECKS \(each only holds\):\n1\. Reply: search Gmail for from:<that address> in:anywhere -in:sent -in:drafts after:2026\/11\/19\. Any result holds, an auto-reply too: label floorboss\/held-replied\.\n2\. Bounce: search Gmail for from:\(mailer-daemon OR postmaster\) "<that address>" in:anywhere after:2026\/11\/19\. Any result holds: label floorboss\/held-bounced\./);
+  assert.ok(!/newer_than/.test(t), 'no expiry on the searches');
   assert.equal(STOP_CHECKS.length, 2);
   assert.match(t, /Each check can only hold, never send/);
   assert.match(t, /click "Always allow"/);
   assert.match(t, /keep this chat.*If the task ever shows Paused, open Scheduled and click Resume/);
   assert.equal(dayTime('09:30'), '9:30');
   assert.throws(() => dayTime('25:00'));
-  assert.throws(() => dailyTaskText({ zone: 'Not/AZone' }));
+  assert.throws(() => dailyTaskText({ zone: 'Not/AZone', after: '2026-11-19' }));
+  assert.throws(() => dailyTaskText({ zone: 'America/New_York' }), /first-send date/);
 });
 
 test('the chatgpt.com link: the text round-trips, and a long one warns', () => {
-  const t = dailyTaskText({ time: '9:00', zone: 'Europe/Lisbon' });
+  const t = dailyTaskText({ time: '9:00', zone: 'Europe/Lisbon', after: '2026-11-19' });
   const l = chatgptLink(t);
   assert.ok(l.url.startsWith('https://chatgpt.com/?q='));
   assert.equal(decodeURIComponent(new URL(l.url).search.slice(3)), t);
@@ -256,6 +276,8 @@ test('the CLI: on --mode drafts, approve points at drafts next, daily-task print
   assert.match(d.link, /^https:\/\/chatgpt\.com\/\?q=/);
   assert.equal(readFileSync(d.file, 'utf8').trim(), d.text.trim());
   assert.match(d.text, /EVERY DAY at 9:30 \(America\/New_York time\)/);
+  assert.equal(d.searches_after, '2026-10-11', 'the day before the first yes');
+  assert.match(d.text, /after:2026\/10\/11/);
   assert.match(d.show, /Always allow/);
   assert.ok(autosend(w.HOME, ['daily-task', '--zone', 'America/New_York'], { claude: true }).ERROR);
 });
@@ -272,6 +294,10 @@ test('the CLI: status gives the overdue search first, and overdue-checked says d
   writeFileSync(st.overdue_check.write, env({ emails: [{ id: 'm2', labels: ['DRAFT'] }], next_page_token: null }));
   const o = autosend(w.HOME, st.overdue_check.then.slice(st.overdue_check.then.indexOf('overdue-checked')), { now: '2026-10-21T09:00:00Z' });
   assert.equal(o.say, "Daily sending looks paused: 1 email is overdue. Open chatgpt.com, go to Scheduled, and resume 'floorboss daily sending'.");
+  assert.match(st.held_check.args.query, /label:floorboss-held-check/);
+  writeFileSync(st.held_check.write, env({ emails: [{ id: 'm2', labels: ['floorboss/held-bounced'] }], next_page_token: null }));
+  const hc = autosend(w.HOME, st.held_check.then.slice(st.held_check.then.indexOf('held-checked')), { now: '2026-10-21T09:00:00Z' });
+  assert.match(hc.say, /1 draft is held after a bounce from that address/);
 });
 
 test('the cloud planner never sends from an event that goes through Gmail drafts', async () => {
@@ -280,4 +306,16 @@ test('the cloud planner never sends from an event that goes through Gmail drafts
   const p = dueNow(w.HOME, w.nowMs);
   assert.deepEqual(p.due, []);
   assert.match(p.waits[0].why, /Gmail drafts/);
+});
+
+test('the held check: drafts the daily task held for check, late or bounce are reported with what to do', () => {
+  assert.equal(heldQuery(), 'in:drafts (label:floorboss-held-check OR label:floorboss-held-late OR label:floorboss-held-bounced)');
+  const o = heldFrom(env({ emails: [{ id: '1', labels: ['floorboss/held-late'] }, { id: '2', labels: ['floorboss/held-late'] }, { id: '3', labels: ['floorboss/held-check'] }, { id: '4', labels: ['Label_77'] }], next_page_token: null }));
+  assert.deepEqual(o.held, { check: 1, late: 2, bounced: 0, other: 1 });
+  assert.match(o.say, /1 draft is held for a check \(an address that looked wrong, or a send that failed\)/);
+  assert.match(o.say, /2 drafts are held as more than 3 days overdue/);
+  assert.match(o.say, /1 draft is held by the daily task/);
+  assert.equal(heldFrom(env({ emails: [], next_page_token: null })).say, null);
+  assert.ok(heldFrom('x').why);
+  assert.match(overdueQuery(['2026-10-19']), /-label:floorboss-held-late/);
 });
