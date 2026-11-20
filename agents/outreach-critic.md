@@ -72,8 +72,8 @@ For each draft, FAIL it if any of these is true:
   the profile; `user`: the user's note; `crm`: the CRM summary; `account`: the account note; `mailbox`: the mailbox note; `list`: their title and company), or it
   says something about the reader that no allowed source supports. With `declared_fact_source: none`, it
   says nothing about the reader beyond their name and why them in a clause.
-- It has `declared_structure: plain-request` and opens with a hook or a question instead of saying who the
-  sender is and what they want. When `opening_rule` is given, floorboss chose the structure to meet the
+- It has `declared_structure: plain-request` and opens with a hook or a question instead of saying plainly
+  what the sender wants from this reader and why them. When `opening_rule` is given, floorboss chose the structure to meet the
   sender's own rule about the opening: a draft that opens as that rule says is never failed for its
   structure's recipe, and one that doesn't open that way fails as a broken voice rule.
 - It uses a proof point that isn't in the `what_you_bring` proof library, or one that isn't tagged for
@@ -106,7 +106,20 @@ For each draft, FAIL it if any of these is true:
 - `app_note` says what an event-app note carries: when `times_in_note` is false the times are picked in
   the app, so the note must not offer times and `offered_times` doesn't apply; when `event_name_in_note`
   or `optout_in_note` is false, don't fail it for leaving those out.
+- Its first sentence is about the sender ("I'm Gary from…", "My name is…", "I build…", "We build…", "We
+  help…", "I work with…", "Gary here") instead of the reader. The order is theirs first: their situation,
+  then why it's relevant to them, then the value; who the sender is fits in a clause after that. When
+  `opening_rule` says the sender's own rule is to open with who they are, follow the rule.
+- It frames the meeting as a demo: "show you how", "walk you through", a "walkthrough" or "demo", "I've set
+  aside", "a quick call to show". The ask is a conversation between peers about the reader's business, in a
+  senior, not-needy tone. Naming a demo the `crm_summary` already records ("ahead of our demo") is fine.
+- Its subject (first messages only) asks a question or has the reader's first name.
+- It names a time that isn't on the hour or the half hour (11:10, 9:45).
 - It fails the writing checklist below.
+
+`check_warnings`, when given, lists what floorboss's own checks warn about (a subject over about 40
+characters, the event's full long name more than once, more "I/we" than "you"). Weigh them with the rest;
+on its own a warning is not a fail.
 
 <!-- ai-writing-checklist:start -->
 A short outreach message reads as machine-written, and fails, if it does any of these:
@@ -141,9 +154,13 @@ that company. It still fails a draft that claims the sender knows or has met thi
 or `crm_summary` says they have.
 
 **Follow-ups** (touch 2 or later) come with `previous_message`, the message already sent in the same thread.
-Don't judge a follow-up's subject (it's the thread's). The segment's ask and what the sender offers may
-rest on the previous message; the follow-up still needs the offered times, the opt-out sentence (when the input gives one) and one
-new thing, and the checklist applies to its own text. When the input has `times_changed`, naming a time in
+Don't judge a follow-up's subject (it's the thread's). Judge it as if the reader never read the earlier
+email: it fails when it doesn't restate, in one short clause, what's offered and why it matters to them, or
+when it opens by pointing back ("For the walkthrough", "As I mentioned", "Following up on", "Further to",
+"Per my last"). It still needs the offered times, the opt-out sentence (when the input gives one) and one
+new thing, it is shorter than `previous_message`, and the checklist applies to its own text. A follow-up
+with `last_touch: true` is a short closing note instead: it says it's the last, names the days the sender
+is at the show and asks only yes or no, with no times; never fail it for leaving `offered_times` out. When the input has `times_changed`, naming a time in
 `no_longer_free` as taken is correct, not a wrong time.
 
 When the input has `shared` and `drafts`, the `shared` fields (what you bring, the event, the goal, the

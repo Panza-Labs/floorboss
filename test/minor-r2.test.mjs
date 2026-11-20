@@ -76,7 +76,7 @@ test('minor: the languages answer says what was saved, not the whole config; app
   // An approval with sending off doesn't claim it goes via email.send.
   const { jobs } = todoJobs(H);
   for (const j of jobs.filter((x) => x.kind === 'message')) {
-    const body = `Hi ${j.contact.name.split(' ')[0]}, I work on carrier compliance for freight teams. Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\nIf this isn't relevant, say so and I won't follow up.`;
+    const body = `Hi ${j.contact.name.split(' ')[0]}, carrier compliance for freight teams is the work I'd like to compare notes on. Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\nIf this isn't relevant, say so and I won't follow up.`;
     cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x', structure: 'plain-request', fact_source: 'list' })]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--text', 'PASS']);
   }

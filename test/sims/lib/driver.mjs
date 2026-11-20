@@ -170,8 +170,9 @@ const BANK = {
   ],
   // Insight-first and peer notes lead with an insight from the profile (the only thing they may claim).
   'insight-first': [['Something you may not have seen:', 'Worth knowing before the event:', 'In case it is useful:', 'A pattern worth a look:', 'One thing that stood out:', 'A quick data point:'], null],
+  // The plain form opens with the reader's side, never the sender ("I sell…" fails floorboss's checks).
   'plain-request': [
-    ['I sell software for', 'My team builds tools for', 'I work on a product for', 'We make a platform for', 'I look after accounts in', 'Our product helps with'],
+    ['Your work in', 'Teams like yours in', 'People who run', 'Leaders in', 'Whoever owns', 'Your side of'],
     ['fraud operations', 'financial-crimes teams', 'case management', 'alert triage', 'payments risk', 'investigations'],
   ],
   'peer-note': [['Comparing notes:', 'From one ops person to another:', 'You may see this too:', 'A note from my side:', 'Curious if this matches yours:', 'Quick one between peers:'], null],
@@ -194,12 +195,26 @@ export function draftFor(todo, j, attempt = 0) {
   const open = {
     'question-first': `${a} ${b}?`,
     'insight-first': `${a} ${b}.`,
-    'plain-request': `${a} ${b}.`,
+    'plain-request': `${a} ${b} is what my software is for.`,
     'peer-note': `${a} ${b}.`,
   }[structure];
   const ask = times ? `Would 20 minutes at ${ev} work, ${times}?` : `Could we find 20 minutes at ${ev}?`;
   // A capped note (a LinkedIn invitation): the drafter keeps to it, as the skill says.
   let body = `Hi ${first},\n\n${open} ${ask}${sign}`;
+  // A follow-up is shorter than the message before it; the last one is a closing note: it says it's the last, names
+  // the days at the show and asks only yes or no.
+  if (j.followup && j.last_touch) {
+    const d = /^(\w{3})\b.* to (\w{3})\b/.exec(todo.event?.dates || '');
+    body = `Meet at ${ev}, yes or no? Last note; I'm there ${d ? `${d[1]} to ${d[2]}` : todo.event?.dates || 'all week'}.\n\nSam\n\n${todo.optout_sentence || "If this isn't relevant, say so and I won't follow up."}`;
+  }
+  else if (j.followup) {
+    // Short openings, so it is always shorter than the first message (which also says "Would 20 minutes at … work").
+    const few = (n) => b.split(' ').slice(0, n).join(' ');
+    const short = structure === 'question-first' ? `${a} ${few(2)}?` : structure === 'plain-request' ? `${a} ${b}.` : `${a} ${few(3)}.`;
+    // Times the way a person types them ("Tue 10th at 10:00"), not the label.
+    const typed = j.slot_labels.map((l) => { const m = /^(\w{3}) (\d{1,2}) \w{3}, (\d{2}:\d{2})/.exec(l); return m ? `${m[1]} ${m[2]}th at ${m[3]}` : l; }).join(' or ');
+    body = `Hi ${first},\n\n${short} ${typed ? `${typed}?` : `Meet at ${ev}?`}${sign}`;
+  }
   if (j.char_limit && body.length > j.char_limit) body = `Hi ${first},\n\n${ask}${sign}`.slice(0, j.char_limit);
   return { id: j.id, touch: j.touch, subject: j.touch > 1 ? 'One more thought' : 'At the summit', body, brief: 'x', insight: ['insight-first', 'peer-note'].includes(structure) ? insightId : null, structure, fact_source: structure === 'plain-request' && fact === 'none' ? 'none' : fact };
 }

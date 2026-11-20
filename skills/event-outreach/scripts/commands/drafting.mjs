@@ -12,7 +12,7 @@ import { insightCap, parseProof } from '../../../event-context/scripts/context-c
 import { relativeFlag, modeFor, daysUntilEvent } from '../leadtime.mjs';
 import { gapKey, gapFor, nextDue, offWeekend } from '../../../../lib/spacing.mjs';
 import { planFor } from '../../../../lib/sendcheck.mjs';
-import { checkDraft, timeMentioned, controlProblems, wordCount, confirmationLinks } from '../checks.mjs';
+import { checkDraft, draftWarnings, timeMentioned, controlProblems, wordCount, confirmationLinks } from '../checks.mjs';
 import { saveDraft as saveDraftFile } from '../../../../lib/drafts.mjs';
 import { buildBrief, instructionsPath } from '../drafter.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
@@ -26,8 +26,17 @@ function checkCtx(c, job, id, channel, others, lang = null) {
   // A LinkedIn message has no meeting fields: the app-note settings are for event apps only.
   const app = channel === 'paste' && whereAt(c, id, job.touch ?? 1) !== 'LinkedIn';
   const skills = skillsOf(c);
+  // A follow-up is shorter than the message before it, on the same channel (a short LinkedIn note before an email
+  // doesn't set the email's length).
+  const before = job.followup && !job.channel_changed ? job.previous_message || earlierDraft(c, id, touchBefore(c.state[id], job.touch))?.body || null : null;
   return {
     followup: !!job.followup,
+    previousBody: before,
+    // The sequence's last message: a short closing note (says it's the last, names the show's days, yes or no).
+    lastTouch: !!(job.followup && job.last_touch),
+    eventDays: daysOf(c.event),
+    // The user's own voice rule says to open with who they are: theirs to keep.
+    senderOpeningOk: openingOf(skills.voice || '') === 'plain' && /\b(?:who\s+(?:i|we)\s+(?:am|are)|my\s+name|our\s+name)\b/i.test(skills.voice || ''),
     contact: c.byId[id],
     slotLabels: app && c.settings.app_note_times === 'in_app' ? [] : job.slot_labels,
     eventName: app && c.settings.app_note_event_name === false ? null : c.event.name,
@@ -56,6 +65,15 @@ function checkCtx(c, job, id, channel, others, lang = null) {
       .filter(Boolean)
       .join('\n')
   };
+}
+
+// The event's days, first to last (YYYY-MM-DD).
+function daysOf(event) {
+  const out = [];
+  if (!event?.start_date || !event?.end_date) return out;
+  for (let d = new Date(`${event.start_date}T12:00:00Z`); out.length < 31 && d.toISOString().slice(0, 10) <= event.end_date; d.setUTCDate(d.getUTCDate() + 1))
+    out.push(d.toISOString().slice(0, 10));
+  return out;
 }
 
 // Whether the latest batch check of this touch, made after this draft was last saved, failed and asks for it to
@@ -176,7 +194,10 @@ export function saveDraft(opts, given = null) {
   let problems = [];
   if (job.kind === 'message') {
     const others = otherAttendees(c, job.id);
-    problems = checkDraft(draft, checkCtx(c, job, job.id, draft.channel, others, draft.language || null));
+    const ctx = checkCtx(c, job, job.id, draft.channel, others, draft.language || null);
+    problems = checkDraft(draft, ctx);
+    // What the checks warn about without failing: kept with the draft, read by the critic, said back to the drafter.
+    draft.warnings = draftWarnings(draft, ctx);
     draft.structure = input.structure || inferStructure(draft);
     draft.structure_assigned = job.structure || null;
     draft.fact_source = input.fact_source || (job.fact_sources || [])[0] || null;
@@ -256,7 +277,7 @@ export function saveDraft(opts, given = null) {
     draft.verdict = { verdict: read.verdict, reasons: read.reasons || [], hash: draft.hash, at: read.at };
   writeJson(job.draft_file, draft);
   c._batches?.clear();
-  return { id: job.id, touch, checks: problems.length ? problems : 'pass', attempts: draft.attempts };
+  return { id: job.id, touch, checks: problems.length ? problems : 'pass', ...(draft.warnings?.length ? { warnings: draft.warnings } : {}), attempts: draft.attempts };
 }
 
 // The follow-ups after `touch` in this person's sequence count from its planned day (day). One whose saved plan counts

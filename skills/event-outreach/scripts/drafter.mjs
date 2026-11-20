@@ -120,12 +120,27 @@ export function buildBrief(job, { event, settings, files }) {
     );
   if (app && !app.times_in_note)
     L.push(`Times: ${event.app_name ? `${event.app_name}'s` : "the app's"} meeting request carries them. Do not put times in the note.`);
+  else if (job.last_touch && kind === 'followup') L.push('No times in this one: the closing note asks only yes or no.');
   else if (job.slot_labels?.length)
     L.push(`Offer exactly these times, written the way a person would ("Tue 27th at 10:00 or 14:30"): ${job.slot_labels.join(' | ')}`);
   else if (kind !== 'confirmation') L.push('No times to offer: ask for a time during the event.');
   if (kind === 'confirmation')
     L.push(`Confirm the meeting at ${job.slot_labels?.[0] || 'the booked time'}${job.meeting_place ? `, at ${job.meeting_place}` : ''}.`);
-  if (!app || app.event_name_in_note) L.push(`Name the event (${event.name}${event.aliases?.length ? ` or ${event.aliases.join(', ')}` : ''}).`);
+  if (!app || app.event_name_in_note) L.push(`Name the event (${event.name}${event.aliases?.length ? ` or ${event.aliases.join(', ')}` : ''}), its full name at most once.`);
+  // The writing rules floorboss's checks hold every message to, whoever writes it.
+  if (kind !== 'confirmation') {
+    L.push(
+      `floorboss's checks fail a message whose first sentence is about the sender ("I'm…", "We build…", "I work with…"): open with their situation, then why it's relevant to them, then the value. They also fail demo framing ("show you how", "walk you through", "walkthrough", "demo", "set aside") and any time not on :00 or :30.`
+    );
+    if (job.channel === 'email' && kind === 'first')
+      L.push('Email: about 60–100 words; a subject of about 40 characters at most, a statement (no "?"), without their first name.');
+    if (kind === 'followup')
+      L.push(
+        job.last_touch
+          ? "This is the last message: a short closing note that says it's the last, names the days the sender is at the show, and asks only yes or no (no times). Shorter than the one before."
+          : "Assume they never read the earlier message: restate in one short clause what's offered and why it matters to them, then one new thing, then the times. Never open with \"As I mentioned\" or \"Following up\". Shorter than the one before."
+      );
+  }
   if (kind !== 'confirmation' && (!app || app.optout_in_note) && settings.optout_sentence && job.optout_line !== null)
     L.push(
       `End with this sentence on its own line after the sign-off, word for word: ${settings.optout_sentence}${

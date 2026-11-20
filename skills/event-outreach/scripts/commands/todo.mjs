@@ -249,6 +249,8 @@ export function todo(opts) {
       mode,
       mode_guidance: MODES[mode].label,
       followup,
+      // The sequence's last message: a short closing note (event-outreach SKILL.md, "The last touch").
+      ...(followup && touch === (steps ? steps.length : c.settings.touches) ? { last_touch: true } : {}),
       followup_note: followup ? channelChangeNote(c, id, touch) || "Send in the same thread, only if they haven't replied." : null,
       contact: { name: ct.name, title: ct.title, company: ct.company },
       group: fin.group,
@@ -313,7 +315,10 @@ export function todo(opts) {
       const steps = routeOf(c, j.id);
       // Each follow-up's day, the user's gap or the table's apart, off the weekend, until one would land after the
       // event's last day (that one and the rest are dropped, never moved closer).
-      for (const { touch: t, due, from } of plannedDays(c.settings, c.event, today, mode, steps ? steps.length : c.settings.touches)) {
+      const days = plannedDays(c.settings, c.event, today, mode, steps ? steps.length : c.settings.touches);
+      // The last step that still fits before the event ends: its closing note.
+      const lastT = days.length ? days[days.length - 1].touch : null;
+      for (const { touch: t, due, from } of days) {
         // A step the user skipped: the sequence goes on to the next one.
         if (c.state[j.id]?.touches?.[t]?.skipped) continue;
         // A follow-up the user dropped ends the sequence there.
@@ -345,6 +350,7 @@ export function todo(opts) {
           channel_changed: !!channelChangeNote(c, j.id, t) || undefined,
           touch: t,
           followup: true,
+          ...(t === lastT ? { last_touch: true } : { last_touch: undefined }),
           planned: true,
           planned_due: due,
           // The gaps it was planned with: planned with others, its day is worked out again from the last send.
