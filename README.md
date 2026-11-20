@@ -236,9 +236,10 @@ The run log is `autosend/log-<day>.md` in the data repo.
 
 The pinned commit means a change to floorboss can't change what a running schedule does: update the pin to get fixes.
 An hourly task is 24 cloud runs a day, most of them doing nothing; narrow the schedule if you like (floorboss decides
-the hours itself). Follow-ups go as new emails with their approved subject, not as replies in the thread, until the
-Gmail tool is shown to take a thread id. The data repo holds personal data (attendee lists, CRM exports): where that
-data may sit, under GDPR and similar laws, is your call.
+the hours itself). A follow-up goes as a reply to the first email auto-send sent them, so it lands in that thread,
+with its approved subject; when auto-send didn't send the first one (you sent it yourself), it goes as a new email.
+The data repo holds personal data (attendee lists, CRM exports): where that data may sit, under GDPR and similar laws,
+is your call.
 
 ### Don't connect mail, CRM or browser tools in Codex on your laptop
 

@@ -17,6 +17,12 @@ The first public version.
   event's hours and with Claude Code's email sending off. The laptop's auto-send changes (on, the second yes, a stop,
   a settled send, a reply or stop recorded) are pushed as they are made, and `autosend sync repair` brings a laptop
   that moved apart from the repo back in line without dropping a stop.
+- Auto-send reads the Gmail tools as a live ChatGPT/Codex cloud run showed them (`mcp__codex_apps__gmail_search_emails`,
+  `mcp__codex_apps__gmail_send_email`): the search's emails and the send's ids come from the result's
+  `structuredContent`, and an `isError` result stops the run (a send's is unclear, never sent or retried). The send
+  goes as `text/plain` with the approved body byte for byte, and a follow-up replies to the first email's message id,
+  so it stays in the thread. The task prompt sets git's sign-in to GitHub for the whole run (a global credential
+  helper reading `GITHUB_TOKEN`) and asks for the whole tool result as JSON.
 - floorboss runs in OpenAI's Codex: the whole event, with you sending every message from your own mail app. A
   Codex pack (`.codex-plugin/plugin.json`, `.agents/skills/floorboss/`, `AGENTS.md`) asks in the chat and runs the
   critic in the same conversation, and says so. Untested in Codex itself, on Windows and with Outlook.
