@@ -18,9 +18,9 @@ test('setup: refuses a folder that is not a checkout, or a remote that is not ht
   assert.ok(!r.ERROR, r.ERROR);
   assert.match(r.pinned_commit || '', /^[0-9a-f]{40}$/);
   assert.match(r.task_prompt, new RegExp(`Clone https://github.com/Panza-Labs/floorboss at commit ${r.pinned_commit}`));
-  assert.match(r.task_prompt, /https:\/\/github\.com\/test-user\/fb-data into \.\/data/);
+  assert.match(r.task_prompt, /https:\/\/github\.com\/test-user\/fb-data into RUN\/data/);
   assert.match(r.task_prompt, /FLOORBOSS_AUTOSEND to cloud/);
-  assert.match(r.task_prompt, /never edit any file\s+in \.\/data yourself/);
+  assert.match(r.task_prompt, /never edit any file\s+in RUN\/data yourself/);
   assert.ok(!/<PINNED_SHA>|<USER>/.test(r.task_prompt));
   assert.deepEqual(r.events, ['harbor-expo']);
 });
