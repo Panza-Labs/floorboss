@@ -9,6 +9,9 @@ import { plural } from '../../../../lib/plural.mjs';
 import { cli, step, node, handSend } from './shared.mjs';
 import { earlierLine } from './counts.mjs';
 
+// Hand-send's people research, never asked: everyone up to 20, else the top 20.
+const handSendScale = (n) => (n > 20 ? { scale: 'top', n: 20 } : { scale: 'all', n });
+
 // Research: company briefs, fit doubts, how much to research, the research itself, and writing samples.
 export function researchSteps(x) {
   const { c, cfg, mock, e } = x;
@@ -17,9 +20,12 @@ export function researchSteps(x) {
   const quick = c.ob.ans.setup_level === 'quick';
   if (companies.to_brief?.length) {
     const todo = companies.companies.filter((x) => !x.has_brief);
+    // Hand-send: research isn't asked. It starts, with one line on what is looked up and about how long it takes, and
+    // the user can say "skip" (saved as the company_research answer, which this step takes).
+    const hs = handSend() && !mock;
     // Quick setup asked nothing about research: web searches start only on the user's yes. Without it, each
     // company gets a "not researched" brief and drafts say nothing about the company itself.
-    if (quick && !e.state.answered.company_research)
+    if (quick && !hs && !e.state.answered.company_research)
       return step(
         'company_research',
         `${todo.length} shortlisted ${todo.length === 1 ? 'company has' : 'companies have'} no brief yet. Quick setup asks before any web research.`,
@@ -46,7 +52,7 @@ export function researchSteps(x) {
             format: `; for the people, add "people: ${shortN0 > 1 ? `all ${shortN0}|top ${topN0}|none` : 'all|none'}" ("go, people: ${shortN0 > 1 ? `top ${topN0}` : 'none'}"), or say "skip all" for neither`
           }
         : null;
-    if (!quick && !mock && !e.state.answered.company_research)
+    if (!quick && !mock && !hs && !e.state.answered.company_research)
       return step(
         'company_research',
         `${todo.length} shortlisted ${todo.length === 1 ? 'company goes' : 'companies go'} to web search before drafting: the user hears which, first.`,
@@ -74,10 +80,25 @@ export function researchSteps(x) {
         show: ['skipped']
       });
     const fileOf = (co) => join(e.paths.work, `company-${companySlug(co)}.json`);
+    // About a minute a company in turn, as the live Codex run took.
+    const mins = Math.max(1, todo.length);
+    const unasked = hs && !e.state.answered.company_research;
+    const peopleToo = unasked && !quick && !e.state.answered.research_scale && shortN0 ? handSendScale(shortN0) : null;
     return step(
       'company_briefs',
-      `Before any draft: what each of ${todo.length} companies sells, how it relates to ${companies.sender_company || 'your company'} and what it would want from you. ${handSend() ? 'Run each researcher in turn, then save each.' : 'Run every researcher at once (in parallel, one message), then save each.'}${todo.length > 15 ? ` Tell the user first, in one line: ${todo.length} company researches, a few web searches each, a few minutes in all.` : ''}`,
+      `Before any draft: what each of ${todo.length} companies sells, how it relates to ${companies.sender_company || 'your company'} and what it would want from you. ${handSend() ? 'Run each researcher in turn, then save each.' : 'Run every researcher at once (in parallel, one message), then save each.'}${!unasked && todo.length > 15 ? ` Tell the user first, in one line: ${todo.length} company researches, a few web searches each, a few minutes in all.` : ''}`,
       {
+        ...(unasked
+          ? {
+              companies: todo.map((x) => x.company),
+              tell_user: `Looking up the ${todo.length} shortlisted ${todo.length === 1 ? 'company' : 'companies'} on the web now (${todo
+                .slice(0, 6)
+                .map((x) => x.company)
+                .join(', ')}${todo.length > 6 ? ', …' : ''}): what each sells and what's new in its market${peopleToo ? `, then ${peopleToo.n === shortN0 ? `the ${plural(shortN0, 'shortlisted person', 'shortlisted people')}` : `the top ${peopleToo.n} shortlisted people`}` : ''}. About ${plural(mins + (peopleToo ? peopleToo.n : 0), 'minute')}. Say "skip" to draft without it.`,
+              accepts: ['company_research'],
+              if_user_says: { skip: 'flow answer --ask company_research --value-file <a file with their words>', means: 'no web research: messages say nothing about the companies themselves' }
+            }
+          : {}),
         agents: todo.map((co) => ({
           name: 'floorboss:attendee-researcher',
           input: {
@@ -128,7 +149,7 @@ export function researchSteps(x) {
   // The offer follows the shortlist's size: "the top 20" of 10 people is all of them.
   const shortN = (readJson(join(e.paths.derived, 'shortlist.json'), {}).ranked || []).length;
   const topN = shortN > 20 ? 20 : Math.max(1, Math.ceil(shortN / 2));
-  if (!e.state.answered.research_scale && !quick && !mock)
+  if (!e.state.answered.research_scale && !quick && !mock && !handSend())
     return step('research', 'Research gives each message one true thing about the reader. It costs web searches.', {
       ask: {
         id: 'research_scale',
@@ -137,7 +158,13 @@ export function researchSteps(x) {
         answer_format: 'all | top | none'
       }
     });
-  const scale = (quick || mock) && !e.state.answered.research_scale ? 'none' : e.state.answered.research_scale.value;
+  // Hand-send (standard and full): the people are researched without a question, all of them up to 20, else the top 20.
+  const scale =
+    (quick || mock) && !e.state.answered.research_scale
+      ? 'none'
+      : !e.state.answered.research_scale && handSend()
+        ? handSendScale(shortN).scale
+        : e.state.answered.research_scale.value;
   if (scale !== 'none') {
     const plan = cli(
       'attendee-research',
@@ -145,11 +172,19 @@ export function researchSteps(x) {
       c
     );
     const todo = (plan.to_research || []).filter((p) => !existsSync(join(e.paths.dir, 'profiles', `${p.id}.md`)));
+    const unaskedPeople = handSend() && !e.state.answered.research_scale;
     if (todo.length)
       return step(
         'research_batch',
         `Research ${plural(todo.length, 'person', 'people')} on the web, ${handSend() ? 'one after another' : 'all at once (in parallel, one message)'}: public sources only, a URL on every claim. Then save each.`,
         {
+          ...(unaskedPeople
+            ? {
+                tell_user: `Looking up ${plural(todo.length, 'shortlisted person', 'shortlisted people')} on the web now, so each message can say one true thing about its reader. About ${plural(todo.length, 'minute')}. Say "skip" to draft without it.`,
+                accepts: ['research_scale'],
+                if_user_says: { skip: 'flow answer --ask research_scale --value-file <a file with the word none>' }
+              }
+            : {}),
           agents: todo.map((p) => ({
             name: 'floorboss:attendee-researcher',
             input: { id: p.id, name: p.name, title: p.title, company: p.company, segment: p.segment, sources: p.sources },
