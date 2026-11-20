@@ -22,7 +22,7 @@ import { readback, approve, revoke } from '../../../lib/autosend/approval.mjs';
 import { dueNow } from '../../../lib/autosend/plan.mjs';
 import { start, end, unlock, repair, laptopWrite, initRepo, publishedWhy, readLock, isRepo, remoteUrl, headOf, pinWhy, redact, repoConfigWhy, LOCK_LIVE_MS, PAUSE_STEPS } from '../../../lib/autosend/sync.mjs';
 import { next, checked, sent, sendGapMs } from './driver.mjs';
-import { draftsNext, draftsAnswer, overdueDays, overdueQuery, overdueFrom, heldQuery, heldFrom, TOOLS as DRAFT_TOOLS, MODE as DRAFTS_MODE, Refused as DraftsRefused } from '../../../lib/autosend/drafts.mjs';
+import { holdWords, draftsNext, draftsAnswer, overdueDays, overdueQuery, overdueFrom, heldQuery, heldFrom, TOOLS as DRAFT_TOOLS, MODE as DRAFTS_MODE, Refused as DraftsRefused } from '../../../lib/autosend/drafts.mjs';
 import { dailyTaskText, chatgptLink, dayTime, DEFAULT_TIME, TASK_NAME } from '../../../lib/autosend/dailytask.mjs';
 import { MAX_RESULTS } from '../../../lib/autosend/replycheck.mjs';
 import { tmpdir } from 'node:os';
@@ -156,15 +156,21 @@ async function revokeCmd(opts) {
     throw new Error(`Auto-send was not stopped: ${failed.map((f) => `${f.slug} (${f.why})`).join('; ')}.${ok.length ? ` Stopped: ${ok.join(', ')}.` : ''} Not stopped: ${failed.map((f) => f.slug).join(', ')}. ${PAUSE_STEPS}.`);
   }
   const notPushed = done.filter((d) => d.w.pushed === false);
-  const next = notPushed.length
+  // Through Gmail drafts: the drafts already queued in Gmail still carry their due labels until floorboss holds them.
+  const holds = done.map((d) => holdWords(eventDirOf(home(), d.slug), d.slug, nowOf())).filter(Boolean);
+  const holdNext = holds.length ? ` ${holds.map((h) => h.say).join(' ')} Tell the user this plainly, and if a hold step can't be confirmed, give them the drafts to delete by hand.` : '';
+  const holdOut = holds.length ? { drafts_hold: holds.map((h) => h.drafts_hold).join(' ; ') } : {};
+  const next0 = notPushed.length
     ? "Tell the user `say` first, word for word: the cloud task doesn't know yet. Don't offer these messages to send by hand until the task is paused."
     : `Those messages are back on the outbox page${all ? 's' : ''}, to send by hand. Tell the user to pause or delete the scheduled task too, if they want nothing more sent.`;
-  if (!all) return { ...done[0].w.result, ...pushWords(done[0].w), next };
+  const next = `${next0}${holdNext}`;
+  if (!all) return { ...done[0].w.result, ...pushWords(done[0].w), ...holdOut, next };
   return {
     revoked: Object.fromEntries(done.map((d) => [d.slug, d.w.result.revoked])),
     events: done.map((d) => d.slug),
     pushed: done.every((d) => d.w.pushed === true) ? true : done.some((d) => d.w.pushed === false) ? false : null,
     ...(notPushed.length ? { say: notPushed.map((d) => `${d.slug}: ${d.w.say}`).join(' ') } : {}),
+    ...holdOut,
     next
   };
 }
@@ -378,7 +384,7 @@ async function drafts(opts, argv) {
   try {
     if (verb === 'next') {
       need(opts, 'run');
-      if (opts.run === 'new') need(opts, 'event');
+      if (opts.run === 'new' || opts.run === 'hold') need(opts, 'event');
       return draftsNext(home(), { event: opts.event, run: String(opts.run), nowMs: nowOf(), cli, gapOf: sendGapMs });
     }
     if (verb === 'answer') {

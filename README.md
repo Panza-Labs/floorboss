@@ -201,13 +201,19 @@ check can only hold, never send. The task never writes, edits or deletes a draft
   old; otherwise it waits a day. A draft more than 3 days overdue is held (`floorboss/held-late`), so a resumed task
   never sends a backlog at once. An address that isn't exactly one plain address, or a send that fails, is held
   (`floorboss/held-check`), never retried. A search that errors or comes back incomplete sends nothing for that draft
-  that day. When you start floorboss in Codex, it tells you about drafts that are overdue or held, and what to do.
+  that day. Any hold puts the same label on every floorboss draft to that address. A draft waits while an earlier
+  floorboss draft to the same address, held or not, is still there. The reply and bounce searches look for the
+  address and its base form (no +tag; for Gmail, no dots), as the laptop's own check does. When you start floorboss in
+  Codex, it tells you about drafts that are overdue or held, and what to do.
 - **The risks, accepted.** Your approval ends when the draft is made: anyone with access to your mailbox can edit a
   queued draft, and it goes as edited. A draft you make by hand with a `floorboss/due-` label is sent too. The task
   sees replies only from the address it wrote to: a colleague who answers from another address isn't seen (tell
   floorboss on the laptop, and it records it). A reply that lands seconds before the send can still miss it.
 - **Stop everything.** Pause the task in chatgpt.com, or delete the floorboss drafts. Tell floorboss "stop
-  auto-send" too.
+  auto-send" too. Drafts already queued in Gmail still carry their due labels, so after a stop on the laptop (stop
+  auto-send, or a reply, opt-out or booking you tell floorboss about) it gives you a short run that labels that
+  person's queued drafts `floorboss/held-check`, so the daily task never sends them. If a label can't be confirmed,
+  it names the drafts to delete by hand.
 
 ### Auto-send from the cloud (Codex, Gmail only)
 

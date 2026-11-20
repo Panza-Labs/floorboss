@@ -271,3 +271,73 @@ test('7. the daily task’s reply and bounce searches are the laptop reply check
   assert.ok(q.includes(bounceTerm(['ana.ito+x@gmail.com', 'anaito@gmail.com'])), q);
   assert.equal(STOP_CHECKS.length, 2);
 });
+
+const draftedLine = (touch = 2, draft = 'r-1', msg = 'm2') => ({ at: NOW, type: 'autosend_drafted', who: 'floorboss', id: 'c001', touch, hash: 'a'.repeat(24), to: ANA.email, due: '2026-10-19', draft_id: draft, message_id: msg, thread_id: 't1', threaded: true, run: 'r' });
+
+test('4. a revoke or a recorded reply: floorboss labels the person’s queued drafts floorboss/held-check', async () => {
+  const { revoke } = await import('../lib/autosend/approval.mjs');
+  const { toHold } = await import('../lib/autosend/drafts.mjs');
+  for (const how of ['revoke', 'reply']) {
+    const w = setup();
+    addLines(w.evDir, [draftedLine()]);
+    assert.equal(toHold(w.evDir, w.nowMs).length, 0, 'nothing to hold while auto-send stands');
+    if (how === 'revoke') revoke(w.evDir, { ids: 'c001', said: 'stop' }, w.nowMs);
+    else addLines(w.evDir, [{ at: NOW, type: 'replied', who: 'user', id: 'c001', outcome: 'replied', text: 'yes' }]);
+    assert.deepEqual(toHold(w.evDir, w.nowMs).map((x) => x.draft_id), ['r-1'], how);
+    let s = next(w, 'hold');
+    assert.equal(s.step, 'profile', how);
+    step(w, s, profile);
+    s = next(w, s.run);
+    assert.deepEqual(s.args, { name: 'floorboss/held-check' });
+    step(w, s, env({ id: 'Lh', name: 'floorboss/held-check' }));
+    s = next(w, s.run);
+    assert.equal(s.step, 'hold_drafted', how);
+    assert.deepEqual(s.args.email_ids, ['m2']);
+    assert.deepEqual(s.args.label_names, ['floorboss/held-check']);
+    step(w, s, env({ ok: true }));
+    s = next(w, s.run);
+    assert.equal(s.step, 'done', how);
+    assert.deepEqual(s.summary.held_drafts.map((x) => x.draft_id), ['r-1']);
+    assert.equal(s.summary.say, undefined);
+    assert.equal(toHold(w.evDir, w.nowMs).length, 0, 'held once');
+  }
+});
+
+test('4. a hold that can’t be confirmed says which drafts to delete by hand', async () => {
+  const { revoke } = await import('../lib/autosend/approval.mjs');
+  const w = setup();
+  addLines(w.evDir, [draftedLine()]);
+  revoke(w.evDir, { ids: 'c001', said: 'stop' }, w.nowMs);
+  let s = next(w, 'hold');
+  step(w, s, profile);
+  s = next(w, s.run);
+  step(w, s, env({ id: 'Lh', name: 'floorboss/held-check' }));
+  s = next(w, s.run);
+  step(w, s, 'not json');
+  s = next(w, s.run);
+  assert.equal(s.step, 'done');
+  assert.match(s.summary.say, /delete these drafts by hand in Gmail.s Drafts folder: r-1 \(to ana@north\.example/);
+});
+
+test('4. the CLI: revoke on a drafts event gives the hold run', async () => {
+  const { autosend, said } = await import('./fixtures/autosend-world.mjs');
+  const w = world({ touches: 2, people: [ANA] });
+  autosend(w.HOME, ['on', '--event', SLUG, '--said-file', said(w.HOME, 'yes'), '--own', OWN, '--mode', 'drafts']);
+  const rb = autosend(w.HOME, ['readback', '--event', SLUG]);
+  autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, SENTENCE)]);
+  addLines(w.evDir, [draftedLine()]);
+  const r = autosend(w.HOME, ['revoke', '--event', SLUG, '--ids', 'c001', '--said-file', said(w.HOME, 'stop')]);
+  assert.match(r.drafts_hold, /drafts next --event harbor-expo --run hold/, JSON.stringify(r));
+  assert.match(r.next, /floorboss\/held-check/);
+});
+
+test('4. holdWords: what a laptop stop (record, revoke) says on a drafts event with queued drafts', async () => {
+  const { holdWords } = await import('../lib/autosend/drafts.mjs');
+  const w = setup();
+  addLines(w.evDir, [draftedLine()]);
+  assert.equal(holdWords(w.evDir, SLUG, w.nowMs), null);
+  addLines(w.evDir, [{ at: NOW, type: 'stop', who: 'user', id: 'c001', said: 'not interested' }]);
+  const h = holdWords(w.evDir, SLUG, w.nowMs);
+  assert.equal(h?.drafts_hold, 'drafts next --event harbor-expo --run hold', JSON.stringify(h));
+  assert.match(h.say, /1 queued Gmail draft is still labelled to send/);
+});

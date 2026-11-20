@@ -21,7 +21,8 @@ import { kindAt, routeOf } from './routes.mjs';
 import { ctxOf, led, sinceOf, idList, crmIdOf, awayNote, isOut, colleagueTold, sendingOn } from './context.mjs';
 import { readTodo, savedDraft, criticFails, followupDayOf } from './saved-drafts.mjs';
 import { laptopWrite, PAUSE_STEPS } from '../../../../lib/autosend/sync.mjs';
-import { autosendEvents, autosendLive, takenTimes, readEvent } from '../../../../lib/autosend/common.mjs';
+import { holdWords } from '../../../../lib/autosend/drafts.mjs';
+import { autosendEvents, autosendLive, takenTimes, readEvent, eventDirOf } from '../../../../lib/autosend/common.mjs';
 import { nowMs } from '../../../../lib/clock.mjs';
 
 export function status(opts) {
@@ -72,10 +73,19 @@ export function status(opts) {
 // that is a checkout of the user's repo, it goes through the sync (lib/autosend/sync.mjs laptopWrite): the remote
 // pulled, the lock taken, the lines written and pushed, so a stop or a reply reaches the cloud task before its next
 // run. A pull or push that fails refuses with nothing recorded, and says how to pause the scheduled task meanwhile.
+// Through Gmail drafts: a reply, an opt-out or a booking recorded here also needs the person's queued drafts held in
+// Gmail (drafts.mjs toHold), or the daily task still sends them. The answer says how.
+function withHolds(opts, out) {
+  if (opts.check || !out || typeof out !== 'object') return out;
+  const slug = String(opts.event || '');
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) return out;
+  const h = holdWords(eventDirOf(home(), slug), slug, nowMs());
+  return h ? { ...out, drafts_hold: h.drafts_hold, drafts_hold_say: `${h.say} The command is the autosend skill's: node <floorboss>/skills/autosend/scripts/cli.mjs ${h.drafts_hold}. Tell the user plainly if any hold can't be confirmed, with the drafts to delete by hand.` } : out;
+}
 export function record(opts) {
-  if (opts.check || !autosendEvents(home()).length) return recordHere(opts);
+  if (opts.check || !autosendEvents(home()).length) return withHolds(opts, recordHere(opts));
   try {
-    return laptopWrite({ home: home(), nowMs: nowMs(), what: `record ${String(opts.event || '').slice(0, 64)}` }, () => recordHere(opts)).result;
+    return withHolds(opts, laptopWrite({ home: home(), nowMs: nowMs(), what: `record ${String(opts.event || '').slice(0, 64)}` }, () => recordHere(opts)).result);
   } catch (e) {
     if (/Nothing was changed\.$/.test(e.message)) throw new Error(`${e.message} If the user told you to stop someone, the cloud task doesn't know yet: ${PAUSE_STEPS}.`);
     throw e;

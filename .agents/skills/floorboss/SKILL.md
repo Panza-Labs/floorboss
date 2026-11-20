@@ -1,6 +1,6 @@
 ---
 name: floorboss
-description: Book meetings at an event with floorboss, in Codex. Sets up the event, sorts the attendee list, researches who to meet, drafts short messages and follow-ups for the user's approval. Approved emails either go out on their own (auto-send: from the user's own ChatGPT cloud task through Gmail, checking for a reply before each one) or wait on an outbox page for the user to send from their own mail app. Use when the user wants to prepare or run outreach for a conference, trade show or event, or reports what happened with that outreach (sent, replied, booked, said no).
+description: Book meetings at an event with floorboss, in Codex. Sets up the event, sorts the attendee list, researches who to meet, drafts short messages and follow-ups for the user's approval. Approved emails either go out on their own through Gmail (auto-send: the first emails send at approval from Codex, the follow-ups wait as labelled Gmail drafts, and a daily ChatGPT scheduled task sends them unless the person replied or bounced; or the user's own ChatGPT cloud task sends them all, checking for a reply before each one) or wait on an outbox page for the user to send from their own mail app. Use when the user wants to prepare or run outreach for a conference, trade show or event, or reports what happened with that outreach (sent, replied, booked, said no).
 license: Apache-2.0
 ---
 
@@ -225,7 +225,10 @@ Offer this way first in Codex (`on ... --mode drafts`): there is no data repo an
   A draft they make by hand with a `floorboss/due-` label is sent too. Both are their own mailbox, so floorboss accepts
   them and says so.
 - To stop everything: pause the task in chatgpt.com (Scheduled), or delete the floorboss drafts. Run `revoke` too, so
-  floorboss itself stops.
+  floorboss itself stops. Queued drafts keep their due labels until floorboss holds them: when `revoke` or `record`
+  answers with `drafts_hold`, run `drafts next --event <slug> --run hold` at once and follow its steps like any run;
+  it labels that person's queued drafts `floorboss/held-check`. If its `done` has a `say`, tell the user word for word:
+  it names the drafts to delete by hand.
 
 **Turning it on.** `on --event <slug> --said-file <file> --own <their Gmail address> --mode drafts`.
 
