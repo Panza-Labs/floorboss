@@ -208,7 +208,7 @@ function nextStep(home, { run, nowMs }, holder = {}) {
       // The release mark must be in the remote before the send is shown: a checked step killed mid-push may have left
       // it here only. Not confirmed: it is thrown away, nothing was shown, and the step stays due.
       if (r.current.pushed !== true) {
-        const p = pushedAll({ home });
+        const p = pushedAll({ home, release: { slug: it.slug, id: it.id, touch: it.touch, run: r.run } });
         if (!p.ok) return stopRun(home, r, nowMs, `the release mark for ${it.id} message ${it.touch} isn't confirmed in your repo (${p.why}), so nothing was sent; it stays due`, { lock: 'discard' });
         r.current.pushed = true;
         saveRun(home, r);
