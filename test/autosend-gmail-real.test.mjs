@@ -123,7 +123,7 @@ test('record: the ids from structuredContent; a follow-up then carries reply_mes
   const a = sendArgs(f);
   assert.equal(a.reply_message_id, '19a2b3c4d5e6f708');
   assert.equal(a.subject, f.subject);
-  assert.equal(a.payload.body.content, f.body);
+  assert.equal(a.payload.body.content, htmlBody(f.body));
   assert.equal(a.to, f.to);
 });
 
