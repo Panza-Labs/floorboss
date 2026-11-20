@@ -44,6 +44,9 @@ function toDraft(opts) {
   assert.deepEqual(s.args, { name: 'floorboss/due-2026-10-19' });
   step(w, s, env({ id: 'Label_9', name: 'floorboss/due-2026-10-19' }));
   s = next(w, s.run);
+  assert.deepEqual(s.args, { name: 'floorboss/held-check' }, 'the label a draft gets when its own label is unclear');
+  step(w, s, env({ id: 'Label_10', name: 'floorboss/held-check' }));
+  s = next(w, s.run);
   assert.equal(s.step, 'search');
   step(w, s, env({ emails: [], next_page_token: null }));
   s = next(w, s.run);
@@ -65,14 +68,17 @@ test('drafts: the first email due now is sent, its follow-up becomes a threaded 
   assert.match(d.tool, /gmail_create_draft$/);
   step(w, d, env({ id: 'r-123', message: { id: 'm2', thread_id: 't1' } }));
   let s = next(w, d.run);
+  assert.equal(s.step, 'verify', 'the content is read back before the label');
+  assert.deepEqual(s.args, { email_id: 'm2' });
+  step(w, s, readBack({ to: ANA.email, subject: t2.subject, body: t2.body.replace(/\n/g, '\r\n'), labels: ['DRAFT'] }));
+  s = next(w, d.run);
   assert.equal(s.step, 'label');
   assert.deepEqual(s.args.email_ids, ['m2']);
   assert.deepEqual(s.args.label_names, ['floorboss/due-2026-10-19']);
   step(w, s, env({ ok: true }));
   s = next(w, d.run);
-  assert.equal(s.step, 'verify');
-  assert.deepEqual(s.args, { email_id: 'm2' });
-  step(w, s, readBack({ to: ANA.email, subject: t2.subject, body: t2.body.replace(/\n/g, '\r\n') }));
+  assert.equal(s.step, 'verify_label');
+  step(w, s, readBack({ to: ANA.email, subject: t2.subject, body: t2.body }));
   s = next(w, d.run);
   assert.equal(s.step, 'done');
   assert.equal(s.summary.sent.length, 1);
@@ -92,21 +98,35 @@ test('drafts: a read-back that differs from the approved text stops, naming the 
     ['subject', { subject: 'Changed' }],
     ['to', { to: ['eve@evil.example'] }],
     ['cc', { cc: ['eve@evil.example'] }],
-    ['label', { labels: ['DRAFT'] }],
     ['thread', { thread_id: 't9' }]
   ]) {
     const { w, s: d } = toDraft();
     const t2 = draftText(ANA, 2);
     step(w, d, env({ id: 'r-77', message: { id: 'm2', thread_id: 't1' } }));
-    let s = next(w, d.run);
-    step(w, s, env({ ok: true }));
-    s = next(w, d.run);
+    const s = next(w, d.run);
+    assert.equal(s.step, 'verify', what);
     const out = step(w, s, readBack({ to: ANA.email, subject: t2.subject, body: t2.body }, extra));
     assert.equal(out.step, 'stop', what);
     assert.match(out.why, /delete the draft r-77/, what);
     assert.ok(ledgerLines(w.evDir).some((e) => e.type === 'autosend_draft_bad' && e.draft_id === 'r-77'), what);
     assert.ok(!ledgerLines(w.evDir).some((e) => e.type === 'autosend_drafted'), what);
   }
+  // The label not shown after labelling: the draft is held with floorboss/held-check, then the run stops.
+  const { w, s: d } = toDraft();
+  const t2 = draftText(ANA, 2);
+  step(w, d, env({ id: 'r-77', message: { id: 'm2', thread_id: 't1' } }));
+  let s = next(w, d.run);
+  step(w, s, readBack({ to: ANA.email, subject: t2.subject, body: t2.body }));
+  s = next(w, d.run);
+  step(w, s, env({ ok: true }));
+  s = next(w, d.run);
+  step(w, s, readBack({ to: ANA.email, subject: t2.subject, body: t2.body }, { labels: ['DRAFT'] }));
+  s = next(w, d.run);
+  assert.equal(s.step, 'hold');
+  const out = step(w, s, env({ ok: true }));
+  assert.equal(out.step, 'stop');
+  assert.match(out.why, /delete the draft r-77/);
+  assert.ok(!ledgerLines(w.evDir).some((e) => e.type === 'autosend_drafted'));
 });
 
 test('drafts: an answer floorboss can’t strictly read is a stop, never a go', () => {
@@ -135,6 +155,8 @@ test('drafts: a reply before the first send holds the person; nothing is sent or
   s = next(w, s.run);
   step(w, s, env({ id: 'Label_9', name: 'floorboss/due-2026-10-19' }));
   s = next(w, s.run);
+  step(w, s, env({ id: 'Label_10', name: 'floorboss/held-check' }));
+  s = next(w, s.run);
   step(w, s, env({ emails: [{ id: 'x', thread_id: 'y', from_: ANA.email, to: [OWN], subject: 'Re: hi', snippet: 'yes', labels: ['INBOX'], email_ts: NOW }], next_page_token: null }));
   s = next(w, s.run);
   assert.equal(s.step, 'done');
@@ -156,7 +178,7 @@ test('drafts: a first email due on a later day is an unthreaded draft, and so ar
     step(w, s, env({ id: `L${labels.length}`, name: s.args.name }));
   }
   // Each draft's day is its planned day from the readback (the event's zone).
-  assert.deepEqual(labels, w.rb.items.map((x) => `floorboss/due-${x.planned_day}`));
+  assert.deepEqual(labels, [...w.rb.items.map((x) => `floorboss/due-${x.planned_day}`), 'floorboss/held-check']);
   assert.equal(labels[0], 'floorboss/due-2026-10-19');
   for (const t of [1, 2]) {
     assert.equal(s.step, 'draft');
@@ -165,8 +187,13 @@ test('drafts: a first email due on a later day is an unthreaded draft, and so ar
     assert.equal(s.args.subject, d.subject);
     step(w, s, env({ draft_id: `r-${t}`, message_id: `m${t}`, thread_id: `t${t}` }));
     s = next(w, s.run);
+    assert.equal(s.step, 'verify');
+    step(w, s, env({ to: [ANA.email], subject: d.subject, body: d.body, labels: [] }));
+    s = next(w, s.run);
+    assert.equal(s.step, 'label');
     step(w, s, env({}));
     s = next(w, s.run);
+    assert.equal(s.step, 'verify_label');
     step(w, s, env({ to: [ANA.email], subject: d.subject, body: d.body, labels: [`L${t}`] }));
     s = next(w, s.run);
   }
@@ -195,7 +222,8 @@ test('the overdue check: drafts whose day went by, still drafts and not held, me
   const w = setup();
   addLines(w.evDir, [{ at: NOW, type: 'autosend_drafted', who: 'floorboss', id: 'c001', touch: 2, hash: 'a'.repeat(24), to: ANA.email, due: '2026-10-19', draft_id: 'r-1', message_id: 'm2', thread_id: 't1', threaded: true, run: 'r' }]);
   assert.deepEqual(overdueDays(w.evDir, Date.parse(NOW)), [], 'not overdue on the day it was made');
-  assert.deepEqual(overdueDays(w.evDir, Date.parse('2026-10-20T08:00:00Z')), ['2026-10-19']);
+  assert.deepEqual(overdueDays(w.evDir, Date.parse('2026-10-20T08:00:00Z')), [], 'nor the morning after (its run may not have come yet)');
+  assert.deepEqual(overdueDays(w.evDir, Date.parse('2026-10-21T08:00:00Z')), ['2026-10-19']);
   const q = overdueQuery(['2026-10-19']);
   assert.match(q, /^in:drafts \(label:floorboss-due-2026-10-19\)/);
   assert.match(q, /-label:floorboss-held-replied/);
@@ -272,10 +300,10 @@ test('the CLI: on --mode drafts, approve points at drafts next, daily-task print
   const s = autosend(w.HOME, ['drafts', 'next', '--event', SLUG, '--run', 'new']);
   assert.equal(s.step, 'profile', JSON.stringify(s));
   assert.equal(s.then.slice(-6).join(' '), `drafts answer --run ${s.run} --file ${s.write}`);
-  const d = autosend(w.HOME, ['daily-task', '--zone', 'America/New_York', '--time', '9:30']);
+  const d = autosend(w.HOME, ['daily-task', '--zone', 'Europe/Lisbon', '--time', '9:30']);
   assert.match(d.link, /^https:\/\/chatgpt\.com\/\?q=/);
   assert.equal(readFileSync(d.file, 'utf8').trim(), d.text.trim());
-  assert.match(d.text, /EVERY DAY at 9:30 \(America\/New_York time\)/);
+  assert.match(d.text, /EVERY DAY at 9:30 \(Europe\/Lisbon time\)/);
   assert.equal(d.searches_after, '2026-10-11', 'the day before the first yes');
   assert.match(d.text, /after:2026\/10\/11/);
   assert.match(d.show, /Always allow/);

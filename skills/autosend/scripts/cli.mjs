@@ -26,6 +26,7 @@ import { draftsNext, draftsAnswer, overdueDays, overdueQuery, overdueFrom, heldQ
 import { dailyTaskText, chatgptLink, dayTime, DEFAULT_TIME, TASK_NAME } from '../../../lib/autosend/dailytask.mjs';
 import { MAX_RESULTS } from '../../../lib/autosend/replycheck.mjs';
 import { tmpdir } from 'node:os';
+import { systemZone } from '../../../lib/tz.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 
@@ -417,7 +418,14 @@ async function heldChecked(opts) {
 // with it typed in, and a file with the same text to copy.
 async function dailyTask(opts) {
   laptopOnly('The daily task setup');
-  const zone = opts.zone === undefined || opts.zone === true ? Intl.DateTimeFormat().resolvedOptions().timeZone : String(opts.zone);
+  // The zone: the drafts events' own (each due label's day is in it). They must agree, and a given --zone must match;
+  // the computer's zone only when no drafts event has one, and then it must be known.
+  const zones = [...new Set(autosendEvents(home()).map((e) => eventJson(e.dir)).filter((ev) => ev?.autosend_mode === DRAFTS_MODE && ev.time_zone).map((ev) => String(ev.time_zone)))].sort();
+  if (zones.length > 1) throw new Error(`The events auto-sending through Gmail drafts are in different time zones (${zones.join(', ')}): one daily task can't fix one TODAY for both. Turn auto-send off for one of them first.`);
+  const given = opts.zone === undefined || opts.zone === true ? null : String(opts.zone);
+  if (given && zones.length && given !== zones[0]) throw new Error(`--zone ${given} isn't the event's time zone (${zones[0]}): the drafts' due days are in ${zones[0]}. Run it with --zone ${zones[0]}, or with no --zone.`);
+  const zone = given || zones[0] || systemZone();
+  if (!zone) throw new Error("This computer's time zone can't be read: run daily-task with --zone <your IANA time zone>, for example --zone America/New_York.");
   const time = dayTime(opts.time === undefined || opts.time === true ? DEFAULT_TIME : String(opts.time));
   // The searches start the day before the first auto-send yes of any drafts event (today, before any yes).
   const yes = autosendEvents(home())

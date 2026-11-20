@@ -173,9 +173,12 @@ The simpler way to auto-send, with no data repo. You approve twice in Codex as b
 - each first email due today is sent at once, from your Codex chat, after a check for a reply or a bounce;
 - every other approved message becomes a Gmail draft labelled `floorboss/due-<day>`, the day in the event's time
   zone. A follow-up of an email sent now sits in that email's thread. If the first email is planned for a later day,
-  it waits as a draft too, and its follow-ups arrive as separate emails, each with its own subject;
-- floorboss reads every draft back and checks the recipient, subject and body against what you approved. If one
-  differs, or Gmail's answer can't be read, it stops and tells you which draft to delete.
+  it waits as a draft too, and its follow-ups arrive as separate emails (not in its thread) with the subject
+  "Re: <the first email's subject>";
+- floorboss reads every draft back before it labels it, and checks the recipient, subject and body against what you
+  approved. If one differs, or Gmail's answer can't be read, it stops and tells you which draft to delete (with no due
+  label, the daily task ignores it). If the label itself can't be confirmed, floorboss labels that draft
+  `floorboss/held-check` so it is never sent, and tells you to delete it.
 
 Then one scheduled ChatGPT task sends the drafts on their days, once a day at a fixed time you pick (9:00 by default).
 `autosend daily-task --zone <your time zone>` gives you a chatgpt.com link with the setup already typed in, and a file

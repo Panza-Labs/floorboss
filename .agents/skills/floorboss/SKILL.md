@@ -214,7 +214,7 @@ Offer this way first in Codex (`on ... --mode drafts`): there is no data repo an
 - After their second yes, each first email due today is sent at once from this chat. Every other approved message
   becomes a Gmail draft with a label `floorboss/due-<day>` (the day in the event's time zone). A follow-up of an email
   sent now is a draft in that email's thread. When the first email is planned for a later day, it is a draft too, and
-  its follow-ups arrive as separate emails with their own subject, not in its thread.
+  its follow-ups arrive as separate emails with the subject "Re: <the first email's subject>", not in its thread.
 - Once a day, at one fixed time they choose (9:00 by default), a scheduled ChatGPT task sends the drafts that are due.
   Before each one it checks for a reply from that person and for a bounce naming them. Either check can only hold a
   draft (label `floorboss/held-replied` or `floorboss/held-bounced`), never send one. The task never writes, edits or
