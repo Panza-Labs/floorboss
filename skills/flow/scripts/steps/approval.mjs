@@ -6,6 +6,33 @@ import { readJson } from '../../../../lib/jsonio.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { step, node, pendingLine, pendingAsk, handSend } from './shared.mjs';
 
+// What changed since a message's last yes, in one line with every message it touches: a new address (the draft goes to
+// another address than the one approved), or a rewrite. Null when nothing was approved before.
+export function changedSince(e, needApprove, touchOf) {
+  const name = (j) => j.contact?.name || j.id;
+  const newAddr = new Map(),
+    rewritten = new Map(),
+    added = new Map();
+  for (const j of needApprove) {
+    const x = touchOf(j);
+    const last = e.entries.filter((y) => y.type === 'approved' && y.id === j.id && Number(y.touch) === Number(j.touch)).pop();
+    const to = readJson(join(e.paths.dir, 'drafts', `${x?.hash}.json`), {})?.to || null;
+    if (!last) added.set(j.id, name(j));
+    else if (to && last.to && String(to).toLowerCase() !== String(last.to).toLowerCase()) newAddr.set(j.id, name(j));
+    else if (last.hash !== x?.hash) rewritten.set(`${j.id}:${j.touch}`, `${name(j)} (message ${j.touch})`);
+  }
+  const and = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}` : xs[0]);
+  const parts = [
+    newAddr.size ? `a new address for ${and([...newAddr.values()])}` : null,
+    rewritten.size ? `rewritten: ${and([...rewritten.values()])}` : null,
+    added.size ? `new: ${and([...new Set(added.values())])}` : null
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  const per = new Map();
+  for (const j of needApprove) per.set(name(j), [...(per.get(name(j)) || []), j.touch]);
+  return `What changed since your last yes: ${parts.join('; ')}. One yes covers the ${plural(needApprove.length, 'message')} this affects: ${[...per].map(([n, ts]) => `${n} (${ts.sort((a, b) => a - b).join(', ')})`).join('; ')}.`;
+}
+
 // Approval: drafts that are stuck, what the user should know before approving, and the approval itself.
 export function approvalSteps(x) {
   const { c, e, jobs, touchOf, staleWhy, mine, stuck, stuckNote, heldNow, lastHeldFail, toldSince, withHeld, heldCount, carried } = x;
@@ -108,7 +135,13 @@ export function approvalSteps(x) {
   ];
   const warnLine = `${coworkerWarn.length ? `Before you approve: ${coworkerWarn.length} of these ${coworkerWarn.length === 1 ? 'goes' : 'go'} to people your coworkers own: ${[...new Set(coworkerWarn)].join(', ')}. Still send them? ` : ''}${oldAddress.length ? `${oldAddress.join('; ')}: check the address is still theirs before it goes. ` : ''}`;
   const approvedBefore = e.entries.some((x) => x.type === 'approved');
-  const approveAgain = approvedBefore
+  // Hand-send: one change, one confirmation. What changed since the last yes (a new address, a rewrite) and every
+  // message it touches, said once with the one question (the shortlist isn't shown again for a list reloaded with only
+  // new addresses: triage.mjs).
+  const changeLine = handSend() && approvedBefore ? changedSince(e, needApprove, touchOf) : null;
+  const approveAgain = changeLine
+    ? changeLine
+    : approvedBefore
     ? `Asked again: ${plural(needApprove.length, 'message')} new or rewritten since your last approval.`
     : carried
       ? `Your ratings from ${carried} apply (your voice hasn't changed since), so the blind set isn't asked again.`
@@ -127,7 +160,19 @@ export function approvalSteps(x) {
           const n = mineLine ? { ...n1, tell_user: [mineLine, n1.tell_user].filter(Boolean).join(' ') } : n1;
           return approveAgain ? { ...n, tell_user: [approveAgain, n.tell_user].filter(Boolean).join(' ') } : n;
         })(),
-        run_first: node('event-outreach', 'open', '--event', e.event.slug, '--review', '--no-open'),
+        // Hand-send: the review is in the chat (a sample, the total, one read-only document), never a page.
+        run_first: handSend()
+          ? node('flow', 'review', '--event', e.event.slug, '--ids', needApprove.map((j) => `${j.id}:${j.touch}`).join(','))
+          : node('event-outreach', 'open', '--event', e.event.slug, '--review', '--no-open'),
+        ...(handSend()
+          ? {
+              accepts: ['review_feedback'],
+              if_user_says: {
+                feedback:
+                  'Feedback on the drafts, or a rewrite of a line: save it with flow answer --ask review_feedback --value-file <file> as {"feedback":"<their words, whole>","ids":"all" or ["c004:1", …] (the messages it is about; "all" for feedback on the drafts overall)}. floorboss rewrites every message it covers, the critic reads them again, and this question comes back with them.'
+              }
+            }
+          : {}),
         ...(coworkerWarn.length ? { warn: { coworkers: coworkerWarn } } : {}),
         ...(jobs.some((j) => j.critic_held)
           ? {
@@ -144,7 +189,9 @@ export function approvalSteps(x) {
         ask: {
           id: 'approve',
           ...pendingAsk(e, 'approval'),
-          question: `${pendingLine(e, 'approval')}${warnLine}Show each message (or the review page). Approve all, approve all except some, approve by name, edit or drop? Once saved, show the answer's say_to_user line word for word: who each name was read as, and who was approved, held back or dropped.`,
+          question: handSend()
+            ? `${pendingLine(e, 'approval')}${warnLine}Show the review's sample in the chat, each message whole (subject and body), and ask for candid feedback overall or a rewrite of any line; offer its document (every message, to read). Never send the user to a page to review. Then: Approve all ${plural(needApprove.length, 'message')} (the ones shown and the rest in the document), all except some, by name, edit or drop? Once saved, show the answer's say_to_user line word for word: who each name was read as, and who was approved, held back or dropped.`
+            : `${pendingLine(e, 'approval')}${warnLine}Show each message (or the review page). Approve all, approve all except some, approve by name, edit or drop? Once saved, show the answer's say_to_user line word for word: who each name was read as, and who was approved, held back or dropped.`,
           answer_format:
             '"approve all" | "approve all except <ids>" | "approve <ids>" | "edit <ids>" | "drop <ids>" | "skip review <ids|all>" (drafts the critic hasn\'t read go on unreviewed, and their cards say so)'
         }
