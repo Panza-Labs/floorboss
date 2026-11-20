@@ -15,8 +15,8 @@ export const ROOT = new URL('../..', import.meta.url).pathname.replace(/\/$/, ''
 export const SLUG = 'harbor-expo';
 // Monday 12 October 2026, 08:00 UTC: 09:00 in Lisbon (summer time).
 export const NOW = '2026-10-12T08:00:00Z';
-export const EVENT = { slug: SLUG, name: 'Harbor Expo', city: 'Lisbon', time_zone: 'Europe/Lisbon', start_date: '2026-11-03', end_date: '2026-11-04', autosend: true, settings: {} };
 export const OWN = 'sam@lanecraft.example';
+export const EVENT = { slug: SLUG, name: 'Harbor Expo', city: 'Lisbon', time_zone: 'Europe/Lisbon', start_date: '2026-11-03', end_date: '2026-11-04', autosend: true, autosend_own: OWN, settings: {} };
 export const PEOPLE = [
   { id: 'c001', name: 'Ana Ito', email: 'ana@north.example', company: 'North' },
   { id: 'c002', name: 'Bo Li', email: 'bo@east.example', company: 'East' },
@@ -137,3 +137,27 @@ export const remoteFile = (bare, path) => {
     return null;
   }
 };
+
+// A cloud run's first step is the profile check: answered here with the user's own account, as the model would,
+// then the step after it. nextNew calls the driver in-process; pastProfile takes a CLI caller (args -> result).
+const profileAnswer = (email = OWN) => JSON.stringify({ content: [{ type: 'text', text: 'Action completed.' }], structuredContent: { id: 'u1', name: 'Sam Lane', email, nickname: 'sam', picture: null, workspace_id: null, workspace_name: null, workspace_picture: null }, isError: false });
+export async function driverOf() {
+  return import('../../skills/autosend/scripts/driver.mjs');
+}
+export function pastProfile(s, call, email = OWN) {
+  if (s?.step !== 'profile') return s;
+  writeFileSync(s.write, profileAnswer(email));
+  const c = call(['checked', '--run', s.run, '--file', s.write]);
+  if (c.step === 'stop' || c.ERROR) return c;
+  return call(['next', '--run', s.run]);
+}
+export function nextNewWith({ next, checked }) {
+  return (dir, opts) => {
+    const s = next(dir, { ...opts, run: 'new' });
+    if (s.step !== 'profile') return s;
+    writeFileSync(s.write, profileAnswer());
+    const c = checked(dir, { run: s.run, file: s.write, nowMs: opts.nowMs });
+    if (c.step === 'stop') return c;
+    return next(dir, { run: s.run, nowMs: opts.nowMs });
+  };
+}

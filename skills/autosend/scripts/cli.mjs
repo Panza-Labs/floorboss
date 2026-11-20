@@ -59,7 +59,7 @@ async function rebuild(slug) {
   }
 }
 
-// on --event <slug> --said <the user's words> [--own <their address>]: the setup answer ("Should floorboss send
+// on --event <slug> --said <the user's words> --own <their address>: the setup answer ("Should floorboss send
 // these on its own from the cloud?"). Saved in event.json; the whole sequence is then drafted and approved up front.
 async function on(opts) {
   laptopOnly('Turning auto-send on');
@@ -69,8 +69,11 @@ async function on(opts) {
   // auto-send's marks): one or the other, never both. The planner holds every send if it comes on later.
   if (claudeSendsEmail(h0(), ev))
     throw new Error('Claude Code sends email for this data folder (its sending setting is on): auto-send can\'t be on as well. Turn Claude Code\'s email sending off first, in Claude Code.');
-  const own = opts.own == null || opts.own === true ? ev.autosend_own || null : String(opts.own).trim();
-  if (own != null && !plainAddress(own)) throw new Error('--own is the user\'s own address (the Gmail account it sends from), one plain address.');
+  // The Gmail account it sends from is required: the approval records it, and every cloud run checks the connected
+  // account against it first (gmail_get_profile).
+  const own = opts.own == null || opts.own === true ? ev.autosend_own || null : String(opts.own).trim().toLowerCase();
+  if (own == null) throw new Error("Missing --own: the Gmail address auto-send sends from (the account connected in ChatGPT). Ask the user for it.");
+  if (!plainAddress(own)) throw new Error('--own is the user\'s own address (the Gmail account it sends from), one plain address.');
   const w = synced('autosend on', false, () => {
     const now = eventJson(dir) || ev;
     writeJson(join(dir, 'event.json'), { ...now, autosend: true, autosend_said: String(opts.said).slice(0, 200), autosend_own: own });
@@ -183,7 +186,7 @@ async function status() {
   };
 }
 
-// settle --event <slug> --id <c…> --touch <n> --went yes|no --said <their words>: an auto-send step that may have
+// settle --event <slug> --id <c…> --touch <n> --went yes|no --said <their words> [--message-id <id> --thread-id <id>]: an auto-send step that may have
 // gone. "yes" records it sent (the user saw it in Sent); "no" clears it: it is never auto-sent again, and goes back to
 // the outbox page to send by hand.
 async function settle(opts) {
@@ -200,6 +203,14 @@ async function settle(opts) {
   const said = String(opts.said).trim();
   if (said.length < 2) throw new Error("Say what the user found, in their words (--said \"it's in my Sent folder\").");
   const went = String(opts.went).toLowerCase();
+  // The ids from Gmail (the message in Sent: its id and thread), when the user has them: a follow-up goes in that
+  // thread only with both recorded.
+  const ids = {};
+  for (const [flag, key] of [['message-id', 'message_id'], ['thread-id', 'thread_id']]) {
+    if (opts[flag] === undefined) continue;
+    if (!/^[\w-]{1,128}$/.test(String(opts[flag]))) throw new Error(`--${flag} is the Gmail id (letters, digits, "-" and "_").`);
+    ids[key] = String(opts[flag]);
+  }
   const rel = [...entries].reverse().find((x) => x?.type === 'autosend_released' && x.id === opts.id && (x.touch ?? 1) === touch);
   const now = new Date(nowOf());
   // A run may still be going: the send may not show in Sent yet. Settled only once that run must be over.
@@ -209,7 +220,7 @@ async function settle(opts) {
     // so it is the user's own send (source hand), and the rest of their sequence is the user's (handSentAfter) until a
     // fresh yes. Recorded as auto-send's, the cloud would send the follow-ups after a message the user sent.
     const source = rel ? 'autosend' : 'hand';
-    synced(`autosend settle ${opts.event} ${opts.id} ${touch}: sent`, false, () => append(ledgerOf(dir), { type: 'sent', who: 'user', id: opts.id, touch, via: 'email.send', channel: 'email', date: eventStateAt(dir, now.getTime()).today || now.toISOString().slice(0, 10), hash: rel?.hash || folded.people[opts.id]?.touches?.[touch]?.hash, source, settled: true, said: said.slice(0, 200) }, now));
+    synced(`autosend settle ${opts.event} ${opts.id} ${touch}: sent`, false, () => append(ledgerOf(dir), { type: 'sent', who: 'user', id: opts.id, touch, via: 'email.send', channel: 'email', date: eventStateAt(dir, now.getTime()).today || now.toISOString().slice(0, 10), hash: rel?.hash || folded.people[opts.id]?.touches?.[touch]?.hash, ...ids, source, settled: true, said: said.slice(0, 200) }, now));
     await rebuild(opts.event);
     return rel
       ? { recorded: 'sent', next: 'It is in your repo.' }

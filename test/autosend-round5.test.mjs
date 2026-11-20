@@ -129,7 +129,7 @@ test('finding 3: after a hand send, a later step whose day went by on the outbox
   let rb = readback(w.evDir, at(NOW));
   approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
   // Message 1 sent by hand on the 12th (as event-outreach record writes it: no source): auto-send ended for Ana.
-  addLines(w.evDir, [{ at: '2026-10-12T10:00:00Z', type: 'sent', who: 'user', id: 'c001', touch: 1, date: '2026-10-12' }]);
+  addLines(w.evDir, [{ at: '2026-10-12T10:00:00Z', type: 'sent', who: 'user', id: 'c001', touch: 1, date: '2026-10-12', message_id: 'h1', thread_id: 'ht1' }]);
   // Message 2 sat on the outbox past its day. The readback on the 26th offers it again.
   const t = at('2026-10-26T08:30:00Z');
   rb = readback(w.evDir, t);

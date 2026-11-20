@@ -31,7 +31,7 @@ const waitOf = (r, id) => r.waits.find((w) => w.id === id)?.why || '';
 
 test('item 1: message 1 sent by hand ends auto-send for the rest of that sequence; the readback re-offers the follow-up for a fresh yes', () => {
   const w = approved();
-  addLines(w.evDir, [{ at: '2026-10-15T10:00:00Z', type: 'sent', who: 'user', id: 'c001', touch: 1, via: 'email.send', channel: 'email', date: '2026-10-15', said: 'sent it by hand' }]);
+  addLines(w.evDir, [{ at: '2026-10-15T10:00:00Z', type: 'sent', who: 'user', id: 'c001', touch: 1, via: 'email.send', channel: 'email', date: '2026-10-15', said: 'sent it by hand', message_id: 'h1', thread_id: 'ht1' }]);
   for (const d of ['2026-10-16', '2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-26', '2026-10-27']) {
     const p = dueNow(w.HOME, at(`${d}T10:00:00Z`));
     assert.ok(!p.due.some((y) => y.id === 'c001'), d);
