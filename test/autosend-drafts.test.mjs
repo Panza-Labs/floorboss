@@ -264,7 +264,7 @@ test('the daily task: one fixed time, the Part B rules, the stop checks as a lis
   assert.match(t, /never create or delete drafts/);
   assert.match(t, /Never send a summary or report email/);
   // The stop checks, a list: reply (anywhere, since the first send, auto-replies too) and bounce.
-  assert.match(t, /STOP CHECKS \(each only holds\):\n1\. Reply: search Gmail for from:<that address> in:anywhere -in:sent -in:drafts after:2026\/11\/19\. Any result holds, an auto-reply too: label floorboss\/held-replied\.\n2\. Bounce: search Gmail for from:\(mailer-daemon OR postmaster\) "<that address>" in:anywhere after:2026\/11\/19\. Any result holds: label floorboss\/held-bounced\./);
+  assert.match(t, /STOP CHECKS \(each only holds\):\nIn these searches, its base address is .*\n1\. Reply: search Gmail for from:\(<that address> OR <its base address>\) in:anywhere -in:sent -in:drafts after:2026\/11\/19\. Any result holds, an auto-reply too: label floorboss\/held-replied\.\n2\. Bounce: search Gmail for \(\(from:mailer-daemon OR from:postmaster OR subject:\(.*\)\) \("<that address>" OR "<its base address>"\)\) in:anywhere after:2026\/11\/19\. Any result holds: label floorboss\/held-bounced\./);
   assert.ok(!/newer_than/.test(t), 'no expiry on the searches');
   assert.equal(STOP_CHECKS.length, 2);
   assert.match(t, /Each check can only hold, never send/);

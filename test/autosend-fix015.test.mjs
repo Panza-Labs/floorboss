@@ -247,3 +247,27 @@ test('5. daily-task: the zone defaults to the drafts events’ zone, and a diffe
   assert.match(autosend(w.HOME, ['daily-task']).ERROR, /different time zones/);
   assert.match(autosend(w.HOME, ['daily-task', '--zone', 'Europe/Lisbon']).ERROR, /different time zones/);
 });
+
+test('7. the daily task: any hold labels every floorboss draft to that address; rule e defers behind any earlier draft', async () => {
+  const { dailyTaskText } = await import('../lib/autosend/dailytask.mjs');
+  const t = dailyTaskText({ time: '9:00', zone: 'Europe/Lisbon', after: '2026-11-19' });
+  assert.match(t, /Whenever this run applies any floorboss\/held- label to a draft, apply the same label to every other floorboss draft to the same address too \(due or not\), and send none of them/);
+  assert.match(t, /e\. Order: if any other floorboss draft to the same address, held or not, has an earlier due date, skip this one for today \(deferred, no label\)\./);
+  assert.match(t, /Otherwise, if it is a follow-up \(it is in a thread with an earlier email from me, or its subject starts with "Re:"\), search in:sent to:<that address>\. It sends only if there is an earlier sent email to that address and the latest one went out at least 1 calendar day before TODAY/);
+});
+
+test('7. the daily task’s reply and bounce searches are the laptop reply check’s, from one builder', async () => {
+  const { dailyTaskText, STOP_CHECKS } = await import('../lib/autosend/dailytask.mjs');
+  const { fromTerm, bounceTerm, DSN_SUBJECTS, query } = await import('../lib/autosend/replycheck.mjs');
+  const t = dailyTaskText({ time: '9:00', zone: 'Europe/Lisbon', after: '2026-11-19' });
+  const A = ['<that address>', '<its base address>'];
+  assert.ok(t.includes(`search Gmail for ${fromTerm(A)} in:anywhere -in:sent -in:drafts after:2026/11/19`), t);
+  assert.ok(t.includes(`search Gmail for ${bounceTerm(A)} in:anywhere after:2026/11/19`));
+  for (const s of DSN_SUBJECTS) assert.ok(t.includes(`"${s}"`), s);
+  assert.match(t, /its base address is that address with any \+tag removed and, for a gmail\.com or googlemail\.com address, the dots before the @ removed/);
+  // The laptop's own query is made from the same two terms.
+  const q = query({ to: 'ana.ito+x@gmail.com', since_ms: Date.parse('2026-11-20T00:00:00Z') });
+  assert.ok(q.includes(fromTerm(['ana.ito+x@gmail.com', 'anaito@gmail.com'])), q);
+  assert.ok(q.includes(bounceTerm(['ana.ito+x@gmail.com', 'anaito@gmail.com'])), q);
+  assert.equal(STOP_CHECKS.length, 2);
+});
