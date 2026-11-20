@@ -215,7 +215,9 @@ async function status() {
   const oq = overdueQuery(days);
   const overdue_check = oq ? checkStep(oq, 'overdue-checked') : null;
   const held_check = draftEvents.length ? checkStep(heldQuery(), 'held-checked') : null;
+  const holds = draftEvents.map((e) => holdWords(e.dir, e.slug, nowOf())).filter(Boolean);
   return {
+    ...(holds.length ? { drafts_hold: holds.map((x) => x.drafts_hold).join(' ; '), drafts_hold_say: holds.map((x) => x.say).join(' ') } : {}),
     ...(overdue_check ? { overdue_check } : {}),
     ...(held_check ? { held_check } : {}),
     lock: isRepo(h) ? readLock(h) : null,

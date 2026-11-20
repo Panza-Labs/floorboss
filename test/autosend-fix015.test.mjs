@@ -341,3 +341,14 @@ test('4. holdWords: what a laptop stop (record, revoke) says on a drafts event w
   assert.equal(h?.drafts_hold, 'drafts next --event harbor-expo --run hold', JSON.stringify(h));
   assert.match(h.say, /1 queued Gmail draft is still labelled to send/);
 });
+
+test('4. status names the hold run while a stopped person still has queued drafts', async () => {
+  const { autosend, said } = await import('./fixtures/autosend-world.mjs');
+  const w = world({ touches: 2, people: [ANA] });
+  autosend(w.HOME, ['on', '--event', SLUG, '--said-file', said(w.HOME, 'yes'), '--own', OWN, '--mode', 'drafts']);
+  const rb = autosend(w.HOME, ['readback', '--event', SLUG]);
+  autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, SENTENCE)]);
+  addLines(w.evDir, [draftedLine(), { at: NOW, type: 'stop', who: 'user', id: 'c001', said: 'no thanks' }]);
+  const st = autosend(w.HOME, ['status']);
+  assert.match(String(st.drafts_hold), /drafts next --event harbor-expo --run hold/, JSON.stringify(st).slice(0, 500));
+});
