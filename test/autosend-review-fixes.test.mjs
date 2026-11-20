@@ -103,7 +103,7 @@ test('finding 1: the checked step killed mid-push of its release: the next step 
   // The step is still due: the next run asks for the search, then the send.
   const again = cloudUntilSend(bare, '2026-10-12T09:30:00Z');
   assert.equal(again.s.step, 'send', JSON.stringify(again.s).slice(0, 300));
-  assert.deepEqual(again.s.args.to, [PEOPLE[0].email]);
+  assert.equal(again.s.args.to, PEOPLE[0].email);
 });
 
 // ---- Finding 2: Claude Code's email sending switched on after `autosend on`.

@@ -24,11 +24,11 @@ import { eventDirOf, eventJson, ledgerOf, readEvent, stepMark, claudeSendsEmail,
 import { hoursWhy } from '../../../lib/unattended-drafts.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
-// The Gmail tools, by the names they may have in the cloud task: OpenAI's Gmail plugin's own (search_emails,
-// send_email) and the ChatGPT-connected app's in Codex (gmail_search_emails, gmail_send_email, which Codex shows with
-// an mcp__codex_apps__ prefix).
-export const SEARCH_TOOLS = Object.freeze(['search_emails', 'gmail_search_emails', 'mcp__codex_apps__gmail_search_emails']);
-export const SEND_TOOLS = Object.freeze(['send_email', 'gmail_send_email', 'mcp__codex_apps__gmail_send_email']);
+// The Gmail tools, by the names a live ChatGPT/Codex cloud run showed (2026-11-20): the ChatGPT-connected Gmail app,
+// which Codex shows with an mcp__codex_apps__ prefix. The step's args are that tool's own (sendArgs), so no other
+// Gmail tool is named.
+export const SEARCH_TOOLS = Object.freeze(['mcp__codex_apps__gmail_search_emails', 'gmail_search_emails']);
+export const SEND_TOOLS = Object.freeze(['mcp__codex_apps__gmail_send_email', 'gmail_send_email']);
 const MAX_ANSWER = 1024 * 1024;
 
 const runsDir = (home) => join(home, 'autosend', 'runs');
@@ -131,24 +131,24 @@ function searchStep(home, r, it) {
   return {
     step: 'search',
     run: r.run,
-    tool: 'search_emails',
+    tool: SEARCH_TOOLS[0],
     tool_names: SEARCH_TOOLS,
     args: { query: query(it), max_results: MAX_RESULTS },
     write: r.current.file,
     then: then(home, 'checked', r.run, r.current.file),
-    say: `Call the Gmail search tool (named search_emails, or gmail_search_emails) with exactly these args. Write its whole answer, unchanged, to the write file, then run then.`
+    say: `Call the Gmail search tool ${SEARCH_TOOLS[0]} (or the one whose name ends in gmail_search_emails) with exactly these args. Write the tool's whole result object as JSON (JSON.stringify of the full result, structuredContent included, an error too) to the write file, then run then.`
   };
 }
 function sendStep(home, r, it) {
   return {
     step: 'send',
     run: r.run,
-    tool: 'send_email',
+    tool: SEND_TOOLS[0],
     tool_names: SEND_TOOLS,
     args: sendArgs(it),
     write: r.current.file,
     then: then(home, 'sent', r.run, r.current.file),
-    say: 'Call the Gmail send tool (named send_email, or gmail_send_email) once, with exactly these args: no other recipient, no cc or bcc, no change to the subject or body. Write its whole answer, unchanged (an error too), to the write file, then run then. Never call it again for this step.'
+    say: `Call the Gmail send tool ${SEND_TOOLS[0]} (or the one whose name ends in gmail_send_email) once, with exactly these args: no other recipient, no cc or bcc, no change to the subject, the body or any other arg. Write the tool's whole result object as JSON (JSON.stringify of the full result, structuredContent included, an error too) to the write file, then run then. Never call it again for this step.`
   };
 }
 
