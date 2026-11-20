@@ -32,6 +32,13 @@ folder), made on the first run, or wherever `FLOORBOSS_HOME` points; `<project>/
 Run every floorboss command from the project folder (Codex's default), not from somewhere you `cd` to: floorboss
 finds its folder from there. The folder holds a `.gitignore` that keeps it out of the project's git; leave it there.
 
+**People typed in the chat instead of a file.** When the user answers the attendee-list question by typing people
+("no list yet, start with Jane Smith, Acme, jane@acme.com …"), write them with your file tool to
+`floorboss/work/typed-attendees.csv` in the project folder, with the header `Name,Title,Company,Email` (leave Title
+empty unless they gave one; one row per person; quote any value with a comma). Invent nothing: a person with no email
+gets an empty Email. Say in one line who you saved, then give that file's path as the answer. More people later go
+into the same file the same way.
+
 **Lists the user gives** (an attendee list, a CRM export, a contacts or do-not-contact file) are read only from that
 folder, the temp folder, or the project folder. A file in Downloads or on the Desktop is refused. Before giving
 floorboss the path, copy the file into the project folder or its `floorboss/work/` folder (ask the user first, and

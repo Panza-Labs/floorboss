@@ -93,7 +93,7 @@ export function listSteps(x) {
   }
   if (!e.inputs.attendees)
     return step('attendee_list', 'floorboss needs the attendee list (a CSV export) before anyone can be judged.', {
-      ask: { id: 'attendee_list', question: 'Where is the attendee list? Give the path to the CSV file.', answer_format: 'a file path' }
+      ask: { id: 'attendee_list', question: 'Who do you want to reach? Give the name of your attendee file (a CSV export), or just type a few people: name, company and email for each.', answer_format: 'a file path, or people typed in the chat (the agent saves them as a CSV first)' }
     });
   if (mappingConfirmed(e, 'attendees') === false) return mappingStep(c, e, 'attendees');
   const crmChoice = c.ob.ans.crm_choice;
