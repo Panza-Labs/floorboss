@@ -7,7 +7,12 @@
 
 const TWO_HOURS = 2 * 3600 * 1000;
 // A slot's id carries its start in the event's own time (s20261201T0930).
-export const onTheHalfHour = (slot) => /T\d{2}(?:00|30)$/.test(String(slot?.id || ''));
+// A slot without such an id is read from its start.
+export const onTheHalfHour = (slot) => {
+  const m = /T\d{2}(\d{2})$/.exec(String(slot?.id || ''));
+  const mm = m ? m[1] : slot?.start ? String(new Date(slot.start).getUTCMinutes()).padStart(2, '0') : null;
+  return mm === '00' || mm === '30';
+};
 
 // topUp: contacts in `existing` who kept one time after the other was booked; they get a second one.
 export function assignSlots(ranked, slots, { max_offers = 3, per_slot = 1, existing = {}, topUp = [] } = {}) {

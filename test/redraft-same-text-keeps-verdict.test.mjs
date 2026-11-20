@@ -17,7 +17,7 @@ test('the same text as a passed version, saved again after another: the gate app
   const { jobs, t } = todoJobs(H);
   const j = jobs.find((x) => x.id === idOf(H, 'Ana Berg') && x.touch === 1);
   const times = j.slot_labels.join(' or ');
-  const A = { subject: 'Test Expo', body: `Hi Ana,\n\nI run ops tooling at Lanecraft and would value 20 minutes at Test Expo. Could you do ${times}?\n\nBest, Sam${t.optout_sentence ? `\n\n${t.optout_sentence}` : ''}`, brief: 'x', structure: 'plain-request', fact_source: 'list' };
+  const A = { subject: 'Test Expo', body: `Hi Ana,\n\nYour ops tooling is where Lanecraft could help, and I would value 20 minutes at Test Expo. Could you do ${times}?\n\nBest, Sam${t.optout_sentence ? `\n\n${t.optout_sentence}` : ''}`, brief: 'x', structure: 'plain-request', fact_source: 'list' };
   const B = { ...A, body: A.body.replace('would value', 'would like') };
   const save = (d) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify(d)]);
   assert.ok(!save(A).ERROR);
