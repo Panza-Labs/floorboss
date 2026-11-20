@@ -1,6 +1,6 @@
 {
   "name": "floorboss",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Book meetings at an event: sort the attendee list, research who to meet, draft short messages and follow-ups, and open each approved email in your own mail app for you to send. On your laptop it uses no connected tools and never sends; auto-send, if you turn it on for an event, sends from your own ChatGPT cloud task (Gmail only).",
   "keywords": ["conference", "events", "meetings", "outreach"],
   "skills": "./.agents/skills",
