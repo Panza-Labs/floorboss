@@ -121,7 +121,9 @@ permissions in ChatGPT, a mailbox they accept this for, a repo token scoped to o
 scheduled task, and "stop auto-send" in Codex.
 
 floorboss's scripts run `git` on the data folder in this mode (pull, commit, push to the user's own remote). They make
-no other network call. Nothing runs on infrastructure the floorboss maintainers run.
+no other network call. The task prompt signs git in with a global credential helper that reads the `GITHUB_TOKEN`
+secret when git asks (never the token in a URL); floorboss still refuses to run git in a data repo whose own
+`.git/config` sets any `credential.*`, `include.*` or other program-starting setting. Nothing runs on infrastructure the floorboss maintainers run.
 
 Where it is built: `lib/autosend/` (the approval, the planner, the reply decision, the send record, the git sync) and
 `skills/autosend/scripts/` (the cloud run's steps). Every auto-send command refuses in Claude Code. git is started by

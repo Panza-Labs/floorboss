@@ -29,7 +29,9 @@ test('the Codex manifest names its own skills, commands and an empty hooks file'
 });
 
 test('the pack names no Claude-only tool, variable or command', () => {
-  const banned = [/AskUserQuestion/, /\bAgent tool\b/, /\bSkill tool\b/, /\/clear\b/, /\bmcp__/, /allowed-tools/, /\bWebFetch\b/];
+  // mcp__codex_apps__ is Codex's own prefix for a ChatGPT-connected app (the cloud task's Gmail tools), not Claude
+  // Code's: the auto-send task names those.
+  const banned = [/AskUserQuestion/, /\bAgent tool\b/, /\bSkill tool\b/, /\/clear\b/, /\bmcp__(?!codex_apps__)/, /allowed-tools/, /\bWebFetch\b/];
   for (const f of PACK) {
     const text = readFileSync(join(ROOT, f), 'utf8');
     for (const b of banned) assert.ok(!b.test(text), `${f}: ${b}`);
