@@ -9,6 +9,7 @@ import { readJson } from '../../../../lib/jsonio.mjs';
 import { levelOptions } from '../../../event-context/scripts/onboarding-tree.mjs';
 import { touchSession, listEvents } from '../../../../lib/scope.mjs';
 import { zoneFrom } from '../../../../lib/tz.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 import { parseDncReport } from '../../../crm-triage/scripts/dnc.mjs';
 import { segmentsMd, setVoiceField } from '../profile-write.mjs';
 import { cli, answers, forMock, writeWorkText, config, text, writeProfile, QUICK_ASSUMES, isNo, zoneExample, profileFile } from './helpers.mjs';
@@ -241,7 +242,26 @@ export const SETUP_SAVERS = {
     return answers(c, { must_meet_asked: true });
   },
   about_you: (v, c) => {
-    const o = typeof v === 'object' && v ? v : null;
+    const o0 = typeof v === 'object' && v ? v : null;
+    // Hand-send: the sign-off from the first name the agent knows ("Best," and the name), and no city: the home zone is
+    // the computer's. A sign-off the user gives later is saved the same way, without a city.
+    if (handSend() && o0 && (o0.first_name || (o0.sign_off && !o0.city))) {
+      const first = String(o0.first_name || '').trim().split(/\s+/)[0].slice(0, 60);
+      if (o0.first_name && !first) throw new Error('The answer is {"first_name":"<first name>","from":"sender_name|account|email|user"}.');
+      const sign = o0.sign_off ? String(o0.sign_off) : `Best,\n${first}`;
+      const sender = o0.sender_name || (o0.sign_off ? o0.sign_off.replace(/^\s*(best|thanks|cheers|regards|kind regards|all the best|warmly)[,!]?\s*/i, '') : first);
+      const f = profileFile(c, 'voice');
+      writeProfile(c, 'voice', setVoiceField(setVoiceField(f.text || f.template, 'Sign-off', sign), 'Sender name', sender));
+      const shown = sign.replace(/\s*\n\s*/g, ' ');
+      return {
+        ...answers(c, { about_you_asked: true }),
+        sign_off: shown,
+        ...(o0.from === 'email'
+          ? { say_to_user: `Your messages are signed "${shown}", the name taken from your email address. Say if it should be another name.` }
+          : {})
+      };
+    }
+    const o = o0;
     if (!o?.sign_off || !o?.city)
       throw new Error('The answer is {"sign_off":"<as they sign, e.g. Best, Noor>","sender_name":"<name, company>","city":"<where they live>"}.');
     const z = zoneFrom(o.city);

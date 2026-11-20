@@ -8,10 +8,30 @@ export function slotId(isoUtc, eventZone) {
   return `s${w.y}${pad(w.m)}${pad(w.d)}T${pad(w.hh)}${pad(w.mm)}`;
 }
 
+// The next :00 or :30 on the event's clock, at or after t (a zone half an hour off UTC still gets its own :00 and :30).
+// The drafting checks also refuse an offered time off :00 and :30; this keeps such a time from being made at all.
+function onHalfHour(t, eventZone) {
+  const mm = wallParts(new Date(t), eventZone).mm;
+  const off = (30 - (mm % 30)) % 30;
+  const base = t - (t % 60000);
+  return off ? base + off * 60000 : base < t ? base + 30 * 60000 : base;
+}
+
 // ranges: from parseFreeTimes, wall minutes in sourceZone. Returns slots (UTC) and what fell outside hours.
+// Scheduling rules (the user's, all optional): bufferMinutes free between two meetings; maxInRow meetings at most in a
+// row, then a break at least one meeting long. Every slot starts on :00 or :30 in the event's time.
 export function buildSlots(
   ranges,
-  { eventZone, sourceZone = eventZone, hours = { start: '08:00', end: '18:00' }, meetingMinutes = 30, now = new Date(), keepOutside = false }
+  {
+    eventZone,
+    sourceZone = eventZone,
+    hours = { start: '08:00', end: '18:00' },
+    meetingMinutes = 30,
+    bufferMinutes = 0,
+    maxInRow = null,
+    now = new Date(),
+    keepOutside = false
+  }
 ) {
   const plain = [],
     own = [];
@@ -51,9 +71,21 @@ export function buildSlots(
   }
   const usable = keepOutside ? [...kept, ...outside].sort((a, b) => a.start - b.start) : kept;
   const step = meetingMinutes * 60000;
+  const gap = Math.max(0, Number(bufferMinutes) || 0) * 60000;
+  const cap = Number.isInteger(Number(maxInRow)) && Number(maxInRow) > 0 ? Number(maxInRow) : null;
   const slots = [];
   for (const s of usable) {
-    for (let t = s.start; t + step <= s.end; t += step) slots.push({ start: t, end: t + step, minutes: meetingMinutes });
+    let inRow = 0;
+    for (let t = onHalfHour(s.start, eventZone); t + step <= s.end; ) {
+      slots.push({ start: t, end: t + step, minutes: meetingMinutes });
+      inRow++;
+      let next = t + step + gap;
+      if (cap && inRow >= cap) {
+        next += step;
+        inRow = 0;
+      }
+      t = onHalfHour(next, eventZone);
+    }
   }
   for (const o of own) {
     if (o.end - o.start >= o.minutes * 60000) slots.push({ start: o.start, end: o.start + o.minutes * 60000, minutes: o.minutes, label: o.label });

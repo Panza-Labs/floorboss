@@ -671,6 +671,14 @@ export const TOOLS_SAVERS = {
   free_time: (v, c) => {
     if (/^\s*keep (them )?all/i.test(String(typeof v === 'object' && v ? v.said || '' : v))) return answers(c, { many_slots_ok: true });
     const o = typeof v === 'object' && v ? v : { free: String(v) };
+    // Their scheduling rules, said with the days: how long a meeting is, minutes between meetings, at most how many in
+    // a row. Saved before the slots are built, so the slots follow them.
+    const rules = {
+      ...(o.meeting_minutes != null ? { meeting_minutes: Number(o.meeting_minutes) } : {}),
+      ...(o.buffer_minutes != null ? { buffer_minutes: Number(o.buffer_minutes) } : {}),
+      ...(o.max_in_row !== undefined ? { max_in_row: o.max_in_row === null ? null : Number(o.max_in_row) } : {})
+    };
+    if (Object.keys(rules).length) config(c, rules);
     const busy = c.event && existsSync(join(c.event.paths.work, 'calendar-busy.json')) ? ['--busy-file', join(c.event.paths.work, 'calendar-busy.json')] : [];
     if (Array.isArray(o.days))
       return cli(

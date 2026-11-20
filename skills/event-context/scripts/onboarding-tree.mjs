@@ -9,6 +9,7 @@
 // Each node: id, round, when(s) → applies?, done(s) → answered?, ask(s) → text, options(s) → [...], saves.
 
 import { connected, harness, HARNESSES } from '../../../lib/harness.mjs';
+import { systemZone } from '../../../lib/tz.mjs';
 import { EVENT_ANSWERS } from '../../../lib/scope.mjs';
 import { plainText, noteOwnerQuestion, effectsHash } from '../../../lib/reading.mjs';
 import { ownerQuoted, plainOwnerValue } from '../../../lib/names.mjs';
@@ -953,7 +954,14 @@ export function defaultsFor(s0) {
   if (s.ans.insights_asked !== true && (!seller(s) || (s.cfg.drafting_mode || cfg.drafting_mode) === 'delegate')) ans.insights_asked = true;
   if (s.ans.app_notes_asked !== true && s.ev?.app_name) ans.app_notes_asked = true;
   if (s.ans.accounts_asked !== true && s.ans.dnc_asked === true) ans.accounts_asked = true;
-  if (!(Array.isArray(s.cfg.languages) && s.cfg.languages.length) && s.ev && englishZone(s.ev.time_zone) && s.cfg.home_tz && englishZone(s.cfg.home_tz))
+  // Hand-send (Codex and the rest): the home zone is the computer's own, never asked (no city question); a computer that
+  // says only UTC leaves the event's zone. Meeting times are the event's either way.
+  if (!connected() && s.ev && !s.cfg.home_tz) {
+    const z = systemZone() || s.ev.time_zone;
+    if (z) cfg.home_tz = z;
+  }
+  const homeZone = s.cfg.home_tz || cfg.home_tz;
+  if (!(Array.isArray(s.cfg.languages) && s.cfg.languages.length) && s.ev && englishZone(s.ev.time_zone) && homeZone && englishZone(homeZone))
     cfg.languages = ['English'];
   // The offer answer carries the proof: its claims aren't asked again (any level).
   if (s.ans.offer_asked === true && s.ans.claims_confirmed !== true) ans.claims_confirmed = true;

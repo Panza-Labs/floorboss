@@ -70,6 +70,23 @@ function build() {
   assert.deepEqual(steps.filter((s) => s.call).map((s) => s.step), []);
   const rb = laptop(HOME, BUILT_AT, ['readback', '--event', SLUG]);
   assert.ok(!rb.ERROR, rb.ERROR);
+  // The readback for the chat (flow review --readback): a sample with bodies, every person's days, the total and one
+  // document; its digest is the readback's own.
+  const rv = run(process.execPath, [join(ROOT, 'skills/flow/scripts/cli.mjs'), 'review', '--event', SLUG, '--readback'], env);
+  assert.ok(!rv.ERROR, rv.ERROR);
+  assert.equal(rv.digest, rb.digest);
+  assert.equal(rv.total, rb.messages);
+  assert.equal(rv.people, rb.people);
+  assert.ok(rv.sample.length >= 2 && rv.sample.length <= 4, String(rv.sample.length));
+  assert.ok(rv.sample.some((m) => m.touch === 1) && rv.sample.some((m) => m.touch > 1), 'a first message and a follow-up');
+  assert.ok(rv.sample.every((m) => m.body && m.subject && m.planned_day));
+  assert.equal(rv.dates.length, rb.people);
+  assert.match(rv.approval_line, new RegExp(`all ${rb.messages} messages to ${rb.people} people`));
+  const doc = readFileSync(rv.document, 'utf8');
+  assert.equal((doc.match(/^### Message /gm) || []).length, rb.messages, 'every message in the document');
+  // The content approval was asked in the chat with the review, never on the page.
+  const ap = steps.find((s) => s.step === 'approve');
+  assert.equal(ap?.run_first?.[2], 'review');
   // "yes" is not the sentence: nothing is written.
   assert.match(laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, 'yes')]).ERROR, /auto-send these sequences/);
   const ok = laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, 'auto-send these sequences')]);

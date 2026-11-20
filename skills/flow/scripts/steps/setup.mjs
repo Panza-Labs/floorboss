@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Phase 1 of nextStep, and the setup questions the first three phases ask (onboardingAsk).
 import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { planQuestions, NODES, defaultsFor } from '../../../event-context/scripts/onboarding-tree.mjs';
 import { crmReaderHint } from '../../../connectors/scripts/tasks.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { step, node, handSend } from './shared.mjs';
-import { ANSWER_FORMAT, helpFor, DISCLAIMER, HAND_SEND_ASKS } from './wording.mjs';
+import { ANSWER_FORMAT, helpFor, DISCLAIMER, HAND_SEND_ASKS, withWhy } from './wording.mjs';
 import { coworkerCounts, customerCounts, lostCounts } from './counts.mjs';
 
 // The next onboarding question of one phase, or null when that phase is done.
@@ -33,6 +34,8 @@ export function onboardingAsk(c, phase) {
     if (lost)
       q.ask = `${q.ask} The count: ${lost.length ? `${plural(lost.length, 'person', 'people')} on the list: ${lost.map((x) => `${x.name} (${x.why}${x.at ? `, last in touch ${x.at}` : ', no date'})`).join('; ')}` : 'nobody on the list has a lost deal or a rejection in the CRM'}.`;
   }
+  // Hand-send: the sign-off isn't asked. "Best," and the first name the agent already knows, saved as the answer.
+  if (q.id === 'about_you' && handSend()) return signOffStep(c);
   // Hand-send: the user's question apart from the notes for the agent (wording.mjs HAND_SEND_ASKS).
   const hs = handSend() ? HAND_SEND_ASKS[q.id] : null;
   const plain = hs ? hs.question({ ...c.ob, ans: c.ob.ans || {}, cfg: c.ob.cfg || {} }) : null;
@@ -42,15 +45,48 @@ export function onboardingAsk(c, phase) {
     {
       ask: {
         id: q.id,
-        question: plain || q.ask,
+        question: handSend() ? withWhy(q.id, plain || q.ask) : plain || q.ask,
         ...(hs ? { how_to_ask: hs.how, ...(plain ? { for_agent: q.ask } : {}) } : {}),
         options: q.options || undefined,
-        answer_format: ANSWER_FORMAT[q.id] || (q.options ? "one of the options, or the user's own words" : "the user's words"),
+        answer_format: hs?.format || ANSWER_FORMAT[q.id] || (q.options ? "one of the options, or the user's own words" : "the user's words"),
         saves: n?.saves
       },
       help: helpFor(q.id)
     }
   );
+}
+
+// The sender name already in the voice file, when it is one (not the template's "<name, company…>").
+function voiceSender(c) {
+  const p = c.ob?.cfg?.context_profile || c.cfg?.context_profile;
+  if (!p) return null;
+  const f = join(c.home, 'context', p, 'voice', 'SKILL.md');
+  if (!existsSync(f)) return null;
+  const m = /^-\s*\*\*Sender name:\*\*\s*(.+)$/m.exec(readFileSync(f, 'utf8'));
+  const v = m ? m[1].trim() : '';
+  return v && !v.startsWith('<') ? v.slice(0, 120) : null;
+}
+
+// Hand-send: the sign-off is "Best," and the user's first name, never a question. The first name comes from what is
+// known, in this order: the sender name already saved, the name on the ChatGPT or Codex account the agent works in, and
+// last the local part of the address they send from (said back only then: "gary.holt" may not be how he signs). The
+// home zone is the computer's (the defaults step), so no city is asked either.
+export function signOffStep(c) {
+  const known = voiceSender(c);
+  const own = c.event?.event?.autosend_own || c.cfg?.own_email || null;
+  const write = join(c.home, 'work', 'about-you.json');
+  return step('onboarding:about_you', "The sign-off: \"Best,\" and the user's first name, from what's already known. Not a question.", {
+    judge: {
+      read: null,
+      ...(known || own ? { known: { ...(known ? { sender_name: known } : {}), ...(own ? { sends_from: own } : {}) } } : {}),
+      how: `Don't ask the user how they sign. Messages are signed "Best," and their first name on the next line. Take the first name from, in order: ${known ? `the sender name already saved (${JSON.stringify(known)}), ` : ''}the name on the ChatGPT or Codex account you're working in, if you know it; or, last, the local part of the address they send from${own ? ` (${own})` : ''}, before the @, as a name ("gary.holt" is Gary). Write {"first_name":"<it>","from":"sender_name|account|email"} and run then. Only when it came from the address, say the sign-off back in one line (the answer's say_to_user) so they can correct it. If you know none of these, ask one short question: "What first name should your messages be signed with?", and write their answer with "from":"user". If they later ask for another sign-off, save it with flow answer --ask about_you as {"sign_off":"<as they sign>","sender_name":"<name, company>"}.`,
+      write,
+      format: '{"first_name":"<first name>","from":"sender_name|account|email|user"}',
+      then: node('flow', 'answer', ...(c.event?.event?.slug ? ['--event', c.event.event.slug] : []), '--ask', 'about_you', '--value-file', write)
+    },
+    accepts: ['about_you'],
+    help: helpFor('about_you')
+  });
 }
 
 // Before there is an event: the disclaimer, the scan of what is connected, the first questions, the event itself.
@@ -165,7 +201,7 @@ export function setupSteps(x) {
     return step('event', 'Onboarding is done but no event is set: create it.', {
       ask: {
         id: 'event',
-        question: 'Which event is this for? A name or a link.',
+        question: handSend() ? withWhy('event', 'Which event is this for? A name or a link.') : 'Which event is this for? A name or a link.',
         ...(handSend() ? { how_to_ask: HAND_SEND_ASKS.event.how } : {}),
         answer_format: '{"name","city","start":"YYYY-MM-DD","end":"YYYY-MM-DD","zone":"Area/City"}'
       }

@@ -15,6 +15,20 @@ import { isAgreement } from '../../../../lib/reading.mjs';
 import { INTERPRETED, gateWords, EDIT_WITH_TEXT, editWithText, SKIP_REVIEW, skipReview, cli, withSubject, writeWork, isNo, ledger, writeWorkText, answers, pathOf, config, windowYes, noReplySaid } from './helpers.mjs';
 
 export const DRAFTS_SAVERS = {
+  // Hand-send review in the chat: the user's feedback on the drafts, or a rewrite of a line, goes through floorboss's own
+  // redraft path (revise) for every message it covers, never only noted. Feedback on the drafts overall ("all") is
+  // also kept as a rule in the voice file, so the next drafts follow it too.
+  review_feedback: (v, c) => {
+    const o = typeof v === 'object' && v ? v : { feedback: String(v || ''), ids: 'all' };
+    const feedback = String(o.feedback || o.said || '').trim();
+    if (!feedback) throw new Error('The answer is {"feedback":"<their words, whole>","ids":"all" or ["c004:1", …]}. Nothing was saved.');
+    const all = o.ids == null || o.ids === 'all' || (Array.isArray(o.ids) && !o.ids.length);
+    const ids = all ? [] : (Array.isArray(o.ids) ? o.ids : String(o.ids).split(',')).map((x) => String(x).trim()).filter(Boolean);
+    if (!all && !ids.every((x) => /^c\d{3,}(:\d+)?$/.test(x))) throw new Error('ids are message ids like "c004:1" (or "all"). Nothing was saved.');
+    const f = writeWorkText(c, 'review-feedback.txt', `Your feedback in the review: ${feedback}`);
+    const r = cli('event-outreach', ['revise', '--event', c.slug, ...(all ? ['--all', '--rule'] : ['--ids', ids.join(',')]), '--feedback-file', f], c);
+    return { revised: r.revise || [], skipped: r.skipped || [], ...(r.rule_saved_to ? { kept_as_rule: true } : {}) };
+  },
   // "skip review <ids|all>" lines send those drafts on unreviewed (their cards say so); the rest go to the gate.
   approve: (v, c) => {
     // Claude's reading of the user's words, by ID: always shown back for their yes (the gate never saves it at once).

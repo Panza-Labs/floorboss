@@ -8,17 +8,25 @@ import { readJson } from '../../../../lib/jsonio.mjs';
 import { readCsv } from '../../../../lib/csv.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { listEvents } from '../../../../lib/scope.mjs';
-import { mtime, lastInputAt, step, node, answersFor, onToolError, cli, TASK_FORMAT_ENRICH, toolDown, pendingLine, pendingAsk } from './shared.mjs';
+import { mtime, lastInputAt, step, node, answersFor, onToolError, cli, TASK_FORMAT_ENRICH, toolDown, pendingLine, pendingAsk, shortlistIds } from './shared.mjs';
 import { handSend } from '../../../../lib/harness.mjs';
 import { onboardingAsk } from './setup.mjs';
 
 // Triage: who is who (resolve), who fits, the people to check, the shortlist the user approves, free time,
 // and looking up missing contact details.
-// The check_these question: as it always was in Claude Code and with a CRM; in hand-send with no CRM, the plain
-// choices (there is no CRM row to name).
-export function checkTheseQuestion(c, env = process.env) {
+// The check_these question: as it always was in Claude Code and with a CRM. In hand-send with no CRM, plain words; and
+// when nobody in it has a match to name (people), only "write or skip": with no CRM, someone is here because floorboss
+// isn't sure they fit (their title), and a "same person as the one beside them" half asks about a match nobody shows
+// (the live Codex test, 2026-11-20: the round-3 wording kept that half).
+export const noMatchShown = (people) =>
+  Array.isArray(people) && people.length > 0 && people.every((r) => r && r.rung !== 'fuzzy' && !r.holder && !(r.alternatives || []).some((a) => a.holder || a.ref));
+export function checkTheseQuestion(c, env = process.env, people = null) {
   const OLD = 'For each person in check-these: same-person (name the CRM row), different-person, not-in-crm (the CRM lookup gave no answer and the CRM has nobody for them), reach, warm or skip, with a word on why.';
   if (!handSend(env) || (c.ob?.ans?.crm_choice && c.ob.ans.crm_choice !== 'none')) return OLD;
+  if (noMatchShown(people))
+    return /job|networking|hiring|research/.test(c.ob?.ans?.goal_type || '')
+      ? "floorboss isn't sure these people fit what you're there for: write to them or skip? A word on why helps."
+      : "floorboss isn't sure these people are buyers: write to them or skip? A word on why helps.";
   return 'For each person below: is it the same person as the one shown beside them (say which), or someone else? And should floorboss write to them, write warmly, or skip them? A word on why.';
 }
 
@@ -98,6 +106,8 @@ export function triageSteps(x) {
       }
     );
   const checks = Object.entries(resolved).filter(([, r]) => r.group === 'check');
+  // Hand-send, no CRM, nobody with a match to name: write or skip, nothing else.
+  const plainCheck = checks.length && handSend() && !(c.ob?.ans?.crm_choice && c.ob.ans.crm_choice !== 'none') && noMatchShown(checks.map(([, r]) => r));
   if (checks.length)
     return step(
       'check_these',
@@ -106,16 +116,17 @@ export function triageSteps(x) {
         show: ['derived/resolved.json: the people whose group is check, each with says and alternatives'],
         ask: {
           id: 'check_these',
-          question: checkTheseQuestion(c),
-          answer_format:
-            'one line per person: "<id> same-person crm:<row>" | "<id> different-person" | "<id> not-in-crm" (only where the CRM lookup gave no answer) | "<id> reach|warm|skip because <why>" | "<id> same-person crm:<row> reach|warm because <why>" (an uncertain match settled and decided on one line); or per group, to save a line per person: "all of <coworker>\'s: hold|reach|skip" (everyone that coworker holds) | "all <words in their title>: reach|warm|skip because <why>" | "all at <company>: …" | "everyone else: …" (a line for one person beats a group line; group these by title when there are many)',
+          question: checkTheseQuestion(c, process.env, checks.map(([, r]) => r)),
+          answer_format: plainCheck
+            ? 'one line per person: "<id> reach because <why>" (write to them) | "<id> skip because <why>"; or for several at once: "all <words in their title>: reach|skip because <why>" | "all at <company>: reach|skip because <why>" | "everyone else: reach|skip because <why>"'
+            : 'one line per person: "<id> same-person crm:<row>" | "<id> different-person" | "<id> not-in-crm" (only where the CRM lookup gave no answer) | "<id> reach|warm|skip because <why>" | "<id> same-person crm:<row> reach|warm because <why>" (an uncertain match settled and decided on one line); or per group, to save a line per person: "all of <coworker>\'s: hold|reach|skip" (everyone that coworker holds) | "all <words in their title>: reach|warm|skip because <why>" | "all at <company>: …" | "everyone else: …" (a line for one person beats a group line; group these by title when there are many)',
           people: checks.map(([id, r]) => ({
             id,
             name: byId[id]?.name,
             company: byId[id]?.company,
             says: r.says,
             alternatives: r.alternatives,
-            answers: answersFor(r)
+            answers: plainCheck ? ['reach', 'skip'] : answersFor(r)
           }))
         }
       }
@@ -157,7 +168,21 @@ export function triageSteps(x) {
           tell_user: `The shortlist is shown again because of what changed since your last answer: ${[countOf('input_added') ? `a new ${[...new Set(sinceGate.filter((x) => x.type === 'input_added').map((x) => x.kind))].join(' and ')} file` : null, countOf('fit') ? plural(countOf('fit'), 'person', 'people') + ' judged' : null, countOf('decide') ? plural(countOf('decide'), 'decision') : null, countOf('keep') || countOf('cap') ? 'your keep or cap change' : null].filter(Boolean).join(', ')}.`
         }
       : {};
-  if (!gateAt || gateAt < lastDecision)
+  // Hand-send: one change, one confirmation. A list reloaded since the yes with the same people on the shortlist (only
+  // new addresses, say) doesn't show the card again; what changed is said once, at the approval (approval.mjs).
+  const seenAtGate = handSend() && gateAt ? readJson(join(e.paths.derived, 'gate-seen.json'), null) : null;
+  const sameAfterReload =
+    !!seenAtGate &&
+    sinceGate.length > 0 &&
+    sinceGate.every((x) => x.type === 'input_added' && x.kind === 'attendees') &&
+    JSON.stringify(seenAtGate.ids || []) === JSON.stringify(shortlistIds(e.paths.derived));
+  // The shortlist file is still built again from the reloaded list (the card's own run does that), without the card.
+  if (sameAfterReload && mtime(join(e.paths.derived, 'shortlist.json')) < mtime(resolvedFile))
+    return step('shortlist_refresh', 'The list was reloaded with the same people on the shortlist: its file is built again, with no card to show.', {
+      run: node('crm-triage', 'view', '--event', e.event.slug),
+      show: []
+    });
+  if ((!gateAt || gateAt < lastDecision) && !sameAfterReload)
     return step('gate', 'The shortlist, who is left out and why, and the must-meet people: the user says ok, or changes it.', {
       ...gateAgain,
       run_first: node('crm-triage', 'view', '--event', e.event.slug),

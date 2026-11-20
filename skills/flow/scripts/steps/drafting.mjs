@@ -9,6 +9,7 @@ import { plural } from '../../../../lib/plural.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { mtime, step, node, cli, SKIP_REVIEW_HINT, handSend } from './shared.mjs';
 import { rewrittenSince, countFails, failCounts, draftFormat, ratingsCarry } from './counts.mjs';
+import { readdressed } from '../review.mjs';
 
 // Drafting: the list of drafting jobs, the drafts, the batch check, the critic, and the ratings.
 export function draftSteps(x) {
@@ -28,6 +29,15 @@ export function draftSteps(x) {
     return step('todo', 'Work out what needs drafting now: first messages, planned follow-ups, confirmations and notes to colleagues.', {
       run: node('event-outreach', 'todo', '--event', e.event.slug)
     });
+  // Hand-send: an approved message waiting to be sent whose person now has another address (the list given again) goes
+  // back through the redraft path first; its approval is then asked once, with what changed.
+  if (handSend()) {
+    const moved = readdressed(e);
+    if (moved.length)
+      return step('readdress', `${plural(moved.length, 'approved message')} now ${moved.length === 1 ? 'has' : 'have'} a new address on the list: drafted again to it, then approved once more.`, {
+        run: node('flow', 'readdress', '--event', e.event.slug)
+      });
+  }
   const todo = readJson(todoFile, { jobs: [] });
   const jobs = todo.jobs || [];
   const touchOf = (j) => e.state.people[j.id]?.touches?.[j.touch];
@@ -42,6 +52,12 @@ export function draftSteps(x) {
     // The same times in another order are the same times.
     if ([...(x.slot_ids || [])].sort().join() !== [...(j.slot_ids || [])].sort().join()) return 'times moved';
     if (rewrittenSince(x, d, j)) return 'the message before it was rewritten';
+    // Hand-send: the list now has another address for them (a reloaded list): the draft goes back through the redraft
+    // path to the new address, and its approval is asked again once, with what changed (approval.mjs changedSince).
+    if (handSend() && !x.sent && d.to && String(d.channel || 'email') === 'email') {
+      const cur = e.state.people[j.id]?.email || j.contact?.email || null;
+      if (cur && String(cur).toLowerCase() !== String(d.to).toLowerCase()) return 'a new address';
+    }
     if (x.checks?.length) return x.checks.join('; ');
     return null;
   };
