@@ -13,6 +13,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { drive, simplePersona, ROOT } from './lib/driver.mjs';
 import { remoteFor, cloneOf, commitsOf, remoteFile, git } from '../fixtures/autosend-world.mjs';
 import { email, searchResult, sendResult, profileResult, threadResult } from '../fixtures/gmail-real.mjs';
+import { htmlBody } from '../../lib/autosend/sendrecord.mjs';
 
 const SLUG = 'mock-harbour-haul';
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
@@ -155,13 +156,13 @@ class FakeGmail {
     assert.deepEqual(Object.keys(args).filter((k) => k !== 'reply_message_id').sort(), keys, 'no cc, bcc, sender or anything else');
     assert.equal(typeof args.to, 'string');
     assert.deepEqual(Object.keys(args.payload).sort(), ['body', 'charset', 'mime_type']);
-    assert.deepEqual([args.payload.mime_type, args.payload.charset, Object.keys(args.payload.body)], ['text/plain', 'UTF-8', ['content']]);
+    assert.deepEqual([args.payload.mime_type, args.payload.charset, Object.keys(args.payload.body)], ['text/html', 'UTF-8', ['content']]);
     assert.deepEqual(args.response_fields, ['id', 'thread_id']);
     if (this.mode.send === 'throws') throw new Error('no answer from the tool');
     const replied = 'reply_message_id' in args ? this.sentMail.find((x) => x.id === args.reply_message_id) : null;
     if ('reply_message_id' in args) assert.ok(replied, `reply_message_id ${args.reply_message_id} is a message this mailbox sent`);
     const id = `out${++this.n}`;
-    const m = { id, threadId: replied ? replied.threadId : `ot${this.n}`, to: [args.to], subject: args.subject, body: args.payload.body.content, reply_message_id: args.reply_message_id ?? null, date: new Date().toISOString() };
+    const m = { id, threadId: replied ? replied.threadId : `ot${this.n}`, to: [args.to], subject: args.subject, html: args.payload.body.content, reply_message_id: args.reply_message_id ?? null, date: new Date().toISOString() };
     this.sentMail.push(m);
     if (this.mode.send === 'noids') return sendResult({});
     return sendResult({ id: m.id, thread_id: m.threadId });
@@ -173,6 +174,7 @@ function cloudRun(bare, at, gmail, { onStep = null, extraEnv = {} } = {}) {
   const dir = cloneOf(bare);
   const env = { ...cloudEnv(dir, at), ...extraEnv };
   let id = 'new';
+  let waits = 0;
   const steps = [];
   for (let i = 0; i < 400; i++) {
     const s = run(process.execPath, [CLI, 'next', '--run', id], env);
@@ -180,7 +182,14 @@ function cloudRun(bare, at, gmail, { onStep = null, extraEnv = {} } = {}) {
     steps.push(s);
     if (s.run) id = s.run;
     if (onStep && onStep(s, { dir, env, id }) === 'halt') return { last: s, steps, id, dir, env };
-    if (s.step === 'stop' || s.step === 'done') return { last: s, steps, id, dir, env };
+    if (s.step === 'stop' || s.step === 'done') return { last: s, steps, id, dir, env, waits };
+    if (s.step === 'wait') {
+      // The gap between sends: the model sleeps; here the clock moves on by those seconds.
+      assert.ok(s.seconds > 0 && s.seconds <= 40, String(s.seconds));
+      env.FLOORBOSS_NOW = new Date(Date.parse(env.FLOORBOSS_NOW) + s.seconds * 1000).toISOString();
+      waits++;
+      continue;
+    }
     if (s.step === 'profile' || s.step === 'thread') {
       assert.equal(s.tool, s.step === 'profile' ? 'mcp__codex_apps__gmail_get_profile' : 'mcp__codex_apps__gmail_read_email_thread');
       let ans;
@@ -238,7 +247,7 @@ test('cases 1, 2, 4, 11: a whole sequence across cloud runs and the laptop: firs
   for (const x of first) {
     const got = sentTo(gmail, x.to);
     assert.equal(got.length, 1, x.id);
-    assert.deepEqual([got[0].to, got[0].subject, got[0].body], [[x.to], x.subject, x.body], x.id);
+    assert.deepEqual([got[0].to, got[0].subject, got[0].html], [[x.to], x.subject, htmlBody(x.body)], x.id);
   }
   let led = remoteLedger(bare);
   for (const x of first) {
@@ -295,7 +304,7 @@ test('cases 1, 2, 4, 11: a whole sequence across cloud runs and the laptop: firs
   assert.equal(r4.last.step, 'done', JSON.stringify(r4.last).slice(0, 400));
   const second = items.filter((x) => x.touch === 2);
   for (const x of second) {
-    const got = sentTo(gmail, x.to).filter((m) => m.subject === x.subject && m.body === x.body);
+    const got = sentTo(gmail, x.to).filter((m) => m.subject === x.subject && m.html === htmlBody(x.body));
     const quiet = ![a.id, b.id, c.id, d.id, f.id, g.id].includes(x.id);
     assert.equal(got.length, quiet ? 1 : 0, `${x.id} follow-up`);
     // The follow-up replies to their first message, so it goes in that thread.
@@ -606,7 +615,7 @@ test('round 3 items 1 and 2: on after the content approval: follow-ups drafted a
   const d2 = cloudRun(bare, `${t2.planned_due}T09:00:00Z`, gmail, { onStep: watch });
   assert.equal(d2.last.step, 'done', JSON.stringify(d2.last).slice(0, 300));
   assert.deepEqual(gmail.sentMail.map((m) => m.subject), [t1.subject, t2.subject]);
-  assert.equal(gmail.sentMail[1].body, t2.body);
+  assert.equal(gmail.sentMail[1].html, htmlBody(t2.body));
   assert.deepEqual(seen, ['search', 'send', 'search', 'send'], 'a reply check before each send');
 });
 

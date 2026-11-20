@@ -134,7 +134,7 @@ test('release: only a due step, only after a fresh reply check, then never again
 });
 
 test('sendArgs: the approved subject and body, the one address, no cc or bcc; a recorded message id threads it', () => {
-  assert.deepEqual(sendArgs(ITEM), { to: 'ana@north.example', subject: 'One more thought', payload: { mime_type: 'text/plain', charset: 'UTF-8', body: { content: 'Hi Ana' } }, response_fields: ['id', 'thread_id'] });
+  assert.deepEqual(sendArgs(ITEM), { to: 'ana@north.example', subject: 'One more thought', payload: { mime_type: 'text/html', charset: 'UTF-8', body: { content: '<p>Hi Ana</p>' } }, response_fields: ['id', 'thread_id'] });
   assert.deepEqual(Object.keys(sendArgs({ ...ITEM, thread_id: 't-1' })).sort(), ['payload', 'response_fields', 'subject', 'to']);
   assert.deepEqual(Object.keys(sendArgs({ ...ITEM, thread_id: 't-1', reply_to_message_id: 'm-1' })).sort(), ['payload', 'reply_message_id', 'response_fields', 'subject', 'to']);
 });

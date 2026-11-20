@@ -13,7 +13,7 @@ import { email, searchResult, sendResult, written } from './fixtures/gmail-real.
 import { readback, approve } from '../lib/autosend/approval.mjs';
 import { dueNow } from '../lib/autosend/plan.mjs';
 import { decide, apply } from '../lib/autosend/replycheck.mjs';
-import { release, sendArgs, record } from '../lib/autosend/sendrecord.mjs';
+import { release, sendArgs, record, htmlBody } from '../lib/autosend/sendrecord.mjs';
 import { repoConfigWhy } from '../lib/autosend/sync.mjs';
 import { approvalHash } from '../lib/sendcheck.mjs';
 import { draftOf } from '../lib/autosend/common.mjs';
@@ -92,17 +92,17 @@ test('sendArgs: exactly the send tool\'s input, the body byte for byte as the ap
   assert.deepEqual(sendArgs(ITEM), {
     to: 'ana@north.example',
     subject: 'One more thought',
-    payload: { mime_type: 'text/plain', charset: 'UTF-8', body: { content: 'Hi Ana' } },
+    payload: { mime_type: 'text/html', charset: 'UTF-8', body: { content: '<p>Hi Ana</p>' } },
     response_fields: ['id', 'thread_id']
   });
-  // Line ends kept as they are.
-  for (const body of ['Hi Ana,\r\n\r\nTuesday?\r\n', 'Hi Ana,\n\nTuesday?\n', 'mixed\r\nand\nends'])
-    assert.equal(sendArgs({ ...ITEM, body }).payload.body.content, body);
+  // The HTML is built from the plain text alone (the live tool hard-wrapped text/plain): either line end, the same.
+  for (const body of ['Hi Ana,\r\n\r\nTuesday?\r\n', 'Hi Ana,\n\nTuesday?\n']) assert.equal(sendArgs({ ...ITEM, body }).payload.body.content, '<p>Hi Ana,</p>\n<p>Tuesday?</p>');
   // The approved item, through the planner: what goes is what the hash names.
   const { evDir, item } = ready();
   const a = sendArgs(item);
   const d = draftOf(evDir, item.hash);
-  assert.equal(approvalHash({ channel: d.channel, subject: a.subject, body: a.payload.body.content }, a.to), item.hash);
+  assert.equal(approvalHash({ channel: d.channel, subject: a.subject, body: d.body }, a.to), item.hash);
+  assert.equal(a.payload.body.content, htmlBody(d.body), 'the HTML is of the approved text');
   for (const k of ['cc', 'bcc', 'from_address', 'reply_to', 'attachment_files', 'body', 'thread_id']) assert.ok(!(k in a), k);
   assert.ok(!('reply_message_id' in a), 'a first message is a new email');
   // An odd recorded id is never passed: the follow-up goes as a new email.

@@ -12,7 +12,7 @@
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { existsSync, readFileSync, mkdirSync, lstatSync, openSync, closeSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { writeJson, appendLine } from '../../../lib/jsonio.mjs';
 import { append } from '../../../lib/ledger.mjs';
@@ -32,6 +32,11 @@ export const SEND_TOOLS = Object.freeze(['mcp__codex_apps__gmail_send_email', 'g
 export const PROFILE_TOOLS = Object.freeze(['mcp__codex_apps__gmail_get_profile', 'gmail_get_profile']);
 export const THREAD_TOOLS = Object.freeze(['mcp__codex_apps__gmail_read_email_thread', 'gmail_read_email_thread']);
 const MAX_ANSWER = 1024 * 1024;
+
+// The gap between two sends in one run: 20 to 40 seconds, fixed by the person's id (a hash, not random, so a run is
+// the same every time). The first live cloud run sent three within seconds and all three landed in spam on a new
+// sender account; a person writing by hand never sends that fast. Under a minute keeps an hourly run short.
+export const sendGapMs = (id) => 20000 + (parseInt(createHash('sha256').update(String(id)).digest('hex').slice(0, 8), 16) % 20001);
 
 const runsDir = (home) => join(home, 'autosend', 'runs');
 const runFile = (home, run) => join(runsDir(home), `${run}.json`);
@@ -143,6 +148,15 @@ function stopRun(home, r, nowMs, why, { lock = 'drop' } = {}) {
 }
 
 const WRITE_ALL = "Write the tool's whole result object as JSON (JSON.stringify of the full result, structuredContent included, an error too) to the write file, then run then.";
+function waitStep(home, r, ms) {
+  const seconds = Math.ceil(ms / 1000);
+  return {
+    step: 'wait',
+    run: r.run,
+    seconds,
+    say: `Wait between sends: run \`sleep ${seconds}\`, then run next again. Call no Gmail tool for this step.`
+  };
+}
 function profileStep(home, r) {
   return {
     step: 'profile',
@@ -290,6 +304,11 @@ function nextStep(home, { run, nowMs }, holder = {}) {
     const e = end({ home, runId: r.run });
     return { step: 'done', summary, ...(e.stop ? { push: e.stop } : {}) };
   }
+  // A gap after the last send of this run, before the next person's checks (so the search stays fresh for the send).
+  if (Number.isFinite(r.last_sent_at)) {
+    const left = r.last_sent_at + sendGapMs(it.id) - nowMs;
+    if (left > 0) return waitStep(home, r, left);
+  }
   r.n += 1;
   const dir = answerDir(r.run);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -417,6 +436,7 @@ function sentStep(home, { run, file, nowMs }) {
   r.seen.push(`${it.slug}:${it.id}`);
   if (out.sent) {
     r.sent.push(`${it.slug} ${it.id} message ${it.touch}`);
+    r.last_sent_at = nowMs;
     log(home, r, nowMs, `sent ${it.slug} ${it.id} message ${it.touch} to ${it.to} ("${it.subject}")`);
     if (out.thread_problem) log(home, r, nowMs, `threading problem: ${it.slug} ${it.id} message ${it.touch} ${out.thread_problem}. It was sent and is never sent again; look at it in Gmail`);
     saveRun(home, r);

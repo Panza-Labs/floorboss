@@ -159,7 +159,7 @@ test('the cloud driver names FLOORBOSS_HOME on every command it gives, so the ne
   const driver = readFileSync(join(ROOT, 'skills/autosend/scripts/driver.mjs'), 'utf8');
   assert.match(driver, /const then = \(home, sub, run, file\) => \['env', `FLOORBOSS_HOME=\$\{home\}`/);
   const task = readFileSync(join(ROOT, 'codex/autosend-task.md'), 'utf8');
-  assert.match(task, /env FLOORBOSS_HOME="<the full path of \.\/data>" FLOORBOSS_AUTOSEND=cloud node/);
+  assert.match(task, /env FLOORBOSS_HOME="RUN\/data" FLOORBOSS_AUTOSEND=cloud node/);
 });
 
 test('the words: README, the Codex skill and AGENTS.md say where the data lives in Codex', () => {
