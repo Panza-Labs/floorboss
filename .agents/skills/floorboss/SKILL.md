@@ -1,6 +1,6 @@
 ---
 name: floorboss
-description: Book meetings at an event with floorboss, in Codex. Sets up the event, sorts the attendee list, researches who to meet, drafts short messages and follow-ups, and builds an outbox page where each email opens in the user's own mail app for them to send. Use when the user wants to prepare or run outreach for a conference, trade show or event, or reports what happened with that outreach (sent, replied, booked, said no).
+description: Book meetings at an event with floorboss, in Codex. Sets up the event, sorts the attendee list, researches who to meet, drafts short messages and follow-ups for the user's approval. Approved emails either go out on their own (auto-send: from the user's own ChatGPT cloud task through Gmail, checking for a reply before each one) or wait on an outbox page for the user to send from their own mail app. Use when the user wants to prepare or run outreach for a conference, trade show or event, or reports what happened with that outreach (sent, replied, booked, said no).
 license: Apache-2.0
 ---
 
