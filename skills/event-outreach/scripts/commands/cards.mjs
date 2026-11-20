@@ -23,7 +23,7 @@ import { hashOf, pickAt, whereAt } from './routes.mjs';
 import { isOut, labelOf, ctxOf, colleagueTold, takenTest } from './context.mjs';
 import { savedDraft, readTodo, draftFiles, ledgerTouch, followupDayOf, laterSent } from './saved-drafts.mjs';
 import { addressBusyToday, busyWhy, homeSends } from '../../../../lib/sendcheck.mjs';
-import { autosendLive, stepMark } from '../../../../lib/autosend/common.mjs';
+import { autosendLive, stepMark, autosendDueDay } from '../../../../lib/autosend/common.mjs';
 import { sessionWhy } from '../../../../lib/autosend/sync.mjs';
 import { addDays } from '../../../../lib/tz.mjs';
 
@@ -141,11 +141,11 @@ function cardsFrom(c, jobs, { pendingOnly }) {
 
 // A follow-up's day (the one rule, lib/spacing.mjs followupDay), for a message after the first; undefined for anything else.
 // Where auto-send stands for a card: live (the second yes that stands for this text, or null), day (the day the cloud
-// sends it) and missed (that day and the day after went by: it is the user's again, with its buttons). due: the
-// follow-up rule's day for the card (dueOf).
+// sends it, worked out as the planner does: lib/autosend/common.mjs autosendDueDay) and missed (that day and the day
+// after went by: it is the user's again, with its buttons). due: the follow-up rule's day for the card (dueOf).
 export function autosendCard(c, j, due) {
   const live = j.kind === 'message' ? autosendLive(c.entries, c.folded, j.id, j.touch) : null;
-  const day = live ? (j.touch === 1 ? live.planned_due : due?.day) : null;
+  const day = live ? (j.touch === 1 ? autosendDueDay(live, { first: true }) : autosendDueDay(live, { first: false, ruleDay: due?.day })) : null;
   return { live, day, missed: !!(live && day && c.today && c.today > addDays(day, 1)) };
 }
 function dueOf(c, j, d) {
