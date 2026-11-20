@@ -10,6 +10,7 @@ import { append } from '../../../lib/ledger.mjs';
 import { sessionEvent } from '../../../lib/scope.mjs';
 import { nowFrom } from '../../../lib/event.mjs';
 import { makeCurrent } from './next.mjs';
+import { handSend } from '../../../lib/harness.mjs';
 import { answers, text, setSavingAsk, INTERPRETED } from './savers/helpers.mjs';
 import { SETUP_SAVERS } from './savers/setup.mjs';
 import { TOOLS_SAVERS } from './savers/tools.mjs';
@@ -50,7 +51,8 @@ export function answer(opts) {
   // The setup level can change at any step until the shortlist is approved (quick setup drops the CRM and team
   // checks, so after that it changes only where a step offers it).
   const shortlistApproved = !!(c.event && readLedger(c.event.paths.ledger).entries.some((x) => x.type === 'answered' && x.ask === 'gate'));
-  const anyTime = ANY_TIME.has(opts.ask) || (opts.ask === 'setup_level' && !shortlistApproved);
+  // In hand-send the sign-off isn't asked (it is "Best," and the first name): the user can change it whenever they say so.
+  const anyTime = ANY_TIME.has(opts.ask) || (opts.ask === 'setup_level' && !shortlistApproved) || (opts.ask === 'about_you' && handSend() && !!c.ob?.ans?.about_you_asked);
   let asked = null;
   if (!anyTime && !(process.env.FLOORBOSS_TEST === '1' && process.env.FLOORBOSS_OUT_OF_TURN === '1')) {
     // The question asked in an ordinary run or an agenda run (its news heads-up), or one the step lists in its own
@@ -105,6 +107,7 @@ export function answer(opts) {
       'gate',
       'approve',
       'skip_review',
+      'review_feedback',
       'research_scale',
       'company_research',
       'list_short',

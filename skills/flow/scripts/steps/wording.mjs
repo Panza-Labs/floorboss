@@ -130,14 +130,37 @@ export const ANSWER_FORMAT = {
 // text with a note on what to do with the answer (how_to_ask); Claude Code's step is as it was. question(s) gets the
 // onboarding state; null keeps the tree's own text as the question (it is already the user's: "That's 64 meetings
 // back to back…").
-const SHAPE = 'Ask the user only the question, in plain words. Never ask them for JSON, a time zone or a file format: turn their plain answer into the answer_format shape yourself, read it back in one or two plain lines, and save it on their yes. The text in "for_agent" is for you, never for the user.';
+const SHAPE = 'Ask the user only the question, in plain words. Never ask them for JSON, a time zone or a file format: turn their plain answer into the answer_format shape yourself and save it. Save a plain answer as it is, with no read-back. Read it back (one or two plain lines, saved on their yes) only when you had to interpret or guess (a range read as one number, a day worked out, words you weren\'t sure of) or when a value looks odd. The text in "for_agent" is for you, never for the user.';
+// Why each setup question is asked, one short clause the user sees with it (hand-send). Kept apart so the tests can
+// check every question still asked carries its own.
+export const HAND_SEND_WHY = {
+  setup_level: 'It decides how many questions come next.',
+  event: 'Its dates and city set the meeting times.',
+  goal: 'floorboss picks who to write to from this.',
+  list_source: 'floorboss picks who to write to from it.',
+  company: 'Nobody there gets contacted.',
+  dnc: 'They never get a message.',
+  team: '(They are never contacted.)',
+  app: 'Someone who misses an email can be reached there.',
+  free_time: 'Messages offer only times you can make.',
+  offer: 'Messages say what you sell in your words, and claim only what is true.',
+  languages: 'A message is only ever written in one of those',
+  samples: 'Your first messages copy that tone.',
+  crm_name: 'Your own contacts are then never held back as a coworker\'s.',
+  coworker_contacts: 'A coworker\'s contact never gets a surprise note.'
+};
+// A question with its why clause, once.
+export const withWhy = (id, q) => {
+  const w = HAND_SEND_WHY[id];
+  return !w || !q || String(q).includes(w) ? q : `${q} ${w}`;
+};
 export const HAND_SEND_ASKS = {
   event: {
     question: (s) =>
       s.ans?.event_hint
         ? `Is it ${s.ans.event_hint}? If you know its dates and city, say them; otherwise I'll look them up and read them back to you.`
         : 'Which event is this for? Its name, or a link to its site.',
-    how: `${SHAPE} With web search, look the event up and read back its dates, city and app for a yes. Without web search, or when nothing is found, ask the user for its dates and city in plain words, and work out the time zone from the city yourself (Nashville is America/Chicago): never ask the user for a zone.`
+    how: `${SHAPE} If the user gave its name, city and dates, save them as given. With web search, look the event up and read back what you found (dates, city, app) for a yes. Without web search, or when nothing is found, ask the user for its dates and city in plain words, and work out the time zone from the city yourself (Nashville is America/Chicago): never ask the user for a zone.`
   },
   goal: {
     question: () => 'Who do you want to meet there, and about how many meetings? Anyone in particular? In your own words.',
@@ -149,8 +172,17 @@ export const HAND_SEND_ASKS = {
     how: `${SHAPE} From a link, read it and propose the lines for a yes.`
   },
   free_time: {
-    question: (s) => (s.slots > 40 ? null : 'When are you free to meet during the event? Say it the way you would, like "mornings, not Thursday".'),
-    how: `${SHAPE} Times are the event's own unless they say otherwise.`
+    question: (s) =>
+      s.slots > 40
+        ? null
+        : `Which days will you be at the show, and any times you're not free? And any scheduling rules: how long a meeting is, at most how many back to back, a break between meetings? Times are the show's local time${s.ev?.city ? ` (${s.ev.city})` : ''}.`,
+    how: `${SHAPE} Times are always the show's local time: never ask which zone they mean. Read their days into the event's dates ("all day" is 09:00-17:00 unless they say), the times they aren't free into "except", and their rules into meeting_minutes, max_in_row and buffer_minutes (leave out a rule they didn't give).`,
+    format:
+      '{"days":[{"date":"YYYY-MM-DD","from":"HH:MM","to":"HH:MM","except":[{"from":"HH:MM","to":"HH:MM"}]}],"meeting_minutes":<minutes, if they said>,"max_in_row":<at most this many in a row, if they said>,"buffer_minutes":<minutes between meetings, if they said>,"notes":["<anything not known yet>"],"said":"<their words>"} : every time in the show\'s local time'
+  },
+  app: {
+    question: () => 'Does the show have its own app for messages and meetings? Its name, or "none".',
+    how: `${SHAPE} Look at the event's site first and say what you found; ask only if it isn't clear.`
   },
   dnc: {
     question: () => 'Is there anyone, or any company, floorboss must never contact (a competitor, a partner)? Names, companies or a file, or "none".',
