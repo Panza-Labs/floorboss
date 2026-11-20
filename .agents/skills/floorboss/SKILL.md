@@ -88,8 +88,9 @@ until it says `done`. Each answer has `step`, `why` and one action:
     show them, and ask which is closest and what to change.
   - `event`: if the user gave its name, city and dates, save them. With web search, look the event up and read back
     what you found (dates and city). Without it (or when nothing is found), ask the user for the dates and the city,
-    and work out the show's time zone from the city yourself (Nashville is `America/Chicago`). Never ask the user for
-    a time zone: their own is the computer's (floorboss reads it), and meeting times are always the show's.
+    and work out the show's time zone from the city yourself (Nashville is `America/Chicago`).
+    Never ask the user for a time zone: their own is the computer's (floorboss reads it), and meeting times are
+    always the show's.
   - The sign-off is never asked: the `onboarding:about_you` step says how to take the first name (it signs "Best,"
     and the name). If the user asks for another sign-off at any point, save it with
     `answer --ask about_you` as `{"sign_off":"<as they sign>","sender_name":"<name, company>"}`.
@@ -224,8 +225,8 @@ each message in its `sample` whole (address, planned day, subject and body), one
 planned days), the people in `refused` and why, then its `approval_line` (it names the total, the messages not shown
 included) and the `document` to read every message with its day. Ask them to type **auto-send these sequences** if
 they want exactly these sent on those days. Write what they typed to a file and run
-`approve --event <slug> --digest <its digest> --said-file <file>`. Never type it for them, never reword a message,
-and if they say anything else, don't run `approve`. If `approve` says something changed, run the review again and
+`approve --event <slug> --digest <its digest> --said-file <file>`. Never type it for
+them, never reword the readback or a message, and if they say anything else, don't run `approve`. If `approve` says something changed, run the review again and
 show it again. `readback` itself still gives the whole text when the user asks to see every message in the chat. A message the user sent themselves (they say "sent", or the
 readback's `hand_sent` or `approve`'s answer names one whose day went by) is recorded with event-outreach `record`
 with what `sent`, the exact command those answers give, never `settle`, which is only for a step auto-send let go;
