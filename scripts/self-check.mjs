@@ -259,8 +259,9 @@ sayAll("auto-send's sync starts one program, git, with no shell, its prompts, ho
   'exactly one call that starts a process': count(syncCode, STARTS) === 1,
   'that call is spawnSync(GIT, [...FIXED, ...args], …) in the data folder': syncCode.includes("  const r = spawnSync(GIT, [...FIXED, ...args], { cwd: home, encoding: 'utf8', env: gitEnv(), timeout: GIT_TIMEOUT_MS });"),
   'GIT is "git" and nothing else (declared once, used once)': syncCode.includes("const GIT = 'git';") && count(syncCode, /\bGIT\b/g) === 2,
-  'the fixed options turn hooks and signing off': syncCode.includes("const FIXED = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', '-c', 'user.name=floorboss', '-c', 'user.email=autosend@floorboss.invalid'];") && count(syncCode, /\bFIXED\b/g) === 2,
-  'git never prompts': syncCode.includes("const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' });"),
+  'the fixed options turn hooks, fsmonitor, a custom ssh, ext:: remotes and signing off': syncCode.includes("const FIXED = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.sshCommand=ssh', '-c', 'protocol.ext.allow=never', '-c', 'commit.gpgsign=false', '-c', 'user.name=floorboss', '-c', 'user.email=autosend@floorboss.invalid'];") && count(syncCode, /\bFIXED\b/g) === 2,
+  'git never prompts, and gets no GIT_* variable but these': syncCode.includes("const gitEnv = () => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k))), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' });"),
+  "a data repo whose own settings could start a program is refused before git runs in it": syncCode.includes('  const why = repoConfigWhy(home);\n  return why ? { ok: false, out: \'\', err: why, refused: why } : run(home, args);'),
   'no shell option anywhere': !/\bshell\s*:/.test(syncCode),
   'spawnSync is named twice (its import and that call)': count(syncCode, /\bspawnSync\b/g) === 2 && syncCode.includes("import { spawnSync } from 'node:child_process';")
 });

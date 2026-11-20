@@ -20,7 +20,7 @@ import { plainAddress } from '../../event-outreach/scripts/mailto.mjs';
 import { refusedHere, eventDirOf, eventJson, autosendEvents, readEvent, unsettled, stepMark, draftOf, ledgerOf, claudeSendsEmail, liveApproval, handSentCommand } from '../../../lib/autosend/common.mjs';
 import { readback, approve, revoke } from '../../../lib/autosend/approval.mjs';
 import { dueNow } from '../../../lib/autosend/plan.mjs';
-import { start, end, unlock, repair, laptopWrite, initRepo, publishedWhy, readLock, isRepo, remoteUrl, headOf, pinWhy, redact, LOCK_LIVE_MS, PAUSE_STEPS } from '../../../lib/autosend/sync.mjs';
+import { start, end, unlock, repair, laptopWrite, initRepo, publishedWhy, readLock, isRepo, remoteUrl, headOf, pinWhy, redact, repoConfigWhy, LOCK_LIVE_MS, PAUSE_STEPS } from '../../../lib/autosend/sync.mjs';
 import { next, checked, sent } from './driver.mjs';
 
 const FLOORBOSS = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -236,6 +236,8 @@ export function taskPrompt({ sha, dataRepo }) {
 async function setup(opts) {
   laptopOnly('Setup');
   const h = home();
+  const unsafe = repoConfigWhy(h);
+  if (unsafe) throw new Error(`Setup refused: ${unsafe}. Nothing was set up.`);
   if (!isRepo(h)) throw new Error(`The data folder (${h}) isn't a git checkout yet. README "Auto-send from the cloud", step 1.`);
   const url = remoteUrl(h);
   const m = /^https:\/\/github\.com\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?$/.exec(String(url || ''));
