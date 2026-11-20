@@ -50,7 +50,7 @@ test('the pack names no Claude-only tool, variable or command', () => {
   // the brief on request.
   assert.match(skill, /every word\*\* of a command in double quotes/);
   assert.match(skill, /`floorboss:` taken off the front of the name/);
-  assert.match(skill, /copy the file into `~\/\.floorboss\/work\/`/);
+  assert.match(skill, /copy the file into the project folder or its `floorboss\/work\/` folder/);
   assert.match(skill, /`YYYY-MM-DD HH:MM` in the event's time zone/);
   assert.match(skill, /next --agenda --event <slug>/);
   assert.match(skill, /^name: floorboss$/m);

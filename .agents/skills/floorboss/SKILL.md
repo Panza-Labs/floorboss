@@ -27,14 +27,16 @@ Command Prompt, bash and zsh. floorboss's other files (the other
 `${CLAUDE_PLUGIN_ROOT}`, read `FLOORBOSS`; where they say the Write tool, use your own way of writing a file; where
 they say "Claude Code asks the user", nothing asks here, so you ask.
 
-floorboss keeps its data in `~/.floorboss` (on Windows `C:\Users\<name>\.floorboss`), or wherever `FLOORBOSS_HOME`
-points; `~/.floorboss` below means that folder.
+In Codex floorboss keeps its data in a `floorboss` folder inside the folder Codex was started in (the project
+folder), made on the first run, or wherever `FLOORBOSS_HOME` points; `<project>/floorboss` below means that folder.
+Run every floorboss command from the project folder (Codex's default), not from somewhere you `cd` to: floorboss
+finds its folder from there. The folder holds a `.gitignore` that keeps it out of the project's git; leave it there.
 
 **Lists the user gives** (an attendee list, a CRM export, a contacts or do-not-contact file) are read only from that
-folder, the temp folder, or the folder Codex was started in (the floorboss folder). A file in Downloads or on the
-Desktop is refused. Before giving floorboss the path, copy the file into `~/.floorboss/work/` (ask the user first, and
-say where it went), then give that path. If a script fails with a permission error writing there, tell the user to start Codex with
-`--add-dir` and that folder (the README's "Run it in Codex" says how), and stop.
+folder, the temp folder, or the project folder. A file in Downloads or on the Desktop is refused. Before giving
+floorboss the path, copy the file into the project folder or its `floorboss/work/` folder (ask the user first, and
+say where it went), then give that path. If a script fails with a permission error writing there, tell the user
+to start Codex in a project folder (not their home folder itself), as the README's "Run it in Codex" says, and stop.
 
 ## Rules in Codex
 
@@ -136,7 +138,7 @@ Then they tell you it went, or tick Sent on the page and paste its "Copy status"
 Whenever the user says what happened ("sent Ana and Raj", "Megan said yes to Tue 9:00", "Jimmy said not
 interested", "Lena asked me to stop", a pasted status), record it before anything else, as
 `FLOORBOSS/skills/event-outreach/SKILL.md` ("Recording what happened") says: write the items to a file in
-`~/.floorboss/work/` and run `node "FLOORBOSS/skills/event-outreach/scripts/cli.mjs" record --event <slug> --file <file>`.
+`<project>/floorboss/work/` and run `node "FLOORBOSS/skills/event-outreach/scripts/cli.mjs" record --event <slug> --file <file>`.
 "Said yes to Tue 9:00" is `booked` with `time` as `YYYY-MM-DD HH:MM` in the event's time zone: work out which event
 day "Tue" is from the event's dates, and if the user is in another zone or the day is unclear, ask before
 recording; "not interested" is `declined`; "stop" or "don't contact me" is
@@ -170,14 +172,14 @@ Run the loop again on any day something may be due. Due follow-ups are drafted, 
 messages, then appear on the outbox page with the same buttons. Run the day before a meeting day or that morning, the loop builds the
 show-day brief. To build it on request, run `node "FLOORBOSS/skills/flow/scripts/cli.mjs" next --agenda --event <slug>`
 and loop on `next --agenda` the same way until `done` (`FLOORBOSS/commands/agenda.md` says what each part is). Then
-give the user the path of `agenda.html` in the event's folder (`~/.floorboss/events/<slug>/`).
+give the user the path of `agenda.html` in the event's folder (`<project>/floorboss/events/<slug>/`).
 
 ## Auto-send from the cloud (Gmail only)
 
 The user can have floorboss send an event's approved sequences on their days, first message included, from a
 ChatGPT scheduled task in their own account, with their computer off. Gmail or Google Workspace only. Every command
 below is `node "FLOORBOSS/skills/autosend/scripts/cli.mjs" <command> ...`, every word in double quotes; put the
-user's words in a file in `~/.floorboss/work/` and pass it with `--said-file` (or `--private-said-file`).
+user's words in a file in `<project>/floorboss/work/` and pass it with `--said-file` (or `--private-said-file`).
 
 **Turning it on.** Ask only when the user wants floorboss to send for them, before the drafts of that event:
 "Should floorboss send these on its own from the cloud?" Before they answer, say in your own words what the README's
@@ -208,7 +210,7 @@ private, ask the user its question; write their words and run `setup --private-s
 `RRULE:FREQ=HOURLY`), with the README's steps 2 to 4 and 6 (token, Gmail connection and permission, network secret
 and internet access, Run now once).
 
-**Every session while it is on.** When `~/.floorboss` is a git checkout and an event is set to auto-send, run
+**Every session while it is on.** When `<project>/floorboss` is a git checkout and an event is set to auto-send, run
 `sync start --who laptop --run laptop-<YYYYMMDD-HHMM>` before anything else in floorboss, and
 `sync end --run <the same id>` after the last floorboss command of the session. If `sync start` answers `took_over`,
 tell the user its `say`. `flow next` and the outbox page
@@ -234,6 +236,6 @@ know yet: give the user its `say` word for word (it has the steps to pause the t
 messages to send by hand, and run `sync repair` once the repo can be reached. Revoked messages are back on the
 outbox page with their buttons.
 
-Never edit anything under `~/.floorboss/autosend/`, the lock or the ledger yourself, and never run git in the data
+Never edit anything under `<project>/floorboss/autosend/`, the lock or the ledger yourself, and never run git in the data
 folder: floorboss does that, setup step 1 included (`init`). The one git command a person may type there is the
 push `init` gives when it can't sign in, and that is the user's to type, never yours.

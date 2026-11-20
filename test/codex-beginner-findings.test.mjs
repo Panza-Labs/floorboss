@@ -249,9 +249,9 @@ test('6. the Codex skill: plain questions, research with nothing found, the judg
   assert.match(t, /double-click/);
 });
 
-test('7. README: the PowerShell folder and the work folder', () => {
+test('7. README: one install for every shell; the data folder is made in the project, no folder to make first', () => {
   const t = readFileSync(join(ROOT, 'README.md'), 'utf8');
-  assert.match(t, /New-Item -ItemType Directory -Force "\$HOME\\\.floorboss\\work"/);
-  assert.match(t, /mkdir -p ~\/\.floorboss\/work/);
-  assert.match(t, /codex --add-dir "\$HOME\\\.floorboss" --search/);
+  // Superseded: the data folder is <project>/floorboss in Codex (lib/paths.mjs projectHome), so no mkdir or --add-dir.
+  assert.match(t, /On macOS, Linux or PowerShell:\n\n```\ngit clone https:\/\/github\.com\/Panza-Labs\/floorboss\.git\ncd floorboss\ncodex --search\n```/);
+  assert.ok(!/New-Item -ItemType Directory|mkdir -p ~\/\.floorboss/.test(t));
 });

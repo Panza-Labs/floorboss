@@ -73,42 +73,35 @@ come from Codex's source and documentation, not from a run. Please open an issue
 
 You need Codex, [Node.js](https://nodejs.org) 22 or later, and git.
 
-On macOS or Linux:
+On macOS, Linux or PowerShell:
 
 ```
 git clone https://github.com/Panza-Labs/floorboss.git
 cd floorboss
-mkdir -p ~/.floorboss/work
-codex --add-dir ~/.floorboss --search
-```
-
-In PowerShell, `~` isn't your home folder for every program, so write `$HOME\.floorboss`. Create the `work` folder
-first (it makes `.floorboss` too):
-
-```
-git clone https://github.com/Panza-Labs/floorboss.git
-cd floorboss
-New-Item -ItemType Directory -Force "$HOME\.floorboss\work"
-codex --add-dir "$HOME\.floorboss" --search
+codex --search
 ```
 
 - Start Codex **in the floorboss folder**. Codex then reads floorboss's `AGENTS.md` and its skill in
   `.agents/skills/floorboss/`.
-- `--add-dir` lets floorboss's scripts write their data folder, which is outside the floorboss folder; Codex's
-  default sandbox lets commands write only the folder you started it in. To make it permanent, add the folder to
-  `sandbox_workspace_write.writable_roots` in `~/.codex/config.toml`.
+- **Where your data goes.** In Codex, floorboss keeps everything in a `floorboss` folder inside the folder you start
+  Codex in (here `floorboss/floorboss/`), made on the first run. Codex's default sandbox lets commands write only
+  inside that folder, so nothing else needs setting up. The folder holds a `.gitignore` that keeps all of it out of
+  that project's git. If you start Codex in your home folder itself, or in a system folder, floorboss uses
+  `~/.floorboss` instead, which the sandbox won't let it write; start Codex in a project folder. To keep the data
+  somewhere else, set `FLOORBOSS_HOME` to that folder and start Codex with `--add-dir` and the same folder.
 - `--search` turns on Codex's web search, which floorboss's research uses. Without it, say "skip" when floorboss asks
   about research.
 - **Windows:** the Codex CLI's install page lists Windows 11 through WSL2; Codex's Windows sandbox page describes the
-  Codex app running natively in PowerShell. floorboss hasn't been tried either way. In WSL2, your data folder is in the Linux home, so
-  open the outbox page from Windows with `explorer.exe .` in the event's folder.
+  Codex app running natively in PowerShell. floorboss hasn't been tried either way. In WSL2, open the outbox page
+  from Windows with `explorer.exe .` in the event's folder.
 
 Codex can also install floorboss as a plugin (`codex plugin marketplace add Panza-Labs/floorboss`, then
-`codex plugin add floorboss@floorboss`): its manifest is `.codex-plugin/plugin.json`. This way is untested too.
+`codex plugin add floorboss@floorboss`): its manifest is `.codex-plugin/plugin.json`. Start Codex in your own
+project folder then; the data goes in its `floorboss` folder the same way. This way is untested too.
 
 **Lists.** floorboss reads an attendee list, a CRM export or a contacts file only from its data folder, the temp
-folder or the folder you started Codex in. Copy the file from Downloads into `~/.floorboss/work/` first (in
-PowerShell, `$HOME\.floorboss\work`, made in Install above), or let floorboss ask to copy it there.
+folder or the folder you started Codex in. Copy the file from Downloads into that folder, or into its
+`floorboss/work/` folder, first, or let floorboss ask to copy it there.
 
 ### First run
 
@@ -120,7 +113,7 @@ follow-ups.
 ### How sending works
 
 When you've approved the messages, floorboss opens the outbox page in your browser (`outbox.html`, in the event's
-folder under `~/.floorboss/events/`). Each email that may go today has two buttons:
+folder under `floorboss/events/` in the folder you started Codex in). Each email that may go today has two buttons:
 
 - **Open in your mail app** opens a new email in Outlook (or whatever your computer uses for email links) with the
   address, subject and message filled in, exactly as you approved them, opt-out line included. Read it, then press
@@ -845,7 +838,8 @@ instead; if that happens with yours, please open an issue.
 ## Where your data lives
 
 Everything floorboss stores is in `~/.floorboss/` (or wherever `FLOORBOSS_HOME` points), outside your
-projects, with files readable only by you.
+projects, with files readable only by you. In Codex it is the `floorboss` folder inside the folder you start Codex
+in, kept out of that project's git by its own `.gitignore` ([Run it in Codex](#run-it-in-codex)).
 
 At the top of that folder is your setup, shared by every event: `config.json` (your settings and the
 connections that passed their test), `onboarding.json` (your answers), `inventory.json` (what the scan found
