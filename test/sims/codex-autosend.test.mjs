@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { drive, simplePersona, ROOT } from './lib/driver.mjs';
 import { remoteFor, cloneOf, commitsOf, remoteFile, git } from '../fixtures/autosend-world.mjs';
-import { email, searchResult, sendResult } from '../fixtures/gmail-real.mjs';
+import { email, searchResult, sendResult, profileResult, threadResult } from '../fixtures/gmail-real.mjs';
 
 const SLUG = 'mock-harbour-haul';
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
@@ -108,7 +108,10 @@ class FakeGmail {
     this.inbox = [];
     this.sentMail = [];
     this.searches = 0;
-    this.mode = { search: 'ok', send: 'ok' };
+    this.mode = { search: 'ok', send: 'ok', profile: 'ok' };
+    this.account = OWN;
+    this.profiles = 0;
+    this.threads = 0;
     this.n = 0;
   }
   deliver(m) {
@@ -122,11 +125,30 @@ class FakeGmail {
     if (this.mode.search === 'error') return { content: [{ type: 'text', text: 'Rate limit exceeded' }], isError: true };
     const after = Number(/after:(\d+)/.exec(args.query)[1]) * 1000;
     const froms = [...args.query.matchAll(/from:([^\s()]+)/g)].map((m) => m[1].toLowerCase()).filter((f) => !['mailer-daemon', 'postmaster'].includes(f));
-    const quoted = /"([^"]+)"/.exec(args.query)?.[1]?.toLowerCase();
+    // The quoted address (the bounce part also quotes the notice subjects, which aren't addresses).
+    const quoted = [...args.query.matchAll(/"([^"]+)"/g)].map((m) => m[1].toLowerCase()).find((q) => q.includes('@'));
+    assert.match(args.query, /subject:\("Delivery Status Notification" OR "Undeliverable" OR "Mail delivery failed" OR "Returned mail"\)/);
     const addr = (f) => (/<([^>]+)>/.exec(f)?.[1] || f).toLowerCase();
-    const hits = this.inbox.filter((m) => Date.parse(m.date) > after && (froms.includes(addr(m.from)) || (/^(mailer-daemon|postmaster)@/.test(addr(m.from)) && quoted && String(m.body).toLowerCase().includes(quoted))));
+    const notice = (m) => /^(mailer-daemon|postmaster)@/.test(addr(m.from)) || /^(Delivery Status Notification|Undeliverable|Mail delivery failed|Returned mail)/i.test(String(m.subject || ''));
+    const hits = this.inbox.filter((m) => Date.parse(m.date) > after && (froms.includes(addr(m.from)) || (notice(m) && quoted && String(m.body).toLowerCase().includes(quoted))));
     const emails = hits.slice(0, args.max_results).map((m) => email({ id: m.id, thread_id: m.threadId, from_: m.from, subject: m.subject, snippet: String(m.body || '').slice(0, 80), labels: m.labels, email_ts: m.date }));
     return searchResult(emails, { next_page_token: this.mode.search === 'incomplete' ? 'page-2' : null });
+  }
+  // gmail_get_profile({}): the connected account, in the real shape.
+  profile(args) {
+    this.profiles++;
+    assert.deepEqual(args, {});
+    if (this.mode.profile === 'throws') throw new Error('the Gmail tool is not available');
+    return profileResult({ email: this.account });
+  }
+  // gmail_read_email_thread({ thread_id, max_messages }): every message in that thread, sent and received, in the
+  // search's item shape (the result's shape wasn't captured: assumed, as floorboss assumes it).
+  thread(args) {
+    this.threads++;
+    assert.deepEqual(Object.keys(args).sort(), ['max_messages', 'thread_id']);
+    const mine = this.sentMail.filter((m) => m.threadId === args.thread_id).map((m) => email({ id: m.id, thread_id: m.threadId, from_: `Sam Lane <${this.account}>`, to: m.to, subject: m.subject, labels: ['SENT'], email_ts: m.date }));
+    const theirs = this.inbox.filter((m) => m.threadId === args.thread_id).map((m) => email({ id: m.id, thread_id: m.threadId, from_: m.from, subject: m.subject, labels: m.labels, email_ts: m.date }));
+    return threadResult([...mine, ...theirs].slice(0, args.max_messages));
   }
   send(args) {
     const keys = ['payload', 'response_fields', 'subject', 'to'];
@@ -139,7 +161,7 @@ class FakeGmail {
     const replied = 'reply_message_id' in args ? this.sentMail.find((x) => x.id === args.reply_message_id) : null;
     if ('reply_message_id' in args) assert.ok(replied, `reply_message_id ${args.reply_message_id} is a message this mailbox sent`);
     const id = `out${++this.n}`;
-    const m = { id, threadId: replied ? replied.threadId : `ot${this.n}`, to: [args.to], subject: args.subject, body: args.payload.body.content, reply_message_id: args.reply_message_id ?? null };
+    const m = { id, threadId: replied ? replied.threadId : `ot${this.n}`, to: [args.to], subject: args.subject, body: args.payload.body.content, reply_message_id: args.reply_message_id ?? null, date: new Date().toISOString() };
     this.sentMail.push(m);
     if (this.mode.send === 'noids') return sendResult({});
     return sendResult({ id: m.id, thread_id: m.threadId });
@@ -159,7 +181,16 @@ function cloudRun(bare, at, gmail, { onStep = null, extraEnv = {} } = {}) {
     if (s.run) id = s.run;
     if (onStep && onStep(s, { dir, env, id }) === 'halt') return { last: s, steps, id, dir, env };
     if (s.step === 'stop' || s.step === 'done') return { last: s, steps, id, dir, env };
-    if (s.step === 'search') {
+    if (s.step === 'profile' || s.step === 'thread') {
+      assert.equal(s.tool, s.step === 'profile' ? 'mcp__codex_apps__gmail_get_profile' : 'mcp__codex_apps__gmail_read_email_thread');
+      let ans;
+      try {
+        ans = s.step === 'profile' ? gmail.profile(s.args) : gmail.thread(s.args);
+      } catch (e) {
+        ans = `Error: ${e.message}`;
+      }
+      writeFileSync(s.write, typeof ans === 'string' ? ans : JSON.stringify(ans));
+    } else if (s.step === 'search') {
       assert.equal(s.tool, 'mcp__codex_apps__gmail_search_emails');
       let ans;
       try {
@@ -232,6 +263,12 @@ test('cases 1, 2, 4, 11: a whole sequence across cloud runs and the laptop: firs
   gmail.deliver({ from: `Someone <${a.to}>`, subject: `Re: ${a.subject}`, date: '2026-10-14T10:00:00Z', body: 'Tuesday works' });
   gmail.deliver({ from: 'Mail Delivery Subsystem <mailer-daemon@mail.example>', subject: 'Delivery Status Notification (Failure)', date: '2026-10-12T09:05:00Z', body: `Your message to ${b.to} couldn't be delivered.` });
   gmail.deliver({ from: c.to, subject: 'Automatic reply: away this week', date: '2026-10-13T08:00:00Z', body: 'I am away' });
+  // A colleague answers in the first message's thread (from another address: the address search never finds it), and
+  // another server bounces by its notice subject from an address that isn't mailer-daemon.
+  const [f, g] = first.slice(4);
+  const fMail = sentTo(gmail, f.to)[0];
+  gmail.deliver({ from: 'Bo Chen <bo@colleague.example>', subject: `Re: ${f.subject}`, date: '2026-10-14T11:00:00Z', body: 'I look after this now', threadId: fMail.threadId });
+  gmail.deliver({ from: 'Microsoft Outlook <MicrosoftExchange329e@gateway.example>', subject: `Undeliverable: ${g.subject}`, date: '2026-10-12T09:10:00Z', body: `Delivery has failed to these recipients: ${g.to}` });
 
   // The laptop, a later day: it pulls the cloud's sends, takes the lock and records a stop the user tells it about.
   const day7 = T('2026-10-19T08:30:00Z');
@@ -259,7 +296,7 @@ test('cases 1, 2, 4, 11: a whole sequence across cloud runs and the laptop: firs
   const second = items.filter((x) => x.touch === 2);
   for (const x of second) {
     const got = sentTo(gmail, x.to).filter((m) => m.subject === x.subject && m.body === x.body);
-    const quiet = ![a.id, b.id, c.id, d.id].includes(x.id);
+    const quiet = ![a.id, b.id, c.id, d.id, f.id, g.id].includes(x.id);
     assert.equal(got.length, quiet ? 1 : 0, `${x.id} follow-up`);
     // The follow-up replies to their first message, so it goes in that thread.
     if (quiet) {
@@ -269,16 +306,29 @@ test('cases 1, 2, 4, 11: a whole sequence across cloud runs and the laptop: firs
       assert.equal(firstMail.reply_message_id, null, 'a first message is a new email');
     }
   }
-  assert.equal(gmail.sentMail.length, people + second.length - 4);
+  assert.equal(gmail.sentMail.length, people + second.length - 6);
   led = remoteLedger(bare);
+  assert.ok(led.some((e2) => e2.type === 'replied' && e2.id === f.id && /bo@colleague\.example/.test(e2.text)), 'the colleague in the thread stops them');
+  assert.ok(led.some((e2) => e2.type === 'bounced' && e2.id === g.id), 'a bounce by its subject');
+  // Every run checked the account first, and every follow-up read its thread.
+  assert.ok(gmail.profiles >= 4, `profiles: ${gmail.profiles}`);
+  assert.ok(gmail.threads >= second.length - 4, `threads: ${gmail.threads}`);
   assert.ok(led.some((e2) => e2.type === 'replied' && e2.id === a.id && e2.outcome === 'replied'));
   assert.ok(led.some((e2) => e2.type === 'bounced' && e2.id === b.id));
   assert.ok(led.some((e2) => e2.type === 'replied' && e2.id === c.id && e2.outcome === 'auto_reply'));
-  assert.deepEqual(r4.last.summary.stopped_people.map((x) => x.split(' ')[1].replace(':', '')).sort(), [a.id, b.id, c.id].sort());
+  assert.deepEqual(r4.last.summary.stopped_people.map((x) => x.split(' ')[1].replace(':', '')).sort(), [a.id, b.id, c.id, f.id, g.id].sort());
   // Never due again.
   const r5 = cloudRun(bare, T('2026-10-20T10:00:00Z'), gmail);
   assert.equal(r5.last.step, 'done');
-  assert.equal(gmail.sentMail.length, people + second.length - 4);
+  assert.equal(gmail.sentMail.length, people + second.length - 6);
+  // Another Gmail account connected: the run stops at its first step, before any search or send.
+  const searches = gmail.searches;
+  gmail.account = 'someone@else.example';
+  const r6 = cloudRun(bare, T('2026-10-20T11:00:00Z'), gmail);
+  assert.equal(r6.last.step, 'stop');
+  assert.match(r6.last.why, /connected Gmail account is someone@else\.example/);
+  assert.equal(gmail.searches, searches);
+  gmail.account = OWN;
 
   // The laptop's next session pulls it all: nothing to settle.
   assert.equal(laptop(HOME, T('2026-10-21T08:00:00Z'), ['sync', 'start', '--who', 'laptop', '--run', 'laptop-2']).started, true);

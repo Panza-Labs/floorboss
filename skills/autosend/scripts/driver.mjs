@@ -11,16 +11,16 @@
 // search being given, in the event's hours, with Claude Code's email sending off; else the release is withdrawn.
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { existsSync, readFileSync, mkdirSync, lstatSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, lstatSync, openSync, closeSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { writeJson, appendLine } from '../../../lib/jsonio.mjs';
 import { append } from '../../../lib/ledger.mjs';
 import { dueNow } from '../../../lib/autosend/plan.mjs';
-import { query, decide, apply, MAX_RESULTS } from '../../../lib/autosend/replycheck.mjs';
+import { query, decide, decideThread, threadArgs, profileEmail, sameAccount, apply, MAX_RESULTS } from '../../../lib/autosend/replycheck.mjs';
 import { release, sendArgs, record } from '../../../lib/autosend/sendrecord.mjs';
 import { start, checkpoint, end, discardUnpushed, pushedAll } from '../../../lib/autosend/sync.mjs';
-import { eventDirOf, eventJson, ledgerOf, readEvent, stepMark, claudeSendsEmail, FRESH_MS } from '../../../lib/autosend/common.mjs';
+import { eventDirOf, eventJson, ledgerOf, readEvent, stepMark, claudeSendsEmail, autosendEvents, FRESH_MS } from '../../../lib/autosend/common.mjs';
 import { hoursWhy } from '../../../lib/unattended-drafts.mjs';
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
@@ -29,6 +29,8 @@ const CLI = join(dirname(fileURLToPath(import.meta.url)), 'cli.mjs');
 // Gmail tool is named.
 export const SEARCH_TOOLS = Object.freeze(['mcp__codex_apps__gmail_search_emails', 'gmail_search_emails']);
 export const SEND_TOOLS = Object.freeze(['mcp__codex_apps__gmail_send_email', 'gmail_send_email']);
+export const PROFILE_TOOLS = Object.freeze(['mcp__codex_apps__gmail_get_profile', 'gmail_get_profile']);
+export const THREAD_TOOLS = Object.freeze(['mcp__codex_apps__gmail_read_email_thread', 'gmail_read_email_thread']);
 const MAX_ANSWER = 1024 * 1024;
 
 const runsDir = (home) => join(home, 'autosend', 'runs');
@@ -80,6 +82,19 @@ function markShown(home, r) {
   if (!m) throw new Refused(FOREIGN(r.run));
   writeJson(ownFile(home, r.run), { ...m, shown: [...new Set([...m.shown, stepKey(r)])] });
 }
+// The send step, claimed once with an exclusive create in this checkout's mark folder before it is given: of two
+// next calls at once, only the one that made the file gets the send; the other stops and changes nothing.
+const claimFile = (home, r) => join(ownDir(home), `${r.run}-${stepKey(r)}.send`);
+function claimSend(home, r) {
+  try {
+    closeSync(openSync(claimFile(home, r), 'wx', 0o600));
+    return true;
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    throw e;
+  }
+}
+const claimed = (home, r) => existsSync(claimFile(home, r));
 const shownHere = (home, r) => {
   const m = ownMark(home, r);
   return !m || m.shown.includes(stepKey(r));
@@ -127,6 +142,31 @@ function stopRun(home, r, nowMs, why, { lock = 'drop' } = {}) {
   return { step: 'stop', why, lock: e.ok ? 'released' : 'kept', ...(e.stop ? { push: e.stop } : {}) };
 }
 
+const WRITE_ALL = "Write the tool's whole result object as JSON (JSON.stringify of the full result, structuredContent included, an error too) to the write file, then run then.";
+function profileStep(home, r) {
+  return {
+    step: 'profile',
+    run: r.run,
+    tool: PROFILE_TOOLS[0],
+    tool_names: PROFILE_TOOLS,
+    args: {},
+    write: r.current.file,
+    then: then(home, 'checked', r.run, r.current.file),
+    say: `Call the Gmail profile tool ${PROFILE_TOOLS[0]} (or the one whose name ends in gmail_get_profile) with no args ({}). ${WRITE_ALL}`
+  };
+}
+function threadStep(home, r, it) {
+  return {
+    step: 'thread',
+    run: r.run,
+    tool: THREAD_TOOLS[0],
+    tool_names: THREAD_TOOLS,
+    args: threadArgs(it),
+    write: r.current.file,
+    then: then(home, 'checked', r.run, r.current.file),
+    say: `Call the Gmail thread tool ${THREAD_TOOLS[0]} (or the one whose name ends in gmail_read_email_thread) with exactly these args. ${WRITE_ALL}`
+  };
+}
 function searchStep(home, r, it) {
   return {
     step: 'search',
@@ -146,9 +186,10 @@ function sendStep(home, r, it) {
     tool: SEND_TOOLS[0],
     tool_names: SEND_TOOLS,
     args: sendArgs(it),
+    expires_at: iso(r.current.expires_at),
     write: r.current.file,
     then: then(home, 'sent', r.run, r.current.file),
-    say: `Call the Gmail send tool ${SEND_TOOLS[0]} (or the one whose name ends in gmail_send_email) once, with exactly these args: no other recipient, no cc or bcc, no change to the subject, the body or any other arg. Write the tool's whole result object as JSON (JSON.stringify of the full result, structuredContent included, an error too) to the write file, then run then. Never call it again for this step.`
+    say: `Check the time first: if expires_at (${iso(r.current.expires_at)}) has passed, don't call the send tool; run next again. Otherwise call the Gmail send tool ${SEND_TOOLS[0]} (or the one whose name ends in gmail_send_email) once, with exactly these args: no other recipient, no cc or bcc, no change to the subject, the body or any other arg. ${WRITE_ALL} Never call it again for this step.`
   };
 }
 
@@ -198,13 +239,25 @@ function nextStep(home, { run, nowMs }, holder = {}) {
     // From here a failure part-way ends this run cleanly (guarded): it knows the run.
     holder.run = id;
     log(home, r, nowMs, 'started');
+    // The first step of every run: which Gmail account is connected, checked against the address the sends were
+    // approved from, before any search or send.
+    const dir = answerDir(r.run);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    r.current = { step: 'profile', file: join(dir, '0-profile.json'), issued_at: nowMs };
+    saveRun(home, r);
+    return profileStep(home, r);
   } else r = loadRun(home, run);
   if (r.state === 'stopped') return { step: 'stop', why: r.why, lock: r.lock || null };
   if (r.state === 'done') return { step: 'done', summary: r.summary };
+  if (r.current?.step === 'profile') return profileStep(home, r);
+  if (r.current?.step === 'thread') return threadStep(home, r, r.current.item);
   if (r.current?.step === 'search') return searchStep(home, r, r.current.item);
   if (r.current?.step === 'send') {
+    // Claimed by another next call that hasn't shown it yet (or died part-way): this one stops and changes nothing.
+    if (!r.current.shown && claimed(home, r)) return { step: 'stop', why: `another next call already has the send step for ${r.current.item.id}: nothing was changed. Run only one next at a time`, lock: null };
     if (!r.current.shown && !shownHere(home, r)) {
       const it = r.current.item;
+      if (!claimSend(home, r)) return { step: 'stop', why: `another next call already has the send step for ${it.id}: nothing was changed. Run only one next at a time`, lock: null };
       // The release mark must be in the remote before the send is shown: a checked step killed mid-push may have left
       // it here only. Not confirmed: it is thrown away, nothing was shown, and the step stays due.
       if (r.current.pushed !== true) {
@@ -217,11 +270,14 @@ function nextStep(home, { run, nowMs }, holder = {}) {
       if (late) return withdraw(home, r, it, nowMs, late);
       markShown(home, r);
       r.current.shown = true;
+      // The send step's expiry: FRESH_MS from when the reply check was given, never later.
+      r.current.expires_at = r.current.issued_at + FRESH_MS;
       saveRun(home, r);
       return sendStep(home, r, it);
     }
     return unclearStop(home, r, r.current.item, nowMs, 'the next step was asked for before the send answer was recorded');
   }
+  if (typeof r.account !== 'string') return stopRun(home, r, nowMs, "the connected Gmail account wasn't checked in this run: nothing was searched or sent");
   const plan = dueNow(home, nowMs);
   if (plan.blocked) return stopRun(home, r, nowMs, `nothing may go: ${plan.blocked}`);
   const it = plan.due.find((x) => !r.seen.includes(`${x.slug}:${x.id}`));
@@ -238,9 +294,64 @@ function nextStep(home, { run, nowMs }, holder = {}) {
   const dir = answerDir(r.run);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   // issued_at: when the search was given to the model, what the reply check is as fresh as.
+  if (!sameAccount(it.from, r.account)) return stopRun(home, r, nowMs, `${it.id}: the connected Gmail account (${r.account}) isn't the address its sends were approved from (${it.from}): nothing more was searched or sent`);
+  // A follow-up reads its thread first (a reply there from anyone but you stops them), then the address search.
+  if (it.followup) {
+    r.current = { step: 'thread', item: it, file: join(dir, `${r.n}-thread.json`), issued_at: nowMs };
+    saveRun(home, r);
+    return threadStep(home, r, it);
+  }
   r.current = { step: 'search', item: it, file: join(dir, `${r.n}-search.json`), issued_at: nowMs };
   saveRun(home, r);
   return searchStep(home, r, it);
+}
+
+// Every sending address auto-send was told to use (each auto-send event's own) and every due step's approved one.
+function approvedSenders(home, nowMs) {
+  const out = new Set();
+  for (const e of autosendEvents(home)) out.add(String(eventJson(e.dir)?.autosend_own || '').trim().toLowerCase() || '(none)');
+  const plan = dueNow(home, nowMs);
+  for (const x of plan.due) out.add(String(x.from || '').toLowerCase() || '(none)');
+  return [...out];
+}
+
+// The profile answer: the connected account must be the approved sender, or the run stops before anything.
+function profiled(home, r, a, nowMs) {
+  const p = profileEmail(a.text ?? 'no answer (the file was not written)');
+  if (p.error) return { checked: 'error', ...stopRun(home, r, nowMs, `the connected Gmail account can't be checked (${p.error}): nothing was searched or sent`) };
+  const senders = approvedSenders(home, nowMs);
+  const other = senders.find((x) => !sameAccount(x, p.email));
+  if (other) return { checked: 'error', ...stopRun(home, r, nowMs, `the connected Gmail account is ${p.email}, not the address auto-send was approved to send from (${other}): nothing was searched or sent. Connect that account in ChatGPT, or approve again on the laptop`) };
+  r.account = p.email;
+  r.current = null;
+  log(home, r, nowMs, `the connected Gmail account is ${p.email}`);
+  saveRun(home, r);
+  return { checked: 'profile', account: p.email, then: 'run next' };
+}
+
+// The thread answer: an inbound message stops them (recorded as the search's would be); else the address search.
+function threadChecked(home, r, a, nowMs) {
+  const it = r.current.item;
+  const evDir = eventDirOf(home, it.slug);
+  const d = decideThread(it, a.text ?? 'no answer (the file was not written)', { own: it.from });
+  if (d.error) return { checked: 'error', ...stopRun(home, r, nowMs, `${it.id}: ${d.error}`) };
+  if (d.stop) return stopPerson(home, r, it, evDir, d, nowMs, 'in their thread');
+  r.current = { step: 'search', item: it, file: join(answerDir(r.run), `${r.n}-search.json`), issued_at: nowMs };
+  saveRun(home, r);
+  return { checked: 'go', then: 'run next' };
+}
+
+// A reply, a bounce or an auto-reply: that person stops, and the run goes on.
+function stopPerson(home, r, it, evDir, d, nowMs, where = '') {
+  apply(evDir, it, d, nowMs);
+  r.seen.push(`${it.slug}:${it.id}`);
+  r.stopped_people.push(`${it.slug} ${it.id}: ${d.stop}`);
+  r.current = null;
+  log(home, r, nowMs, `${it.slug} ${it.id} (${it.to}) not sent: ${d.stop === 'reply' ? 'a reply' : d.stop === 'bounce' ? 'a bounce' : 'an auto-reply'}${where ? ` ${where}` : ''} (${d.evidence})`);
+  saveRun(home, r);
+  const c = checkpoint({ home, message: `checked ${it.slug} ${it.id}: ${d.stop}` });
+  if (c.stop) return { checked: d.stop, ...stopRun(home, r, nowMs, c.stop) };
+  return { checked: d.stop, then: 'run next' };
 }
 
 // The answer file a step named, as the model wrote it: its text, or null when it wasn't written.
@@ -255,25 +366,18 @@ function answerText(r, file) {
 // checked --run <id> --file <f>: the search answer.
 function checkedStep(home, { run, file, nowMs }) {
   const r = loadRun(home, run);
-  if (r.state !== 'open' || r.current?.step !== 'search') throw new Refused('no search step is open in this run: run next');
+  if (r.state !== 'open' || !['profile', 'thread', 'search'].includes(r.current?.step)) throw new Refused('no profile, thread or search step is open in this run: run next');
   const a = answerText(r, file);
   if (a.refused) throw new Refused(a.refused);
+  if (r.current.step === 'profile') return profiled(home, r, a, nowMs);
+  if (r.current.step === 'thread') return threadChecked(home, r, a, nowMs);
   const it = r.current.item;
   const evDir = eventDirOf(home, it.slug);
   const ev = eventJson(evDir) || {};
-  const d = decide(it, a.text ?? 'no answer (the file was not written)', { own: ev.autosend_own || null });
+  const d = decide(it, a.text ?? 'no answer (the file was not written)', { own: it.from });
   if (d.error) return { checked: 'error', ...stopRun(home, r, nowMs, `${it.id}: ${d.error}`) };
+  if (d.stop) return stopPerson(home, r, it, evDir, d, nowMs);
   apply(evDir, it, d, nowMs);
-  if (d.stop) {
-    r.seen.push(`${it.slug}:${it.id}`);
-    r.stopped_people.push(`${it.slug} ${it.id}: ${d.stop}`);
-    r.current = null;
-    log(home, r, nowMs, `${it.slug} ${it.id} (${it.to}) not sent: ${d.stop === 'reply' ? 'they replied' : d.stop === 'bounce' ? 'a bounce' : 'an auto-reply'} (${d.evidence})`);
-    saveRun(home, r);
-    const c = checkpoint({ home, message: `checked ${it.slug} ${it.id}: ${d.stop}` });
-    if (c.stop) return { checked: d.stop, ...stopRun(home, r, nowMs, c.stop) };
-    return { checked: d.stop, then: 'run next' };
-  }
   const issued = r.current.issued_at;
   const cc = claudeSendsEmail(home, ev);
   if (cc) return { checked: 'go', ...stopRun(home, r, nowMs, `${it.id}: ${cc}`) };
@@ -301,12 +405,20 @@ function sentStep(home, { run, file, nowMs }) {
   if (a.refused) throw new Refused(a.refused);
   const it = r.current.item;
   const evDir = eventDirOf(home, it.slug);
-  const out = record(evDir, it, a.text, r.run, nowMs);
+  // Written after the send step's expiry (or with no expiry recorded): the send may have gone late, so it is never
+  // recorded as a clean send: unclear, and the user settles it.
+  const exp = r.current.expires_at;
+  let late = null;
+  if (!Number.isFinite(exp)) late = 'the send step had no expiry recorded';
+  // The file's time, on floorboss's clock (the same clock outside tests, where FLOORBOSS_NOW moves it).
+  else if (a.text != null && lstatSync(file).mtimeMs - (Date.now() - nowMs) > exp) late = `the send answer was written after the step expired (${iso(exp)})`;
+  const out = record(evDir, it, a.text, r.run, nowMs, { late });
   r.current = null;
   r.seen.push(`${it.slug}:${it.id}`);
   if (out.sent) {
     r.sent.push(`${it.slug} ${it.id} message ${it.touch}`);
     log(home, r, nowMs, `sent ${it.slug} ${it.id} message ${it.touch} to ${it.to} ("${it.subject}")`);
+    if (out.thread_problem) log(home, r, nowMs, `threading problem: ${it.slug} ${it.id} message ${it.touch} ${out.thread_problem}. It was sent and is never sent again; look at it in Gmail`);
     saveRun(home, r);
     const c = checkpoint({ home, message: `sent ${it.slug} ${it.id} ${it.touch}` });
     // Sent, and not pushed: the lock stays in the remote, so no run goes on until the user looks.

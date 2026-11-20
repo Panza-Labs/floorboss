@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, chmodSync, renameSync } from 'node:fs';
 import { world, ledgerLines, remoteFor, cloneOf, remoteFile, autosend, said, PEOPLE, NOW, ROOT, SLUG, EVENT } from './fixtures/autosend-world.mjs';
+import { pastProfile } from './fixtures/autosend-world.mjs';
 import { readback, approve } from '../lib/autosend/approval.mjs';
 
 const at = (iso) => Date.parse(iso);
@@ -85,7 +86,8 @@ test('finding 2: a checkout whose .git is not a plain folder: the run stops befo
   assert.equal(s.lock, 'not taken');
   assert.equal(remoteFile(w.bare, 'autosend/lock.json'), null, 'no lock in the remote');
   // A later run, in a plain checkout, goes on.
-  assert.equal(cloud(cloneOf(w.bare, 'y'), '2026-10-12T09:00:00Z', ['next', '--run', 'new']).step, 'search');
+  const Y = cloneOf(w.bare, 'y');
+  assert.equal(pastProfile(cloud(Y, '2026-10-12T09:00:00Z', ['next', '--run', 'new']), (a) => cloud(Y, '2026-10-12T09:00:00Z', a)).step, 'search');
 });
 
 test("finding 3: sync start on the laptop takes over the laptop's own earlier lock, and flow next agrees", () => {

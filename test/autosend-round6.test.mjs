@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, rmSync, existsSync } from 'node:fs';
 import { world, addLines, ledgerLines, remoteFor, cloneOf, remoteFile, autosend, said, PEOPLE, NOW, ROOT, SLUG, EVENT, approvedLines } from './fixtures/autosend-world.mjs';
+import { pastProfile } from './fixtures/autosend-world.mjs';
 import { readback, approve } from '../lib/autosend/approval.mjs';
 import { dueNow } from '../lib/autosend/plan.mjs';
 import { query } from '../lib/autosend/replycheck.mjs';
@@ -42,7 +43,7 @@ function pushed({ touches = 1, people = [PEOPLE[0]] } = {}) {
 // Run X: search, release, the send shown; the model sends, then the run dies before `sent`.
 function deadRun(bare, now = '2026-10-12T08:00:00Z') {
   const X = cloneOf(bare, 'x');
-  let s = cloud(X, now, ['next', '--run', 'new']);
+  let s = pastProfile(cloud(X, now, ['next', '--run', 'new']), (a) => cloud(X, now, a));
   assert.equal(s.step, 'search', JSON.stringify(s));
   writeFileSync(s.write, '[]');
   assert.equal(thenOf(s, now).checked, 'go');
@@ -121,7 +122,7 @@ test('finding 2: after a hand send recorded days later, the reply check searches
   process.env.FLOORBOSS_HOME = w.HOME;
   // Message 1 sent by hand on Monday 12 October, recorded on Thursday 15.
   const THU = '2026-10-15T09:00:00Z';
-  addLines(w.evDir, [{ at: THU, type: 'sent', who: 'user', id: 'c001', touch: 1, via: 'email.send', channel: 'email', date: '2026-10-12', source: 'user', said: 'I sent it Monday' }]);
+  addLines(w.evDir, [{ at: THU, type: 'sent', who: 'user', id: 'c001', touch: 1, via: 'email.send', channel: 'email', date: '2026-10-12', source: 'user', said: 'I sent it Monday', message_id: 'h1', thread_id: 'ht1' }]);
   const rb = readback(w.evDir, at(THU));
   approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(THU));
   const due = ledgerLines(w.evDir).find((e) => e.type === 'autosend_approved' && e.touch === 2).planned_due;

@@ -17,6 +17,8 @@ import { dueNow } from '../lib/autosend/plan.mjs';
 import { decide } from '../lib/autosend/replycheck.mjs';
 import { start, end } from '../lib/autosend/sync.mjs';
 import { next, checked } from '../skills/autosend/scripts/driver.mjs';
+import { nextNewWith, pastProfile } from './fixtures/autosend-world.mjs';
+const nextNew = nextNewWith({ next, checked });
 
 const at = (iso) => Date.parse(iso);
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
@@ -60,7 +62,7 @@ const remoteLedger = (bare, slug = 'harbor-expo') => (remoteFile(bare, `events/$
 function cloudUntilSend(bare, nowIso) {
   const dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
-  let s = next(dir, { run: 'new', nowMs: at(nowIso) });
+  let s = nextNew(dir, { nowMs: at(nowIso) });
   const run = s.run;
   for (let i = 0; i < 20 && s.step === 'search'; i++) {
     writeFileSync(s.write, JSON.stringify({ messages: [] }));
@@ -84,7 +86,7 @@ test('finding 1: the checked step killed mid-push of its release: the next step 
   chmodSync(join(bin, 'git'), 0o755);
   const when = '2026-10-12T09:00:00Z';
   const env = cloudEnv(dir, when, { PATH: `${bin}:${process.env.PATH}` });
-  const s = cli(['next', '--run', 'new'], env).out;
+  const s = pastProfile(cli(['next', '--run', 'new'], env).out, (a) => cli(a, env).out);
   assert.equal(s.step, 'search');
   writeFileSync(s.write, JSON.stringify({ messages: [] }));
   writeFileSync(marker, '');
@@ -127,7 +129,7 @@ test('finding 2 and 5: Claude Code email turned on between the release and the s
   const dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
   const now = at('2026-10-12T09:00:00Z');
-  const s = next(dir, { run: 'new', nowMs: now });
+  const s = nextNew(dir, { nowMs: now });
   writeFileSync(s.write, JSON.stringify({ messages: [] }));
   assert.equal(checked(dir, { run: s.run, file: s.write, nowMs: now + 5000 }).checked, 'go');
   const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
@@ -156,7 +158,7 @@ test('finding 5: a search answered more than a few minutes after it was given is
   let dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
   let t0 = at('2026-10-12T09:00:00Z');
-  let s = next(dir, { run: 'new', nowMs: t0 });
+  let s = nextNew(dir, { nowMs: t0 });
   writeFileSync(s.write, JSON.stringify({ messages: [] }));
   let c = checked(dir, { run: s.run, file: s.write, nowMs: t0 + 10 * 60000 });
   assert.equal(c.step, 'stop', JSON.stringify(c).slice(0, 300));
@@ -166,7 +168,7 @@ test('finding 5: a search answered more than a few minutes after it was given is
   dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
   t0 = at('2026-10-12T15:59:00Z');
-  s = next(dir, { run: 'new', nowMs: t0 });
+  s = nextNew(dir, { nowMs: t0 });
   writeFileSync(s.write, JSON.stringify({ messages: [] }));
   assert.equal(checked(dir, { run: s.run, file: s.write, nowMs: t0 + 30000 }).checked, 'go');
   let n = next(dir, { run: s.run, nowMs: at('2026-10-12T16:00:10Z') });
@@ -177,7 +179,7 @@ test('finding 5: a search answered more than a few minutes after it was given is
   dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
   t0 = at('2026-10-13T09:00:00Z');
-  s = next(dir, { run: 'new', nowMs: t0 });
+  s = nextNew(dir, { nowMs: t0 });
   writeFileSync(s.write, JSON.stringify({ messages: [] }));
   assert.equal(checked(dir, { run: s.run, file: s.write, nowMs: t0 + 20000 }).checked, 'go');
   n = next(dir, { run: s.run, nowMs: t0 + 6 * 60000 });

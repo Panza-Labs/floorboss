@@ -15,7 +15,9 @@ import { dueNow } from '../lib/autosend/plan.mjs';
 import { readEvent } from '../lib/autosend/common.mjs';
 import { legacyState } from '../lib/ledger.mjs';
 import { todayKeyIn } from '../lib/tz.mjs';
-import { next } from '../skills/autosend/scripts/driver.mjs';
+import { next, checked } from '../skills/autosend/scripts/driver.mjs';
+import { nextNewWith } from './fixtures/autosend-world.mjs';
+const nextNew = nextNewWith({ next, checked });
 import { autosendCard } from '../skills/event-outreach/scripts/commands/cards.mjs';
 import { followupDayOf } from '../skills/event-outreach/scripts/commands/saved-drafts.mjs';
 import { offersCopy, mailOf } from '../skills/event-outreach/scripts/outbox.mjs';
@@ -83,7 +85,7 @@ test('finding 3: checked is SIGKILLed between writing the release and committing
   const dir = cloneOf(bare);
   process.env.FLOORBOSS_HOME = dir;
   const now = at('2026-10-12T10:00:00Z');
-  const s = next(dir, { run: 'new', nowMs: now });
+  const s = nextNew(dir, { nowMs: now });
   assert.equal(s.step, 'search', JSON.stringify(s).slice(0, 300));
   writeFileSync(s.write, JSON.stringify({ messages: [] }));
   // A git that kills its caller at the first `git status` (the first call checkpoint makes, after the writes).
