@@ -60,3 +60,16 @@ export function relativeWordsIn(text) {
     )
   ];
 }
+
+// The relative-day check's words, naming each word and the sentence it is in ("today" in "Could we meet today?"),
+// so the writer and the user can see what set it off. null when there is none.
+export function relativeFlag(text) {
+  const words = relativeWordsIn(text);
+  if (!words.length) return null;
+  const parts = String(text).split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  const where = words
+    .map((w) => parts.find((x) => new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}])`, 'iu').test(x)))
+    .filter(Boolean)
+    .map((x) => `"${x.length > 120 ? `${x.slice(0, 117)}...` : x}"`);
+  return `uses relative time words (${words.join(', ')})${where.length ? ` in ${[...new Set(where)].join(' and ')}` : ''}; write the day and date`;
+}

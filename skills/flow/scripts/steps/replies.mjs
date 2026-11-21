@@ -5,8 +5,36 @@ import { join } from 'node:path';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { todayKeyIn, addDays } from '../../../../lib/tz.mjs';
 import { companySlug } from '../../../../lib/normalize.mjs';
-import { step, node, onToolError, toolDown, cli } from './shared.mjs';
+import { step, node, onToolError, toolDown, cli, handSend } from './shared.mjs';
 import { inboxStep } from './channels.mjs';
+import { noteRepliesAsked } from '../replies-asked.mjs';
+
+// What auto-send did from the cloud since the user last answered what came in (or since the start): what went, who
+// it stopped (a reply, a bounce, an auto-reply it found), and any send to check in Sent mail. Plain words, or null.
+export function autosendNews(e) {
+  if (e.event?.autosend !== true) return null;
+  const all = e.entries;
+  let from = 0;
+  all.forEach((x, i) => {
+    if (x?.type === 'answered' && x.ask === 'replies_since') from = i + 1;
+  });
+  const since = all.slice(from);
+  const nameOf = (id) => e.state.people[id]?.name || id;
+  const list = (ids) => {
+    const u = [...new Set(ids)].map(nameOf);
+    return u.length > 4 ? `${u.slice(0, 4).join(', ')} and ${u.length - 4} more` : u.join(', ');
+  };
+  const sent = since.filter((x) => x?.type === 'sent' && x.source === 'autosend').map((x) => x.id);
+  const stopped = since.filter((x) => (x?.type === 'replied' && x.source === 'autosend') || (x?.type === 'bounced' && x.who === 'mailbox')).map((x) => x.id);
+  const unclear = since.filter((x) => x?.type === 'send_unclear' && x.who === 'floorboss').map((x) => x.id);
+  if (!sent.length && !stopped.length && !unclear.length) return null;
+  const parts = [
+    sent.length ? `sent ${sent.length} message${sent.length === 1 ? '' : 's'} (${list(sent)})` : null,
+    stopped.length ? `stopped ${list(stopped)} (a reply, a bounce or an out-of-office in your Gmail)` : null,
+    unclear.length ? `couldn't tell whether ${list(unclear)}'s message went: check your Sent folder` : null
+  ].filter(Boolean);
+  return `Since last time, auto-send ${parts.join('; ')}.`;
+}
 
 // What came back since the last run: replies in the mailbox, the CRM, the calendar and the inboxes read in the
 // user's browser, and the user's own word where nothing can be read.
@@ -68,6 +96,11 @@ export function replySteps(x) {
     const blindLine = blindNames.length
       ? `Your CRM shows no email with ${blindNames.length > 8 ? `${blindNames.slice(0, 8).join(', ')} and ${blindNames.length - 8} more` : blindNames.join(', ')} since your last message, so it can't say whether they replied. `
       : '';
+    const news = autosendNews(e);
+    // Hand-send only (Codex): the count the question was shown at is kept, so the answer needs no number. Claude Code
+    // reads as it always did.
+    const hand = handSend();
+    const shownAt = (hand ? noteRepliesAsked(e.paths, e.entries) : null) ?? e.entries.length;
     return step(
       'replies_since',
       `${blindNames.length ? "The CRM can't see some people's email" : 'Nothing connected can see replies'}, so the user is asked what came in${since ? ` since ${since}` : ''} before anything else happens.`,
@@ -75,11 +108,13 @@ export function replySteps(x) {
         ask: {
           id: 'replies_since',
           since,
-          ledger_lines: e.entries.length,
-          question: `${blindLine}Since ${since || 'your first messages went'}, has anyone you wrote to replied, booked or moved a time, cancelled, said no, asked you to stop, or sent an out-of-office? Paste or tell me what came in, or say "none".`,
+          ledger_lines: shownAt,
+          ...(news ? { say_first: news } : {}),
+          question: `${news ? `${news} ` : ''}${blindLine}Since ${since || 'your first messages went'}, has anyone you wrote to replied, booked or moved a time, cancelled, said no, asked you to stop, or sent an out-of-office? Paste or tell me what came in, or say "none".`,
           options: ['none', '<what came in>'],
-          answer_format:
-            '"none"; or first record what they told you (write it as items and run outreach record, as in the event-outreach skill\'s "Recording what happened"), then answer {"answer":"recorded","ledger_lines":<this step\'s ledger_lines>}'
+          answer_format: hand
+            ? '"none"; or first record what they told you (write it as items and run outreach record, as in the event-outreach skill\'s "Recording what happened"), then answer {"answer":"recorded"} (a ledger_lines number may be left out)'
+            : '"none"; or first record what they told you (write it as items and run outreach record, as in the event-outreach skill\'s "Recording what happened"), then answer {"answer":"recorded","ledger_lines":<this step\'s ledger_lines>}'
         }
       }
     );
@@ -158,7 +193,7 @@ export function replySteps(x) {
         const data = readJson(ad.file, { meetings: [] });
         return step(
           'agenda_news',
-          `Before the agenda: what's new about ${ad.no_news_yet.length} ${ad.no_news_yet.length === 1 ? 'company' : 'companies'} you're meeting${forDay ? ` on ${forDay}` : ''}. Run every researcher at once (in parallel, one message), then save each.`,
+          `Before the agenda: what's new about ${ad.no_news_yet.length} ${ad.no_news_yet.length === 1 ? 'company' : 'companies'} you're meeting${forDay ? ` on ${forDay}` : ''}. ${handSend() ? 'Run each researcher in turn, then save each.' : 'Run every researcher at once (in parallel, one message), then save each.'}`,
           {
             agents: ad.no_news_yet.map((co) => {
               const ms = data.meetings.filter((m) => m.person.company === co);

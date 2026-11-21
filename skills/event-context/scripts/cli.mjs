@@ -21,7 +21,7 @@ import { planQuestions, NODES, ROUNDS, CHOICES, choiceValue, defaultsFor } from 
 import { onboardingPlan as planOnboarding, onboardingState } from './onboarding-state.mjs';
 import { allowedPath } from '../../../lib/paths.mjs';
 import { instructionsPath } from '../../event-outreach/scripts/drafter.mjs';
-import { connected, inventoryView, modeLine } from '../../../lib/harness.mjs';
+import { connected, inventoryView, modeLine, handSendPatch } from '../../../lib/harness.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +41,9 @@ function ack(opts = {}) {
 // The mock event (mock: its slug) keeps every setting in its own event.json: nothing set during the demo
 // reaches the user's setup.
 function saveScoped(patch, { mock = null } = {}) {
+  // Outside Claude Code no connection, sending or CRM-write key is saved, on an event as in the setup (saveConfig does
+  // the same for config.json): the mock event's settings and an event's own part went straight to event.json.
+  if (!connected()) patch = handSendPatch(patch);
   if (mock) {
     const e = loadEvent(mock);
     saveEvent(mock, { ...e.event, settings: { ...(e.event.settings || {}), ...patch } });
@@ -177,6 +180,10 @@ function config(opts) {
     for (const k of ['touches', 'max_offers', 'per_slot', 'meeting_minutes', 'warm_months', 'paste_limit']) {
       if (k in patch && !(Number.isFinite(+patch[k]) && +patch[k] > 0)) throw new Error(`${k} must be a positive number.`);
     }
+    if ('buffer_minutes' in patch && !(Number.isInteger(Number(patch.buffer_minutes)) && Number(patch.buffer_minutes) >= 0 && Number(patch.buffer_minutes) <= 240))
+      throw new Error('buffer_minutes is a whole number of minutes between meetings (0 for none).');
+    if ('max_in_row' in patch && patch.max_in_row !== null && !(Number.isInteger(Number(patch.max_in_row)) && Number(patch.max_in_row) >= 1))
+      throw new Error('max_in_row is a whole number of meetings (1 or more), or null for no cap.');
     if ('company_caps' in patch && patch.company_caps !== null) {
       const cc = patch.company_caps;
       const okMode = (m) => ['scale', 'one', 'teams', 'off'].includes(m);

@@ -24,13 +24,13 @@ test('app notes: with times in the app and no event name or opt-out line, a casu
   assert.equal(j.channel, 'paste');
   assert.deepEqual(j.app_note, { times_in_note: false, event_name_in_note: false, optout_in_note: false });
   const body = 'Hey Ana, I run ops tooling at Lanecraft. Would love to meet up and hear how Acme handles dock scheduling.\n\nSam';
-  const saved = cli(casual, 'event-outreach', ['save-draft', '--event', casual.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ body, brief: 'x' })]);
+  const saved = cli(casual, 'event-outreach', ['save-draft', '--event', casual.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ body, brief: 'x, no research profile' })]);
   assert.equal(saved.checks, 'pass', JSON.stringify(saved));
   // The same note under the default settings misses the times, the event and the opt-out line.
   const strict = setup({ attendees: ATT, event: { app_name: 'Grip' } });
   triage(strict);
   const js = todoJobs(strict).jobs.find((x) => x.id === idOf(strict, 'Ana Berg'));
-  const s2 = cli(strict, 'event-outreach', ['save-draft', '--event', strict.slug, '--id', js.id, '--touch', '1', '--json', JSON.stringify({ body, brief: 'x' })]);
+  const s2 = cli(strict, 'event-outreach', ['save-draft', '--event', strict.slug, '--id', js.id, '--touch', '1', '--json', JSON.stringify({ body, brief: 'x, no research profile' })]);
   assert.ok(Array.isArray(s2.checks) && s2.checks.some((x) => /opt-out/.test(x)) && s2.checks.some((x) => /doesn't name the event/.test(x)), JSON.stringify(s2));
   assert.match(cli(strict, 'event-context', ['config', '--set', JSON.stringify({ app_note_times: 'sometimes' })]).ERROR, /in_text" or "in_app/);
 });

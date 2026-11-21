@@ -28,7 +28,7 @@ function ready(settings) {
   const job = (name) => r.jobs.find((x) => x.id === idOf(H, name) && x.kind === 'message');
   return { H, job };
 }
-const save = (H, j, body) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `${body} Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam`, brief: 'x', structure: j.structure, fact_source: j.fact_sources?.[0] || 'none' })]);
+const save = (H, j, body) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `${body} Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam`, brief: 'x, no research profile', structure: j.structure, fact_source: j.fact_sources?.[0] || 'none' })]);
 const optoutProblem = (r) => JSON.stringify(r).includes('missing the opt-out sentence');
 
 test('"only on cold emails": a warm reader\'s email ends at the sign-off, a cold one keeps the line', () => {
@@ -79,7 +79,7 @@ test('the user\'s own edit of a German draft keeps the draft\'s language, so the
   const { H, job } = ready({ languages: ['English', 'German'], optout_sentences: { German: DE } });
   const j = job('Amira Haddad');
   const body = (t) => `Hallo Amira, kurze Frage zu euren Docks. Passt ${j.slot_labels.join(' oder ')} auf der Test Expo?\n\nBeste Grüße, Sam\n\n${t}`;
-  const first = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: body(DE), brief: 'x', language: 'German', structure: j.structure, fact_source: j.fact_sources?.[0] || 'none' })]);
+  const first = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: body(DE), brief: 'x, no research profile', language: 'German', structure: j.structure, fact_source: j.fact_sources?.[0] || 'none' })]);
   assert.ok(!optoutProblem(first), JSON.stringify(first).slice(0, 400));
   const edit = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: body(DE).replace('kurze Frage', 'eine Frage') })]);
   assert.ok(!optoutProblem(edit), `an edit with the German line is not refused: ${JSON.stringify(edit).slice(0, 400)}`);
@@ -108,6 +108,6 @@ test('a stranger at a customer account (no CRM record of their own) keeps the li
   assert.equal(stranger.optout_line, DEFAULTS.optout_sentence, `group ${stranger.group}: a stranger at a customer keeps the line`);
   assert.equal(known.optout_line, null);
   assert.match(JSON.stringify(save(H, known, `Hi Hannah, good to see the yard module live.`) ), /./);
-  const withLine = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', known.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Hannah, good to see the yard module live. Could you do ${known.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\n${DEFAULTS.optout_sentence}`, brief: 'x', structure: known.structure, fact_source: known.fact_sources?.[0] || 'none' })]);
+  const withLine = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', known.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Hannah, good to see the yard module live. Could you do ${known.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam\n\n${DEFAULTS.optout_sentence}`, brief: 'x, no research profile', structure: known.structure, fact_source: known.fact_sources?.[0] || 'none' })]);
   assert.match(JSON.stringify(withLine), /chose to leave off emails to people you already know/);
 });

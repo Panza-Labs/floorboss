@@ -90,8 +90,8 @@ export function planSync(people, { state, since, source, now, byId, zone = 'UTC'
         ignored++;
         continue;
       }
-      // A bounce: that address doesn't work, so nothing more goes there. An out-of-office: follow-ups wait until
-      // they're back, and go on as planned when it gives no date. Neither is them writing back.
+      // A bounce: that address doesn't work, so nothing more goes there. An out-of-office: the day they're back is
+      // noted, and follow-ups go on as planned (this read runs only in Claude Code). Neither is them writing back.
       // A bounce is a failure of the address floorboss emails, and stops everything to it. From any address of theirs it
       // isn't one; for someone
       // floorboss has no email for, there's nothing to fail. Either way it's an automatic message, not them writing.

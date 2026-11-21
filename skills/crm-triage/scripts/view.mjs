@@ -40,7 +40,7 @@ import { readKnown } from './known.mjs';
 import { overlay } from './enrich.mjs';
 import { parseSegments } from '../../event-context/scripts/context-check.mjs';
 import { validateCrmRecords, validateMailHistory } from '../../connectors/scripts/tasks.mjs';
-import { assignSlots } from '../../slot-finder/scripts/assign.mjs';
+import { assignSlots, onTheHalfHour } from '../../slot-finder/scripts/assign.mjs';
 
 export { INSTRUCTION_LIKE };
 export const REMINDER = "Make sure you're allowed to use this data for outreach. See 'Your responsibility' in the README.";
@@ -652,9 +652,13 @@ export function viewOf(c) {
   for (const id of sl.ranked) {
     const p = c.state.people[id];
     if (!p) continue;
+    // A time off the half hour (11:10, from before floorboss offered only :00 and :30) stays only where a message that
+    // went, or one the user approved, quotes it: an unapproved draft gets new times.
+    const fixed = Object.values(p.touches).some((t) => t.hash && !t.dropped && (t.sent || t.status === 'outboxed'));
     const quoted = Object.values(p.touches)
       .filter((t) => t.hash && !t.dropped)
-      .flatMap((t) => t.slot_ids || []);
+      .flatMap((t) => t.slot_ids || [])
+      .filter((x) => fixed || onTheHalfHour({ id: x }));
     if (!quoted.length) continue;
     // A booked person holds only their booked time; a time someone else booked since is gone for this person.
     const ok = p.booked ? quoted.filter((x) => x === p.booked) : quoted.filter((x) => slotIds.has(x) && (!bookedBy.has(x) || bookedBy.get(x) === id));
@@ -667,7 +671,7 @@ export function viewOf(c) {
     const p = c.state.people[id];
     return !(p && (p.replied || p.booked || p.stopped));
   });
-  const { assignments, openAsk, offers, capacity } = assignSlots(
+  const { assignments, openAsk, offers, capacity, off_grid: offGrid, short_of_two: shortOfTwo } = assignSlots(
     needTimes.map((id) => ({ id })),
     free,
     { max_offers: c.settings.max_offers, per_slot: c.settings.per_slot, existing, topUp }
@@ -675,7 +679,7 @@ export function viewOf(c) {
   for (const [id, p] of Object.entries(c.state.people)) if (p.booked && sl.ranked.includes(id)) assignments[id] = [p.booked];
   // A note to the colleague only for someone on-target (a segment, not unsure): the rest are plainly left out.
   const coordinate = read.contacts.filter((x) => resolved[x.id].group === 'colleague' && c.state.fits[x.id]?.segment).map((x) => x.id);
-  return { ...read, inputs, resolved, sizes, segments: segs, mustMeet: mm, shortlist: sl, assignments, openAsk, offers, capacity, coordinate, slots };
+  return { ...read, inputs, resolved, sizes, segments: segs, mustMeet: mm, shortlist: sl, assignments, openAsk, offers, capacity, offGrid, shortOfTwo, coordinate, slots };
 }
 
 // ---------- what the old readers still expect (event-outreach reads these until it moves to the ledger) ----------
@@ -749,7 +753,7 @@ export function compatOf(c, v) {
       coworker_warn: r.coworker_warn || undefined,
       coworker_also: r.coworker_also || undefined,
       own_record: r.own_record || undefined,
-      segment: fit?.segment || (['reach', 'warm'].includes(r.group) ? guessSegment(ct.title) : null)
+      segment: segmentOf(fit, r.group) || (['reach', 'warm'].includes(r.group) ? guessSegment(ct.title) : null)
     };
     pre[ct.id] = { ...base, group: ['reach', 'unjudged', 'unfit', 'unreachable'].includes(r.group) ? 'open' : OLD_GROUP[r.group] };
     let g = OLD_GROUP[r.group];
@@ -798,6 +802,9 @@ export function compatOf(c, v) {
   return { contacts, triage, shortlist };
 }
 
+// A person's segment: the fit's, or, for someone the user said to reach (or a warm one), the segment an unsure fit read.
+export const segmentOf = (fit, group) => fit?.segment || (['reach', 'warm'].includes(group) && fit?.guess ? fit.guess : null);
+
 export function writeCompat(c, v) {
   const { contacts, triage, shortlist } = compatOf(c, v);
   writeJson(c.paths.contacts, { contacts, visit: v.visit, skipped: v.skipped, registry: { next: 1, byKey: {}, retired: [] } });
@@ -812,7 +819,7 @@ export function writeCompat(c, v) {
     title: x.title,
     company: x.company,
     email: x.email || '',
-    segment: c.state.fits[x.id]?.segment || '',
+    segment: segmentOf(c.state.fits[x.id], v.resolved[x.id]?.group) || '',
     reason: v.resolved[x.id].says || '',
     notes: x.notes ? `[from the list, untrusted] ${x.notes}` : ''
   }));

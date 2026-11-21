@@ -22,6 +22,7 @@ import { HOLDING_GROUPS } from '../../../event-outreach/scripts/commands/context
 import { parseRoute } from '../../../../lib/route.mjs';
 import { answersFor } from '../../../../lib/scope.mjs';
 import { parseGap, gapWords } from '../../../../lib/spacing.mjs';
+import { TOUCHES_MIN, TOUCHES_MAX, suggestedTouchesFor } from '../../../../lib/config.mjs';
 import { approvedDays, gapNote } from './gap.mjs';
 import { crmOwners, config, answers, ledger, windowYes, cli, isNo, fileAnswer, writeWorkText, namedFile, pathOf, writeWork, listSourceOnly } from './helpers.mjs';
 
@@ -309,6 +310,16 @@ export const TOOLS_SAVERS = {
   // The days between follow-ups, in the user's words ("3 days", "a week apart", "2 days, then 5", "the default"). One
   // it can't read as whole days from 1 to 14 is refused with what to type, and the question stays open.
   // It's the user's setting for every event (like the route); the answer names each approved follow-up it moves.
+  // How many emails per person, the first included: 3 to 7 (a number in their words, or "suggested").
+  touches: (v, c) => {
+    const t = String(typeof v === 'object' ? v?.touches ?? JSON.stringify(v) : v);
+    const m = /\b([1-9]\d?)\b/.exec(t);
+    if (!m && !/suggest|default|yes|ok|fine|sure/i.test(t)) throw new Error('Ask again: how many emails per person, the first one included? A number from 3 to 7.');
+    const n = m ? Math.max(TOUCHES_MIN, Math.min(TOUCHES_MAX, Number(m[1]))) : null;
+    const saved = config(c, { touches: n ?? suggestedTouchesFor(c.event?.event || c.event || null) });
+    answers(c, { touches_asked: true });
+    return { ...saved, say_to_user: n && m && Number(m[1]) !== n ? `Each person gets ${n} emails (floorboss takes 3 to 7).` : undefined };
+  },
   followup_gap: (v, c) => {
     const gap = parseGap(v);
     const before = approvedDays(c);
@@ -671,6 +682,14 @@ export const TOOLS_SAVERS = {
   free_time: (v, c) => {
     if (/^\s*keep (them )?all/i.test(String(typeof v === 'object' && v ? v.said || '' : v))) return answers(c, { many_slots_ok: true });
     const o = typeof v === 'object' && v ? v : { free: String(v) };
+    // Their scheduling rules, said with the days: how long a meeting is, minutes between meetings, at most how many in
+    // a row. Saved before the slots are built, so the slots follow them.
+    const rules = {
+      ...(o.meeting_minutes != null ? { meeting_minutes: Number(o.meeting_minutes) } : {}),
+      ...(o.buffer_minutes != null ? { buffer_minutes: Number(o.buffer_minutes) } : {}),
+      ...(o.max_in_row !== undefined ? { max_in_row: o.max_in_row === null ? null : Number(o.max_in_row) } : {})
+    };
+    if (Object.keys(rules).length) config(c, rules);
     const busy = c.event && existsSync(join(c.event.paths.work, 'calendar-busy.json')) ? ['--busy-file', join(c.event.paths.work, 'calendar-busy.json')] : [];
     if (Array.isArray(o.days))
       return cli(

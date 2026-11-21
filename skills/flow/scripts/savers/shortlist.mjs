@@ -4,7 +4,9 @@
 // its columns, people to check, the shortlist, fit doubts, and research.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readJson, appendLine } from '../../../../lib/jsonio.mjs';
+import { readJson, appendLine, writeJson } from '../../../../lib/jsonio.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
+import { shortlistIds } from '../steps/shared.mjs';
 import { context, nextStep } from '../steps.mjs';
 import { skipNames, unclearSkip, skipReadBack } from '../../../../lib/names.mjs';
 import { INTERPRETED, ledger, writeWork, writeWorkText, cli, pathOf, mapping, decisions, gateWords, isNo, peopleScaleOf } from './helpers.mjs';
@@ -93,10 +95,16 @@ export const SHORTLIST_SAVERS = {
   map_columns_attendees: (v, c) => mapping(c, 'attendees', v),
   map_columns_crm: (v, c) => mapping(c, 'crm', v),
   check_these: (v, c) => decisions(c, v),
-  gate: (v, c) =>
-    v && typeof v === 'object' && v[INTERPRETED]
-      ? cli('crm-triage', ['gate', '--event', c.slug, '--answers', String(v.answers), '--interpreted', '--said-file', writeWorkText(c, 'interpreted-said.txt', v.said)], c)
-      : cli('crm-triage', ['gate', '--event', c.slug, '--answers', gateWords(v, 'shortlist')], c),
+  gate: (v, c) => {
+    const r =
+      v && typeof v === 'object' && v[INTERPRETED]
+        ? cli('crm-triage', ['gate', '--event', c.slug, '--answers', String(v.answers), '--interpreted', '--said-file', writeWorkText(c, 'interpreted-said.txt', v.said)], c)
+        : cli('crm-triage', ['gate', '--event', c.slug, '--answers', gateWords(v, 'shortlist')], c);
+    // Who was on the shortlist at this yes (hand-send): a list reloaded later with the same people (only new addresses,
+    // say) doesn't show the card again (triage.mjs gateSeenSame).
+    if (handSend() && c.event) writeJson(join(c.event.paths.derived, 'gate-seen.json'), { ids: shortlistIds(c.event.paths.derived) });
+    return r;
+  },
   fit_doubts: (v, c) => {
     const step = nextStep(context(c.slug, {}));
     const people = step.ask?.people || [];
@@ -136,7 +144,9 @@ export const SHORTLIST_SAVERS = {
       .trim()
       .replace(/^(?:please|pls|ok|okay|so|alright|yes)(?![\p{L}\p{N}])[\s,]+(?=skip|leave out|not)/iu, '');
     if (unclearSkip(t)) throw new Error('Name the companies to skip ("skip Acme, Globex"), or say "skip all".');
-    const listed = nextStep(context(c.slug, {})).ask?.companies || [];
+    // The companies named: the question's, or (hand-send, where research starts without one) the research step's.
+    const now = nextStep(context(c.slug, {}));
+    const listed = now.ask?.companies || now.companies || [];
     // The people question asked in the same breath ("go, and people: top 5", "skip all research"): saved too, so
     // it isn't asked again.
     const scale = peopleScaleOf(t);

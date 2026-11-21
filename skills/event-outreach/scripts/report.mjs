@@ -28,7 +28,7 @@ function channelOf(sent, approved) {
 // From the ledger's entries, in order. A booking replaced by another in the same report (same time: "moved",
 // "rescheduled", or the calendar moving it) is one meeting, moved; any other unbooking is a cancellation. An outcome
 // counts for the booking it names (its start), and the latest word stands.
-export function buildReport(entries, { byId = {}, zone = 'UTC', now = new Date(), minutes = 30 } = {}) {
+export function buildReport(entries, { byId = {}, zone = 'UTC', city = null, now = new Date(), minutes = 30 } = {}) {
   const meetings = [];
   const open = new Map(); // id → the meeting its current booking belongs to
   const pendingUnbook = new Map(); // id → { meeting, at } for an unbook that a booking at the same time may follow
@@ -62,6 +62,8 @@ export function buildReport(entries, { byId = {}, zone = 'UTC', now = new Date()
         const moved = pendingUnbook.get(id);
         if (moved && moved.at === x.at) {
           moved.meeting.moves.push(moved.meeting.start);
+          // An outcome was for the old time: the meeting at its new time has none yet.
+          if (moved.meeting.start !== (x.start || null)) moved.meeting.outcome = null;
           moved.meeting.start = x.start || null;
           moved.meeting.slot = x.slot || null;
           moved.meeting.status = 'booked';
@@ -72,7 +74,10 @@ export function buildReport(entries, { byId = {}, zone = 'UTC', now = new Date()
         const cur = open.get(id);
         if (cur && cur.status === 'booked') {
           // Booked again with no unbook between (an older log): the same meeting, moved.
-          if (cur.start !== (x.start || null)) cur.moves.push(cur.start);
+          if (cur.start !== (x.start || null)) {
+            cur.moves.push(cur.start);
+            cur.outcome = null;
+          }
           cur.start = x.start || null;
           cur.slot = x.slot || null;
           break;
@@ -126,9 +131,9 @@ export function buildReport(entries, { byId = {}, zone = 'UTC', now = new Date()
       id: m.id,
       name: ct.name || m.id,
       company: ct.company || null,
-      time: m.start ? labelInZone(m.start, zone) : null,
+      time: m.start ? labelInZone(m.start, zone, { city }) : null,
       start: m.start,
-      moved_from: m.moves.filter(Boolean).map((s) => labelInZone(s, zone)),
+      moved_from: m.moves.filter(Boolean).map((s) => labelInZone(s, zone, { city })),
       outcome: status,
       first_contact: fc ? { channel: fc.channel, date: fc.date } : null
     };

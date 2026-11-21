@@ -54,8 +54,8 @@ test('batch check: a reason that names the user\'s own edit says it is theirs, l
   const msgs = jobs.filter((j) => j.kind === 'message' && j.touch === 1);
   const last = msgs[msgs.length - 1];
   for (const j of msgs) {
-    const body = `Hi ${j.contact.name.split(' ')[0]}, we help operations teams at events like Test Expo plan dock shifts. Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`;
-    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', ...(j === last ? ['--said', 'my own words'] : []), '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x', structure: 'plain-request', fact_source: 'list' })]);
+    const body = `Hi ${j.contact.name.split(' ')[0]}, we help operations teams at events like Test Expo plan dock shifts. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`;
+    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', ...(j === last ? ['--said', 'my own words'] : []), '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x, no research profile', structure: 'plain-request', fact_source: 'list' })]);
   }
   const b = cli(H, 'event-outreach', ['batch-check', '--event', H.slug]);
   assert.equal(b.verdict, 'FAIL', JSON.stringify(b).slice(0, 300));

@@ -8,13 +8,14 @@ import { pageInputs } from './page-inputs.mjs';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { loadEvent, contextFor, nowFrom } from '../../../../lib/event.mjs';
 import { todayKeyIn } from '../../../../lib/tz.mjs';
-import { eventDayState, zoneReadable } from '../../../../lib/spacing.mjs';
+import { eventDayState, zoneReadable, backAfterAway, writtenDate } from '../../../../lib/spacing.mjs';
 import { slotLabel } from '../../../slot-finder/scripts/slots.mjs';
 import { parseSegments, parseProof } from '../../../event-context/scripts/context-check.mjs';
 import { readLedger, fold, legacyState, append } from '../../../../lib/ledger.mjs';
 import { viewOf, writeDerived, compatOf, inputFile } from '../../../crm-triage/scripts/view.mjs';
 import { validateCrmRecords } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig } from '../../../../lib/config.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 
 // Names a draft must not mention: everyone else on the list, except the user's own company (the sender's
 // own name in a signature isn't another attendee).
@@ -64,7 +65,8 @@ export function ctxOf(slug, opts) {
   const ledgerAt = inputsAt.ledgers[base.paths.ledger]?.[0] ?? 0;
   const { entries, damaged } = readLedger(base.paths.ledger);
   const folded = fold(entries, damaged);
-  if (!Object.keys(folded.people).length) throw new Error(`${base.event.name} has no loaded list yet. Run /floorboss:start first.`);
+  if (!Object.keys(folded.people).length)
+    throw new Error(`${base.event.name} has no loaded list yet. ${handSend() ? 'Start floorboss first.' : 'Run /floorboss:start first.'}`);
   // Everything about everyone, computed from the inputs and the ledger right now (the triage view), in the
   // shapes this step reads: contacts, groups, the shortlist and the times offered.
   const tc = {
@@ -230,6 +232,10 @@ export function blockReason(c, id, kind) {
 
 // Sending is on for this event: the user chose at least one channel floorboss may send on itself.
 export const sendingOn = (settings) => (settings.sending?.channels || []).length > 0;
+// The whole sequence is drafted and approved up front: with sending on, or (outside Claude Code) for an event the user
+// set to auto-send from the cloud (event.json autosend: lib/autosend/), whose second yes covers every message of it.
+// Claude Code reads only its own sending setting, whatever a Codex session saved in a shared data folder.
+export const wholeSequence = (c) => sendingOn(c.settings) || (handSend() && c.event?.autosend === true);
 
 // What a draft is checked against. For event-app and LinkedIn notes, the user's app-note settings decide
 // whether the times, the event name and the opt-out line belong in the note. ownFacts: the only things the
@@ -290,5 +296,7 @@ export function segmentInfo(ctxSkills, slug) {
 // The colleague has the coordinate note: the user passed it on, or its CRM task is done.
 export const colleagueTold = (st) => !!st.note_passed || Object.values(st.tasks || {}).some((t) => t.kind === 'coordinate' && t.done);
 
-// Someone away (an out-of-office): noted beside the follow-ups, which keep their days.
-export const awayNote = (until) => `away until ${until}: follow-ups go on as planned`;
+// Someone away (an out-of-office): noted beside the follow-ups. In Claude Code they keep their days; in hand-send
+// none goes before the first working day after (saved-drafts.mjs followupDayOf).
+export const awayNote = (until) =>
+  handSend() ? `away until ${until}: no follow-up before ${writtenDate(backAfterAway(until))}` : `away until ${until}: follow-ups go on as planned`;

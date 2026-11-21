@@ -47,8 +47,10 @@ export function mailtoHref({ to, subject, body }) {
 }
 
 // RFC 2047 encoded words, each under 75 characters, split on whole characters (never inside one).
+// A plain ASCII subject goes as it is, unless it holds "=?": a mail app would decode an encoded word in it
+// (=?UTF-8?B?…?=) and show text the user never saw (a direction override, hidden words), so then it is encoded whole.
 function encodedSubject(subject) {
-  if (/^[\x20-\x7e]*$/.test(subject) && subject.length <= 900) return subject;
+  if (/^[\x20-\x7e]*$/.test(subject) && subject.length <= 900 && !subject.includes('=?')) return subject;
   const words = [];
   let chunk = '';
   for (const ch of subject) {

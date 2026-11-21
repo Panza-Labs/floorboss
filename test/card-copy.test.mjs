@@ -62,7 +62,7 @@ test('rate set: with no event app, a paste message is "(first message, to paste)
   const { jobs } = todoJobs(H);
   for (const j of jobs.filter((x) => x.kind === 'message')) {
     const body = `Hi ${j.contact.name.split(' ')[0]}, carriers are being asked for insurance proof earlier this year. Could you do ${(j.slot_labels || []).join(' or ') || 'a coffee at Test Expo'}?\n\nBest, Sam`;
-    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--json', JSON.stringify({ subject: j.channel === 'email' ? 'Test Expo' : undefined, body, brief: 'x', structure: 'plain-request', fact_source: 'list' })]);
+    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--json', JSON.stringify({ subject: j.channel === 'email' ? 'Test Expo' : undefined, body, brief: 'x, no research profile', structure: 'plain-request', fact_source: 'list' })]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--text', 'PASS']);
   }
   const set = cli(H, 'event-outreach', ['rate-set', '--event', H.slug]);

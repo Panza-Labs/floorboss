@@ -19,8 +19,45 @@ import { touchBefore } from '../../../../lib/route.mjs';
 import { assignStructures, factSources, STRUCTURES, openingOf, OPENINGS, warmReader, FROM_RELATIONSHIP } from '../structures.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { whereAt, writtenInApp, routeOf, whereMoved, messageFields, channelChangeNote } from './routes.mjs';
-import { ctxOf, skillsOf, takenTest, isOut, lastSentTouch, segmentInfo, knownReader, sameSlots, labelOf, sendingOn } from './context.mjs';
+import { ctxOf, skillsOf, takenTest, isOut, lastSentTouch, segmentInfo, knownReader, sameSlots, labelOf, wholeSequence } from './context.mjs';
 import { readTodo, staleFor, savedDraft, draftFile, ledgerTouch, criticFails, earlierDraft, resolveInsight, touchBatch, followupDayOf } from './saved-drafts.mjs';
+
+// The must-follow drafting rules (from skills/event-outreach/SKILL.md), at the top of the todo file the drafting
+// step reads.
+export const DRAFTING_RULES = [
+  "Open with the reader's researched fact (fact_source research) as one short clause, never as news.",
+  "Then what's in it for them and what you offer. Never open with I, we, \"I'd like\", \"I would like\", \"Let's\" or \"Let us\".",
+  'No meeting place (booth, hall, stand, table) before they say yes.',
+  'Times the way a person types them: "Tue 19th or Wed 20th at 9:00". No time zone, city, month or a.m./p.m.; on the hour or half hour.',
+  'No demo framing: ask for a conversation between peers.',
+  '60 to 100 words for a first email.',
+  'Subject under about 40 characters, no question mark, no first name.',
+  'A follow-up stands alone, adds one new thing, and is shorter than the message before it.',
+  'The opt-out line exactly as given (optout_sentence).',
+  'Invent nothing: no figure, claim or fact that is not in the research, the CRM, or the context text.',
+  'The voice text wins on tone; take proof points and insights only from what_you_bring.',
+  'Plain form only for a person with no research profile, and the brief says so.'
+];
+const CONTEXT_CAP = 6000;
+const contextPaths = (skills) => ({
+  who_to_meet: skills.dir ? join(skills.dir, 'who-to-meet', 'SKILL.md') : null,
+  what_you_bring: skills.dir ? join(skills.dir, 'what-you-bring', 'SKILL.md') : null,
+  voice: skills.dir ? join(skills.dir, 'voice', 'SKILL.md') : null
+});
+// The user's own material, inline, so a drafter that never opens the paths still has it. Cut at a cap, and said.
+function contextText(skills) {
+  const paths = contextPaths(skills);
+  const src = { voice: skills.voice, what_you_bring: skills.whatYouBring, who_to_meet: skills.whoToMeet };
+  const out = {};
+  const truncated = [];
+  for (const [k, t] of Object.entries(src)) {
+    const text = String(t || '');
+    out[k] = text.length > CONTEXT_CAP ? text.slice(0, CONTEXT_CAP) : text;
+    if (text.length > CONTEXT_CAP) truncated.push(`${k}: cut at ${CONTEXT_CAP} of ${text.length} characters; the rest is in ${paths[k]}`);
+  }
+  if (truncated.length) out.truncated = truncated;
+  return out;
+}
 
 // What a rewrite answers to, on the job the drafter gets: the user's words (an outreach revise, or the note on a
 // draft they rated 3 or less, which only the ledger holds) and the critic's reasons on the version being
@@ -101,6 +138,9 @@ export function todo(opts) {
   // The last gate wrote down what the user passed over ("approve all except c012"); those wait for the user.
   const leftOutKeys = new Set(readTodo(c, null)?.left_out || []);
   const jobs = [],
+    // With auto-send on (Codex), a first message approved before it was turned on still brings its follow-ups: it is
+    // read here as for a job (anchors), never drafted again, and only its follow-ups are asked for.
+    anchors = [],
     skipped = [],
     heldForUser = [];
   // The app's meeting-request limit: first messages already sent in the app use it up; new ones go in
@@ -181,10 +221,15 @@ export function todo(opts) {
     }
     const lastSent = lastSentTouch(st);
     let touch = null,
-      followup = false;
+      followup = false,
+      anchorOnly = false;
     const t1 = st.touches[1]?.status;
     if (!lastSent) {
       if (t1 !== 'outboxed' || redraft.has(id) || whereMoved(c, id, 1)) touch = 1;
+      else if (wholeSequence(c) && c.event?.autosend === true) {
+        touch = 1;
+        anchorOnly = true;
+      }
     } else {
       let next = lastSent + 1;
       while (st.touches?.[next]?.skipped) next++;
@@ -198,7 +243,7 @@ export function todo(opts) {
     }
     if (!touch) continue;
     if (steps) channel = steps[touch - 1] === 'email' ? 'email' : 'paste';
-    if (touch === 1 && channel === 'paste' && isApp(id)) {
+    if (touch === 1 && channel === 'paste' && isApp(id) && !anchorOnly) {
       if (appLeft <= 0) {
         skipped.push({ id, reason: `backup: the app's request limit (${limit}) is used up by people already written to, or planned to be written to, in the app` });
         continue;
@@ -221,8 +266,8 @@ export function todo(opts) {
     // Left out at the last gate ("approve all except c012"): it waits for the user, it isn't redrafted.
     // (Left out stays left out when their times change: the user decided about the person, not the times.)
     const leftOut = !held && !!priorV && leftOutKeys.has(`${id}:${touch}`) && st.touches?.[touch]?.status === 'drafted';
-    if (held) heldForUser.push({ id, touch, reasons: priorV.reasons });
-    if (leftOut) heldForUser.push({ id, touch, reasons: ['left out at the last gate'] });
+    if (held && !anchorOnly) heldForUser.push({ id, touch, reasons: priorV.reasons });
+    if (leftOut && !anchorOnly) heldForUser.push({ id, touch, reasons: ['left out at the last gate'] });
     // In time order (slot ids are their times), so a rebuild that assigns the same times never reads as a change.
     const sids = (assignments[id] || []).filter((x) => slotById[x]).sort();
     const labels = sids.map((x) => slotLabel(slotById[x], c.event.time_zone, null, c.event.city));
@@ -231,7 +276,7 @@ export function todo(opts) {
     const before = touchBefore(st, touch);
     const prevDraft = followup ? earlierDraft(c, id, before) : null;
     const prevBody = st.sent_text?.[before] || prevDraft?.body || null;
-    jobs.push({
+    (anchorOnly ? anchors : jobs).push({
       id,
       touch,
       kind: 'message',
@@ -241,6 +286,8 @@ export function todo(opts) {
       mode,
       mode_guidance: MODES[mode].label,
       followup,
+      // The sequence's last message: a short closing note (event-outreach SKILL.md, "The last touch").
+      ...(followup && touch === (steps ? steps.length : c.settings.touches) ? { last_touch: true } : {}),
       followup_note: followup ? channelChangeNote(c, id, touch) || "Send in the same thread, only if they haven't replied." : null,
       contact: { name: ct.name, title: ct.title, company: ct.company },
       group: fin.group,
@@ -300,12 +347,15 @@ export function todo(opts) {
   }
   // With sending on, the whole sequence is written and approved up front: each first message brings its
   // follow-ups, planned on the days they'd go (each one only if there's still no reply, booking or stop).
-  if (sendingOn(c.settings)) {
-    for (const j of jobs.filter((x) => x.kind === 'message' && x.touch === 1)) {
+  if (wholeSequence(c)) {
+    for (const j of [...jobs.filter((x) => x.kind === 'message' && x.touch === 1), ...anchors]) {
       const steps = routeOf(c, j.id);
       // Each follow-up's day, the user's gap or the table's apart, off the weekend, until one would land after the
       // event's last day (that one and the rest are dropped, never moved closer).
-      for (const { touch: t, due, from } of plannedDays(c.settings, c.event, today, mode, steps ? steps.length : c.settings.touches)) {
+      const days = plannedDays(c.settings, c.event, today, mode, steps ? steps.length : c.settings.touches);
+      // The last step that still fits before the event ends: its closing note.
+      const lastT = days.length ? days[days.length - 1].touch : null;
+      for (const { touch: t, due, from } of days) {
         // A step the user skipped: the sequence goes on to the next one.
         if (c.state[j.id]?.touches?.[t]?.skipped) continue;
         // A follow-up the user dropped ends the sequence there.
@@ -337,6 +387,7 @@ export function todo(opts) {
           channel_changed: !!channelChangeNote(c, j.id, t) || undefined,
           touch: t,
           followup: true,
+          ...(t === lastT ? { last_touch: true } : { last_touch: undefined }),
           planned: true,
           planned_due: due,
           // The gaps it was planned with: planned with others, its day is worked out again from the last send.
@@ -480,14 +531,27 @@ export function todo(opts) {
     (firsts.length ? firsts : messages).map((j) => ({ id: j.id, segment: j.segment?.slug })),
     Object.fromEntries(parseSegments(skills.whoToMeet || '').map((x) => [x.slug, x.name]))
   );
+  const event = {
+    name: c.event.name,
+    city: c.event.city,
+    dates: `${writtenDate(c.event.start_date)} to ${writtenDate(c.event.end_date)}`,
+    days_until: days
+  };
   // The day it was worked out for (event time) and the run: time passing changes what is due (a follow-up on its
   // day), so the flow works it out again on a new day and in a new run, not only when the ledger grows.
   writeJson(join(c.paths.derived, 'todo.json'), {
+    // First in the file, because the drafting step reads this file and may not open the help file (Codex).
+    rules: DRAFTING_RULES,
+    context: contextPaths(skills),
+    context_text: contextText(skills),
     at: c.now.toISOString(),
     ledger_lines: readLedger(c.paths.ledger).entries.length,
     built_for_day: today,
     run: sessionRun(),
+    // Auto-send turned on since (event.json): the follow-ups of every sequence are asked for, so it is worked out again.
+    ...(c.event?.autosend === true ? { autosend: true } : {}),
     event_name: c.event.name,
+    event,
     mode,
     insights: insights.map(({ id, insight, segments }) => ({ id, insight, segments })),
     insight_cap_by_touch: insightCaps,
@@ -499,7 +563,7 @@ export function todo(opts) {
     })
   });
   return {
-    event: { name: c.event.name, city: c.event.city, dates: `${writtenDate(c.event.start_date)} to ${writtenDate(c.event.end_date)}`, days_until: days },
+    event,
     mode,
     mode_guidance: MODES[mode].label,
     goal: c.settings.goal,
@@ -508,11 +572,7 @@ export function todo(opts) {
     optout_sentences: Object.fromEntries((c.settings.languages || []).map((l) => [l, optoutFor(c.settings, l)])),
     draft_language: c.settings.draft_language,
     paste_limit: c.settings.paste_limit,
-    context: {
-      who_to_meet: skills.dir ? join(skills.dir, 'who-to-meet', 'SKILL.md') : null,
-      what_you_bring: skills.dir ? join(skills.dir, 'what-you-bring', 'SKILL.md') : null,
-      voice: skills.dir ? join(skills.dir, 'voice', 'SKILL.md') : null
-    },
+    context: contextPaths(skills),
     drafting: {
       mode: c.settings.drafting_mode || 'floorboss',
       by_user: jobs.filter((j) => j.drafter?.by === 'user').length,

@@ -64,8 +64,8 @@ test('a text edited after the critic read it goes back to the critic before it c
   triage(H);
   const { t, jobs } = todoJobs(H);
   const j = jobs[0];
-  const body = `Hi Ana, we're both at Test Expo. Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`;
-  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x' })]);
+  const body = `Hi Ana, we're both at Test Expo. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`;
+  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x, no research profile' })]);
   cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', '1', '--text', 'PASS']);
   const f = join(H.dir, 'work', 'drafts', `${j.id}-t1.json`);
   const d = JSON.parse(readFileSync(f, 'utf8'));

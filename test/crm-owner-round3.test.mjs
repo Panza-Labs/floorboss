@@ -449,7 +449,7 @@ test('C6 (M16, M17): an event that keeps its own owner, and an approval of an ol
   // Lucas's approved message edited since (a new text, not approved): not one the page offers, so not one taken.
   const lucas = idOf(A, 'Lucas Visser');
   const d = JSON.parse(readFileSync(join(A.dir, 'work', 'drafts', `${lucas}-t1.json`), 'utf8'));
-  const s = cli(A, 'event-outreach', ['save-draft', '--event', A.slug, '--id', lucas, '--touch', '1', '--json', JSON.stringify({ subject: d.subject, body: d.body.replace(/\n\n/, '\n\nA line of mine.\n\n'), brief: 'x', structure: d.structure || 'question-first', fact_source: d.fact_source || 'list' })]);
+  const s = cli(A, 'event-outreach', ['save-draft', '--event', A.slug, '--id', lucas, '--touch', '1', '--json', JSON.stringify({ subject: d.subject, body: d.body.replace(/\n\n/, '\n\nA line of mine.\n\n'), brief: 'x, no research profile', structure: d.structure || 'question-first', fact_source: d.fact_source || 'list' })]);
   assert.ok(!s.ERROR, s.ERROR);
   // Expo C keeps its own owner setting.
   const C = home({ settings: { crm_user_name: 'Bram Janssens' }, home: A.HOME, event: { slug: 'expo-c', name: 'Expo C' } });

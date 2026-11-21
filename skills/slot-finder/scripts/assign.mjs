@@ -2,8 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Give each shortlisted contact up to two slots: different days, else 2h apart the same day,
 // else one slot, else an open ask. Higher ranks pick first; no slot exceeds its capacity.
+// Only times on the hour or the half hour are offered ("Tue 1st at 9:00", never "11:10"): a slot that starts anywhere
+// else (a busy block or a gap moved it) stays free for booking but is never offered.
 
 const TWO_HOURS = 2 * 3600 * 1000;
+// A slot's id carries its start in the event's own time (s20261201T0930).
+// A slot without such an id is read from its start.
+export const onTheHalfHour = (slot) => {
+  const m = /T\d{2}(\d{2})$/.exec(String(slot?.id || ''));
+  const mm = m ? m[1] : slot?.start ? String(new Date(slot.start).getUTCMinutes()).padStart(2, '0') : null;
+  return mm === '00' || mm === '30';
+};
 
 // topUp: contacts in `existing` who kept one time after the other was booked; they get a second one.
 export function assignSlots(ranked, slots, { max_offers = 3, per_slot = 1, existing = {}, topUp = [] } = {}) {
@@ -22,6 +31,8 @@ export function assignSlots(ranked, slots, { max_offers = 3, per_slot = 1, exist
   }
   // Slots with their own label and length (a dinner) are for the user to offer by hand, not auto-assigned.
   slots = slots.filter((s) => !s.label);
+  const offGrid = slots.filter((s) => !onTheHalfHour(s)).length;
+  slots = slots.filter(onTheHalfHour);
   const openAsk = [];
   // Offers spread over the days and the hours: the day and the hour offered least so far go first. Picking the
   // earliest free slot would bunch everyone into the first days, 30 minutes apart.
@@ -82,7 +93,9 @@ export function assignSlots(ranked, slots, { max_offers = 3, per_slot = 1, exist
       note(s);
     });
   }
-  return { assignments, openAsk, offers: count, capacity };
+  // Who got fewer than two times to choose from, and how many free slots weren't offered for starting off the half hour.
+  const shortOfTwo = ranked.map((c) => c.id).filter((id) => (assignments[id] || []).length === 1);
+  return { assignments, openAsk, offers: count, capacity, off_grid: offGrid, short_of_two: shortOfTwo };
 }
 
 // Who else was offered each slot (for the outbox slot table and re-plan warnings).

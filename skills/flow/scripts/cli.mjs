@@ -6,5 +6,14 @@
 import { run } from '../../../lib/args.mjs';
 import { next } from './next.mjs';
 import { answer, ids } from './answer.mjs';
+import { review, readdress } from './review.mjs';
+import { sessionWhy } from '../../../lib/autosend/sync.mjs';
 
-run({ next, answer, asks: ids });
+// With auto-send on, next runs only while this laptop session holds the data folder (lib/autosend/sync.mjs sessionWhy).
+const nextHeld = (opts) => {
+  const why = sessionWhy();
+  if (why) throw new Error(why);
+  return next(opts);
+};
+
+run({ next: nextHeld, answer, asks: ids, review, readdress });

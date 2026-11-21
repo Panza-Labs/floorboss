@@ -64,7 +64,7 @@ those scripts.
 floorboss also runs in OpenAI's Codex (the coding agent that comes with a ChatGPT plan). There it does the whole
 event with you (the list, who to meet, research, drafts, follow-ups, what came back, the show-day brief), and **you
 send every message yourself, from your own mail app**. In Codex floorboss uses no connected tools at all: no mailbox,
-no CRM, no calendar, no browser.
+no CRM, no calendar, no browser, unless you turn on auto-send for an event ([below](#auto-send-from-the-cloud-codex-gmail-only)).
 
 **Untested so far:** Codex itself (it isn't installed where floorboss is built), Windows, and Outlook. The steps below
 come from Codex's source and documentation, not from a run. Please open an issue with what you find.
@@ -73,33 +73,35 @@ come from Codex's source and documentation, not from a run. Please open an issue
 
 You need Codex, [Node.js](https://nodejs.org) 22 or later, and git.
 
+On macOS, Linux or PowerShell:
+
 ```
 git clone https://github.com/Panza-Labs/floorboss.git
 cd floorboss
-mkdir ~/.floorboss
-codex --add-dir ~/.floorboss --search
+codex --search
 ```
-
-In PowerShell the folder is `$HOME\.floorboss`: `mkdir $HOME\.floorboss`, then
-`codex --add-dir $HOME\.floorboss --search`.
 
 - Start Codex **in the floorboss folder**. Codex then reads floorboss's `AGENTS.md` and its skill in
   `.agents/skills/floorboss/`.
-- `--add-dir` lets floorboss's scripts write their data folder, which is outside the floorboss folder; Codex's
-  default sandbox lets commands write only the folder you started it in. To make it permanent, add the folder to
-  `sandbox_workspace_write.writable_roots` in `~/.codex/config.toml`.
+- **Where your data goes.** In Codex, floorboss keeps everything in a `floorboss` folder inside the folder you start
+  Codex in (here `floorboss/floorboss/`), made on the first run. Codex's default sandbox lets commands write only
+  inside that folder, so nothing else needs setting up. The folder holds a `.gitignore` that keeps all of it out of
+  that project's git. If you start Codex in your home folder itself, or in a system folder, floorboss uses
+  `~/.floorboss` instead, which the sandbox won't let it write; start Codex in a project folder. To keep the data
+  somewhere else, set `FLOORBOSS_HOME` to that folder and start Codex with `--add-dir` and the same folder.
 - `--search` turns on Codex's web search, which floorboss's research uses. Without it, say "skip" when floorboss asks
   about research.
 - **Windows:** the Codex CLI's install page lists Windows 11 through WSL2; Codex's Windows sandbox page describes the
-  Codex app running natively in PowerShell. floorboss hasn't been tried either way. In WSL2, your data folder is in the Linux home, so
-  open the outbox page from Windows with `explorer.exe .` in the event's folder.
+  Codex app running natively in PowerShell. floorboss hasn't been tried either way. In WSL2, open the outbox page
+  from Windows with `explorer.exe .` in the event's folder.
 
 Codex can also install floorboss as a plugin (`codex plugin marketplace add Panza-Labs/floorboss`, then
-`codex plugin add floorboss@floorboss`): its manifest is `.codex-plugin/plugin.json`. This way is untested too.
+`codex plugin add floorboss@floorboss`): its manifest is `.codex-plugin/plugin.json`. Start Codex in your own
+project folder then; the data goes in its `floorboss` folder the same way. This way is untested too.
 
 **Lists.** floorboss reads an attendee list, a CRM export or a contacts file only from its data folder, the temp
-folder or the folder you started Codex in. Copy the file from Downloads into `~/.floorboss/work/` first (in
-PowerShell, `$HOME\.floorboss\work`), or let floorboss ask to copy it there.
+folder or the folder you started Codex in. Copy the file from Downloads into that folder, or into its
+`floorboss/work/` folder, first, or let floorboss ask to copy it there.
 
 ### First run
 
@@ -111,7 +113,7 @@ follow-ups.
 ### How sending works
 
 When you've approved the messages, floorboss opens the outbox page in your browser (`outbox.html`, in the event's
-folder under `~/.floorboss/events/`). Each email that may go today has two buttons:
+folder under `floorboss/events/` in the folder you started Codex in). Each email that may go today has two buttons:
 
 - **Open in your mail app** opens a new email in Outlook (or whatever your computer uses for email links) with the
   address, subject and message filled in, exactly as you approved them, opt-out line included. Read it, then press
@@ -119,6 +121,8 @@ folder under `~/.floorboss/events/`). Each email that may go today has two butto
 - **Download .eml** saves the same email as a draft file. Open it and Outlook shows it as a draft to send. Use it when
   the first button doesn't open your mail app, when the line breaks come out wrong, or for a message too long for a
   mail link (the page then shows only this button). The files are also in the event's `mail/` folder.
+- **Copy address**, **Copy subject** and **Copy message** copy each part exactly as approved. If the mail-app button
+  doesn't work, copy these three into a new email.
 
 Event-app and LinkedIn messages have a Copy button each, to paste where they go.
 
@@ -160,8 +164,147 @@ folder. Untested in Codex.
 | The critic | a separate agent that can't open files | the same Codex conversation, so a weaker check: read every draft |
 | The guard hook | checks every tool call, fails closed | none (Codex's hooks fail open, so floorboss doesn't install any) |
 | Unattended drafts and the morning brief on its own | macOS, if you install them | no |
+| Auto-send with nobody there | drafts only, macOS | sends, Gmail only, in your ChatGPT cloud, no guard |
 
-### Don't connect mail, CRM or browser tools in Codex
+### Auto-send through Gmail drafts (Codex, Gmail only)
+
+The simpler way to auto-send, with no data repo. You approve twice in Codex as below. Right after your second yes:
+
+- each first email due today is sent at once, from your Codex chat, after a check for a reply or a bounce;
+- every other approved message becomes a Gmail draft labelled `floorboss/due-<day>`, the day in the event's time
+  zone. A follow-up of an email sent now sits in that email's thread. If the first email is planned for a later day,
+  it waits as a draft too, and its follow-ups arrive as separate emails (not in its thread) with the subject
+  "Re: <the first email's subject>";
+- floorboss reads every draft back before it labels it, and checks the recipient, subject and body against what you
+  approved. If one differs, or Gmail's answer can't be read, it stops and tells you which draft to delete (with no due
+  label, the daily task ignores it). If the label itself can't be confirmed, floorboss labels that draft
+  `floorboss/held-check` so it is never sent, and tells you to delete it.
+
+Then one scheduled ChatGPT task sends the drafts on their days, once a day at a fixed time you pick (9:00 by default).
+`autosend daily-task --zone <your time zone>` gives you a chatgpt.com link with the setup already typed in, and a file
+with the same text in case the link comes up empty. Use a chatgpt.com chat in the browser: a Codex desktop chat can
+only make a local task, which needs your laptop on. Before each draft the task checks for a reply from that address
+and for a bounce naming it; either one holds the draft (`floorboss/held-replied`, `floorboss/held-bounced`). A
+check can only hold, never send. The task never writes, edits or deletes a draft, and never emails you a summary.
+
+- **Always allow.** The first time the task sends, ChatGPT asks to "send an existing Gmail draft". Click "Always
+  allow". That lets this task send drafts from then on without asking you. It covers that one permission, nothing
+  more.
+- **Keep the task running.** Keep the chat that created the task: deleting or archiving it pauses the task. ChatGPT
+  also pauses a task when an action needs approval. If the task ever shows Paused (chatgpt.com, Scheduled), click
+  Resume. When you start floorboss in Codex, it looks for drafts whose day has passed and tells you if daily sending
+  looks paused.
+- **What the daily task checks.** It fixes today's date once per run and takes the due drafts oldest first, at most
+  one send per address per run. Right before each send it searches all of Gmail (Spam and Trash included) for
+  anything from that address since your first auto-send yes, and for a bounce naming it; any result holds the draft,
+  an auto-reply too. A follow-up goes only when Sent already has an earlier email to that address, at least a day
+  old; otherwise it waits a day. A draft more than 3 days overdue is held (`floorboss/held-late`), so a resumed task
+  never sends a backlog at once. An address that isn't exactly one plain address, or a send that fails, is held
+  (`floorboss/held-check`), never retried. A search that errors or comes back incomplete sends nothing for that draft
+  that day. Any hold puts the same label on every floorboss draft to that address. A draft waits while an earlier
+  floorboss draft to the same address, held or not, is still there. The reply and bounce searches look for the
+  address and its base form (no +tag; for Gmail, no dots), as the laptop's own check does. When you start floorboss in
+  Codex, it tells you about drafts that are overdue or held, and what to do.
+- **The risks, accepted.** Your approval ends when the draft is made: anyone with access to your mailbox can edit a
+  queued draft, and it goes as edited. A draft you make by hand with a `floorboss/due-` label is sent too. The task
+  sees replies only from the address it wrote to: a colleague who answers from another address isn't seen (tell
+  floorboss on the laptop, and it records it). A reply that lands seconds before the send can still miss it.
+- **Stop everything.** Pause the task in chatgpt.com, or delete the floorboss drafts. Tell floorboss "stop
+  auto-send" too. Drafts already queued in Gmail still carry their due labels, so after a stop on the laptop (stop
+  auto-send, or a reply, opt-out or booking you tell floorboss about) it gives you a short run that labels that
+  person's queued drafts `floorboss/held-check`, so the daily task never sends them. If a label can't be confirmed,
+  it names the drafts to delete by hand.
+
+### Auto-send from the cloud (Codex, Gmail only)
+
+floorboss can send an approved sequence for you on its days, first message included, from a ChatGPT scheduled task
+that runs in OpenAI's cloud on your own account, with your computer off. It works only with Gmail or Google
+Workspace, through OpenAI's Gmail connector. Nothing runs on any server of ours.
+
+You approve twice in Codex: the messages, as usual, then floorboss reads back each person, each message and the day it
+is planned for, and you type "auto-send these sequences". That approval is for that exact text to that exact address.
+Change a message and it waits for you again.
+
+Each run first asks Gmail which account is connected; if it isn't the address you gave when you turned auto-send on
+(recorded with your yes), the run stops before it searches or sends anything. Before each follow-up, floorboss reads
+the thread of your first email to that person: any message there from someone else (them, a colleague who answered
+for them, an out-of-office, a bounce) stops their sequence. Then, before each message, it searches your Gmail for
+anything from that person, or a bounce naming their address, since your first email to them. A reply, a bounce or an
+out-of-office stops their sequence. Two sends in one run are 20 to 40 seconds apart, so a new sender account doesn't
+send a burst. Messages go only on their day or the
+day after, on weekdays from 09:00 to 17:00 in the event's time zone, never after the event, and never more than one a
+day to a person. The first thing that goes wrong stops the run, and a send whose result isn't clear is never tried
+again: floorboss waits for you to check your Sent folder.
+
+**What you are trusting.** In Codex nothing checks a tool call before it runs. The run's model has your Gmail send
+tool, and floorboss can only ask it to follow its steps. A model that doesn't could send other text, to other people,
+from your account. Turn this on only for a mailbox you accept that for, and read the run log.
+
+**What it can't see:** a new email (not in the thread) from another address, LinkedIn or the event app, and mail
+Gmail puts in Spam. Keep
+telling floorboss what came back.
+
+**Your data** moves to a private GitHub repo of yours, so the cloud run can read and update it. It holds your lists
+and everything floorboss records. Keep the repo private and the token limited to it.
+
+It needs a ChatGPT plan with Codex on the web and scheduled tasks; each run uses your plan's allowance. Untested on a
+live account so far.
+
+**Setting it up.** In Codex, ask floorboss to auto-send an event's sequences; the skill takes you through these steps.
+
+1. Make a new, empty private repo on GitHub for the data folder. Then, in Codex, say yes when floorboss offers to
+   make the data folder a copy of it; it runs one command, the same in PowerShell, Terminal or any shell:
+   `node "<floorboss>/skills/autosend/scripts/cli.mjs" init --remote https://github.com/<you>/<repo>`. floorboss
+   commits under its own name, so you don't need to set up a git name or email, and only its data goes up (it writes
+   a `.gitignore` that leaves your uploads and laptop-only files out). If git can't sign in to GitHub from there, it
+   tells you the one line to type yourself in a terminal in the data folder: `git push -u origin <your branch>`.
+   `autosend setup` then asks you to confirm the repo is private (it can't see GitHub's settings) and refuses a
+   remote that isn't `https://github.com/...`.
+2. Make a fine-grained GitHub token with **Contents: read and write** on that one repo only, expiring after the
+   event.
+3. In ChatGPT: connect Gmail (Settings, Apps, Gmail) with the Google account you send from. Set its permission so
+   sends don't ask (**Never ask**, or "Allow all actions" where that is the label).
+4. In ChatGPT, Codex cloud settings: a personal network secret `GITHUB_TOKEN` for `github.com`, and internet access
+   that allows `github.com` and `codeload.github.com`.
+5. In Codex on the laptop, for the event: say yes when floorboss asks whether it should send on its own from the
+   cloud (before the drafts, so every message of each sequence is written and approved up front), approve the
+   messages as usual, then floorboss reads back each person, message and day; type **auto-send these sequences**.
+   floorboss then pushes the data folder.
+6. In ChatGPT on the web: Scheduled, new standalone task, Work in Cloud. Paste the prompt `autosend setup` prints
+   (it is `codex/autosend-task.md` with your repo and floorboss's pinned commit filled in), schedule
+   `RRULE:FREQ=HOURLY`. Press **Run now** once and read its result.
+7. To stop: say "stop auto-send" in Codex on the laptop, and pause or delete the scheduled task. Either one alone
+   stops sends: revoked messages are never due. A stop is per event: name the event to stop only that one, or
+   people at it; "stop auto-send" with no event named stops every event. floorboss pushes the stop to your repo at once; if it can't (no
+   network, or the laptop and the repo moved apart), it keeps the stop on the laptop and tells you to pause the task
+   (ChatGPT on the web, Scheduled, the floorboss task, pause), then to run `autosend sync repair` once your repo can
+   be reached.
+
+While auto-send is on, each Codex session on the laptop starts by pulling the data repo and taking its lock, and ends
+by pushing it; if the cloud task holds the lock, the session says so and changes nothing. Turning auto-send on, the
+second yes, a stop, a settled send and anything you report back go to your repo as soon as they are made. If the
+laptop and the repo ever move apart, `autosend sync repair` puts the laptop's own records after the cloud's; it
+never drops a stop, and refuses anything it can't carry over safely. After a run that stopped on
+an unclear send, floorboss lists it (`autosend status`): look in Gmail's Sent folder, then tell it "it went" or "it
+didn't go". A message that didn't go is never auto-sent again; it comes back to the outbox page for you to send.
+The run log is `autosend/log-<day>.md` in the data repo.
+
+The pinned commit means a change to floorboss can't change what a running schedule does: update the pin to get fixes.
+An hourly task is 24 cloud runs a day, most of them doing nothing; narrow the schedule if you like (floorboss decides
+the hours itself). A follow-up goes as a reply to the first email auto-send sent them, so it lands in that thread,
+with its approved subject (a changed subject is a changed message: it needs a fresh yes). When floorboss has no
+record of that first email's Gmail ids (you sent it yourself, or settled it without them), the follow-up is held for
+you to send; it never goes as a new email. If Gmail puts a follow-up in another thread anyway, it is recorded as sent
+and the run log flags it. A send step expires a few minutes after its reply check: the model is told not to send
+past it, and an answer written after it counts as unclear. Each run clones into a new temporary folder, since the
+cloud workspace keeps files between runs. The body goes as plain HTML built from your approved text (paragraphs and
+line breaks only): Gmail's tool wrapped plain text mid-sentence.
+The data repo holds personal data (attendee lists, CRM exports): where that data may sit, under GDPR and similar laws,
+is your call.
+
+### Don't connect mail, CRM or browser tools in Codex on your laptop
+
+Auto-send from the cloud uses the Gmail connector in the cloud task only (below), never in your Codex chat on the laptop. Auto-send through Gmail drafts (above) is the one exception: right after your second yes, the Codex chat calls only the Gmail steps floorboss names (one send per first email due now, then create, label and read back each draft).
 
 floorboss's guard runs only in Claude Code. In Codex nothing checks a tool call before it runs, so floorboss can't
 stop the model using a mail, CRM, calendar or browser tool you connected there, whatever floorboss's own text says.
@@ -215,7 +358,8 @@ privately ([SECURITY.md](SECURITY.md)).
 **What floorboss depends on.** No third-party packages. `package.json` lists no dependencies, there's no
 lockfile, and every import is either a Node.js built-in module or one of floorboss's own files. Nothing
 runs `npm install`, `npx`, `curl` or any download, at install or while it runs, and floorboss's own
-scripts make no network calls. It needs:
+scripts make no network calls, except `git pull` and `git push` of your own data repo, when auto-send is on (Codex
+only). It needs:
 
 | What | Where it comes from | Notes |
 |---|---|---|
@@ -348,9 +492,9 @@ question is how much setup you want. You can change it any time by saying "more 
 
 | Setup | Setup questions | What you get |
 |---|---|---|
-| **Quick** | about 8 | Your list, who you want to meet and what you offer, your sign-off and free time. It assumes you work alone, with no CRM and no writing samples (it says so when you pick it). Nothing connected is read and nothing is sent; if a CRM is connected, it says plainly that it won't be checked. It asks before researching the shortlisted companies on the web. |
-| **Standard** | about 18 | Also checks the list against your CRM, mailbox and calendar (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, how long a lost deal keeps someone out, whether emails to people you already know end with the opt-out line, and sets your tone from samples and from emails of yours that got replies, if you have them. You send the messages. |
-| **Full** | about 23 | Everything in standard, plus floorboss sends what you approve, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), logs messages in your CRM, and asks how many days to leave between follow-ups. |
+| **Quick** | about 9 | Your list, who you want to meet and what you offer, your sign-off and free time. It assumes you work alone, with no CRM and no writing samples (it says so when you pick it). Nothing connected is read and nothing is sent; if a CRM is connected, it says plainly that it won't be checked. It asks before researching the shortlisted companies on the web. |
+| **Standard** | about 19 | Also checks the list against your CRM, mailbox and calendar (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, how long a lost deal keeps someone out, whether emails to people you already know end with the opt-out line, and sets your tone from samples and from emails of yours that got replies, if you have them. You send the messages. |
+| **Full** | about 24 | Everything in standard, plus floorboss sends what you approve, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), logs messages in your CRM, and asks how many days to leave between follow-ups. |
 
 The counts are the setup questions after the level and the event, from walking the question tree for a
 seller who works alone and has a CRM, mailbox and calendar connected, and who has written nothing about themselves yet (standard and full ask for a line about you and what you know that buyers may not); a team, a CRM export, an event outside the English-speaking world, a job search or a list that's
@@ -756,7 +900,8 @@ instead; if that happens with yours, please open an issue.
 ## Where your data lives
 
 Everything floorboss stores is in `~/.floorboss/` (or wherever `FLOORBOSS_HOME` points), outside your
-projects, with files readable only by you.
+projects, with files readable only by you. In Codex it is the `floorboss` folder inside the folder you start Codex
+in, kept out of that project's git by its own `.gitignore` ([Run it in Codex](#run-it-in-codex)).
 
 At the top of that folder is your setup, shared by every event: `config.json` (your settings and the
 connections that passed their test), `onboarding.json` (your answers), `inventory.json` (what the scan found

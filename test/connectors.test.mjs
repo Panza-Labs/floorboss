@@ -178,7 +178,7 @@ test('plan, triage and draft with recipes: calendar, CRM lookups, staged drafts'
   cli('crm-triage', ['gate', '--event', SLUG, '--answers', 'defaults']);
   const todo = cli('event-outreach', ['todo', '--event', SLUG]);
   const job = JSON.parse(readFileSync(todo.todo_file, 'utf8')).jobs.find((j) => j.kind === 'message' && j.channel === 'email');
-  const body = `Hi, one question before ${ev.name}: where does onboarding time go? Could you do ${job.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${todo.optout_sentence}`;
+  const body = `Hi, one question before ${ev.name}: where does onboarding time go? Could you do ${job.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\nBest, Sam\n\n${todo.optout_sentence}`;
   const dp = join(home, 'd.json');
   writeFileSync(dp, JSON.stringify([{ id: job.id, touch: 1, subject: 'Onboarding time', body }]));
   cli('event-outreach', ['save-drafts', '--event', SLUG, '--drafts-file', dp]);
@@ -212,7 +212,7 @@ test('staging after approval: a redraft flags the old mailbox draft, removed peo
   cli('crm-triage', ['gate', '--event', SLUG, '--answers', 'defaults']);
   const todo = cli('event-outreach', ['todo', '--event', SLUG]);
   const jobs = JSON.parse(readFileSync(todo.todo_file, 'utf8')).jobs.filter((j) => j.kind === 'message' && j.channel === 'email').slice(0, 2);
-  const mk = (j, q) => ({ id: j.id, touch: 1, subject: 'Onboarding', body: `Hi, ${q} Could you do ${j.slot_labels.join(' or ')} at Harbour & Haul Expo?\n\nBest, Sam\n\n${todo.optout_sentence}` });
+  const mk = (j, q) => ({ id: j.id, touch: 1, subject: 'Onboarding', body: `Hi, ${q} Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Harbour & Haul Expo?\n\nBest, Sam\n\n${todo.optout_sentence}` });
   const dp = join(home, 'd.json');
   const vp = join(home, 'v.txt');
   const approve = (list) => {

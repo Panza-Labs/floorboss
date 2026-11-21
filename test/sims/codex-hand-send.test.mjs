@@ -34,7 +34,8 @@ test('Codex: a whole campaign by hand, with no connected-tool step and send butt
   const env = { ...process.env, FLOORBOSS_HOME: HOME, FLOORBOSS_SCAN_HOME: join(HOME, 'scan-home'), FLOORBOSS_SCAN_CWD: join(HOME, 'scan-home'), CODEX_SESSION_ID: 'codex-sess', CODEX_THREAD_ID: 'codex-thread' };
   delete env.CLAUDECODE;
   // A Claude Code setup on the same machine left a send connection and sending on: Codex must not use either.
-  writeFileSync(join(HOME, 'config.json'), JSON.stringify({ connectors: { 'email.send': { server: 'claude_ai_Gmail', tool: 'send_message', args: { to: '{to}', subject: '{subject}', body: '{body}' } } }, sending: { channels: ['email'], followups: 'scheduled' } }));
+  // This campaign covers email cards and email review samples.
+  writeFileSync(join(HOME, 'config.json'), JSON.stringify({ channels: ['email'], connectors: { 'email.send': { server: 'claude_ai_Gmail', tool: 'send_message', args: { to: '{to}', subject: '{subject}', body: '{body}' } } }, sending: { channels: ['email'], followups: 'scheduled' } }));
   const day = (d) => `${d}T09:00:00Z`;
   const now = day('2026-10-12');
   execFileSync('node', [join(ROOT, 'examples/mock-event/load.mjs'), '--goal', 'buyers', '--now', now], { env });
@@ -46,6 +47,22 @@ test('Codex: a whole campaign by hand, with no connected-tool step and send butt
   // Not one step asked for a connected tool, a send or a browser.
   assert.deepEqual(steps.filter((s) => s.call).map((s) => s.step), []);
   assert.ok(!steps.some((s) => /send|stage|browser|crm_log_window|test_call/.test(s.step)), steps.map((s) => s.step).join(' '));
+  // The review is in the chat: the approval's run_first is flow review (a sample, the total, one read-only document),
+  // never the review page.
+  const ap = steps.find((s) => s.step === 'approve');
+  assert.ok(ap, 'an approval step');
+  assert.equal(ap.run_first[2], 'review');
+  assert.doesNotMatch(JSON.stringify(ap), /review page|--review|outbox\.html/);
+  assert.ok(ap.accepts.includes('review_feedback'));
+  const rv = JSON.parse(execFileSync('node', [join(ROOT, 'skills/flow/scripts/cli.mjs'), ...ap.run_first.slice(2)], { env: { ...env, FLOORBOSS_NOW: now }, encoding: 'utf8' }));
+  assert.ok(rv.total >= 10, String(rv.total));
+  assert.ok(rv.sample.length >= 2 && rv.sample.length <= 4, String(rv.sample.length));
+  assert.ok(rv.sample.every((m) => m.subject && m.body && m.to));
+  assert.equal(new Set(rv.sample.map((m) => m.id)).size, rv.sample.length, 'different people');
+  assert.match(ap.ask.question, new RegExp(`Approve all ${rv.total} messages`));
+  assert.match(rv.approval_line, new RegExp(`^Approve all ${rv.total} messages`));
+  const doc = readFileSync(rv.document, 'utf8');
+  assert.equal((doc.match(/^### Message /gm) || []).length, rv.total, 'every message in the document');
 
   const dir = join(HOME, 'events', SLUG);
   const html = readFileSync(join(dir, 'outbox.html'), 'utf8');

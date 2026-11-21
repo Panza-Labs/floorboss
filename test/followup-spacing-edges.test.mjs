@@ -31,8 +31,10 @@ function approveRounds(H, now = NOW, extra = '') {
     const r = todoJobs(H, now);
     for (const j of r.jobs.filter((x) => x.kind === 'message' && !x.waits_for_previous)) {
       const d = draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] });
-      const body = j.touch === 1 && extra ? d.body.replace(/\n\nBest, Sam/, ` ${extra}\n\nBest, Sam`) : d.body;
-      cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x', structure: d.structure, fact_source: d.fact_source, ...(d.insight ? { insight: d.insight } : {}) })], now);
+      // Leave room for a shorter third message in the four-touch sequences.
+      const note = j.touch === 2 && !j.last_touch ? 'We could compare shift handoffs.' : j.touch === 1 ? extra : '';
+      const body = note ? d.body.replace(/\n\nBest, Sam/, ` ${note}\n\nBest, Sam`) : d.body;
+      cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x, no research profile', structure: d.structure, fact_source: d.fact_source, ...(d.insight ? { insight: d.insight } : {}) })], now);
       cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', 'PASS'], now);
     }
   }

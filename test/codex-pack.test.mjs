@@ -30,9 +30,13 @@ test('the Codex manifest names its own skills, commands and an empty hooks file'
 
 test('the pack names no Claude-only tool, variable or command', () => {
   const banned = [/AskUserQuestion/, /\bAgent tool\b/, /\bSkill tool\b/, /\/clear\b/, /\bmcp__/, /allowed-tools/, /\bWebFetch\b/];
+  const cloudTask = join('codex', 'autosend-task.md');
+  const gmailTools = /\bmcp__codex_apps__gmail_(?:get_profile|read_email_thread|search_emails|send_email)\b/g;
   for (const f of PACK) {
     const text = readFileSync(join(ROOT, f), 'utf8');
-    for (const b of banned) assert.ok(!b.test(text), `${f}: ${b}`);
+    // This task names the four connected Gmail tools available in ChatGPT.
+    const checked = f === cloudTask ? text.replace(gmailTools, '') : text;
+    for (const b of banned) assert.ok(!b.test(checked), `${f}: ${b}`);
   }
   // CLAUDE_PLUGIN_ROOT appears once, in the sentence that says what to read in its place.
   for (const f of PACK) {
@@ -50,7 +54,7 @@ test('the pack names no Claude-only tool, variable or command', () => {
   // the brief on request.
   assert.match(skill, /every word\*\* of a command in double quotes/);
   assert.match(skill, /`floorboss:` taken off the front of the name/);
-  assert.match(skill, /copy the file into `~\/\.floorboss\/work\/`/);
+  assert.match(skill, /copy the file into the project folder or its `floorboss\/work\/` folder/);
   assert.match(skill, /`YYYY-MM-DD HH:MM` in the event's time zone/);
   assert.match(skill, /next --agenda --event <slug>/);
   assert.match(skill, /^name: floorboss$/m);

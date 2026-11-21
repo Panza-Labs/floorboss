@@ -27,8 +27,8 @@ function twoTouches(answer, verdicts = {}) {
   triage(H);
   const { t, jobs } = todoJobs(H);
   for (const j of jobs.filter((x) => x.kind === 'message')) {
-    const times = j.slot_labels?.length ? `Could you do ${j.slot_labels.join(' or ')}?` : 'Could we find 30 minutes at Test Expo?';
-    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, message ${j.touch} about Test Expo. ${times}\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x' })]);
+    const times = j.slot_labels?.length ? `Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?` : 'Could we find 30 minutes at Test Expo?';
+    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, message ${j.touch} about Test Expo. ${times}\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x, no research profile' })]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', verdicts[j.touch] || 'PASS']);
   }
   // Run 6, round 3: "approve all" with another clause is read back first and saved on the user's yes.
@@ -68,7 +68,7 @@ test('3: a text the critic failed can\'t be skipped past it after a revise, and 
   const r = todoJobs(H);
   const bo = idOf(H, 'Bo Li');
   for (const j of r.jobs) {
-    const d = (({ body, structure, fact_source, insight }) => ({ subject: 'Test Expo', body, brief: 'x', structure, fact_source, ...(insight ? { insight } : {}) }))(draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] }));
+    const d = (({ body, structure, fact_source, insight }) => ({ subject: 'Test Expo', body, brief: 'x, no research profile', structure, fact_source, ...(insight ? { insight } : {}) }))(draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] }));
     cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify(d)]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', j.id === bo ? 'FAIL: invents a customer' : 'PASS']);
   }
@@ -113,7 +113,7 @@ test('5: the "failed twice, held" count is the ledger\'s: zeroing it in the work
   const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.example\nBo Li,COO,Globex,bo@globex.example\n' });
   triage(H);
   const { t, jobs } = todoJobs(H);
-  const save = (j) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi ${j.contact.name.split(' ')[0]}, we're both at Test Expo. Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x' })]);
+  const save = (j) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi ${j.contact.name.split(' ')[0]}, we're both at Test Expo. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x, no research profile' })]);
   const verdict = (j, text) => cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', '1', '--text', text]);
   const [bad] = jobs;
   save(bad); verdict(bad, 'FAIL: could go to anyone'); save(bad); verdict(bad, 'FAIL: still could go to anyone');
@@ -127,8 +127,8 @@ test('6: a rewrite saved back as the very text that failed counts as a second fa
   triage(H);
   const { t, jobs } = todoJobs(H);
   const [j] = jobs;
-  const body = `Hi Ana, we're both at Test Expo. Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`;
-  const save = () => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x' })]);
+  const body = `Hi Ana, we're both at Test Expo. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`;
+  const save = () => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x, no research profile' })]);
   save(); cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', '1', '--text', 'FAIL: could go to anyone']); save();
   assert.ok(todoJobs(H).jobs.find((x) => x.id === j.id).critic_held);
 });

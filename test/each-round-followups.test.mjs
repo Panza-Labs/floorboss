@@ -57,7 +57,7 @@ test('the critic gets the earlier message of a sequence drafted up front, and th
   const { t, jobs } = todoJobs(H);
   assert.ok(jobs.some((j) => j.touch === 2), 'with sending on the whole sequence is drafted up front');
   const ana = idOf(H, 'Ana Berg');
-  for (const j of jobs.filter((x) => x.id === ana && x.kind === 'message')) cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', ana, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, message ${j.touch}. Could we find 30 minutes at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x' })]);
+  for (const j of jobs.filter((x) => x.id === ana && x.kind === 'message')) cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', ana, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi Ana, message ${j.touch}. Could we find 30 minutes at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x, no research profile' })]);
   const inp = cli(H, 'event-outreach', ['critic-input', '--event', H.slug, '--id', ana, '--touch', '2']);
   assert.ok(inp.previous_message, 'the first message is there although nothing was sent yet');
 });

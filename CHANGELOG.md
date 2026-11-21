@@ -7,6 +7,22 @@ All notable changes to floorboss are listed here. The format follows Keep a Chan
 The first public version.
 
 ### Codex and hand-send
+- Auto-send from the cloud (Codex, Gmail only): after the content approval and a second yes ("auto-send these
+  sequences", bound to the readback the user saw), a ChatGPT scheduled task on the user's own account sends each
+  approved message on its day, first message included, with a Gmail reply check decided in code before each one.
+  The data folder lives in the user's private GitHub repo, pulled and pushed with a lock (`lib/autosend/`,
+  `skills/autosend/`, `codex/autosend-task.md`). There is no guard in Codex: floorboss trusts the model with
+  sending, and SECURITY.md says so. Tested with a fake Gmail and a local bare repo only; untested on a live account.
+  A send step is shown only once its release mark is confirmed in the repo, within 3 minutes of its search, in the
+  event's hours and with Claude Code's email sending off. The laptop's auto-send changes (on, the second yes, a stop,
+  a settled send, a reply or stop recorded) are pushed as they are made, and `autosend sync repair` brings a laptop
+  that moved apart from the repo back in line without dropping a stop.
+- Auto-send reads the Gmail tools as a live ChatGPT/Codex cloud run showed them (`mcp__codex_apps__gmail_search_emails`,
+  `mcp__codex_apps__gmail_send_email`): the search's emails and the send's ids come from the result's
+  `structuredContent`, and an `isError` result stops the run (a send's is unclear, never sent or retried). The send
+  goes as `text/plain` with the approved body byte for byte, and a follow-up replies to the first email's message id,
+  so it stays in the thread. The task prompt sets git's sign-in to GitHub for the whole run (a global credential
+  helper reading `GITHUB_TOKEN`) and asks for the whole tool result as JSON.
 - floorboss runs in OpenAI's Codex: the whole event, with you sending every message from your own mail app. A
   Codex pack (`.codex-plugin/plugin.json`, `.agents/skills/floorboss/`, `AGENTS.md`) asks in the chat and runs the
   critic in the same conversation, and says so. Untested in Codex itself, on Windows and with Outlook.
@@ -16,6 +32,19 @@ The first public version.
 - The outbox page: each approved email that may go today gets "Open in your mail app" (a mailto: link with the
   exact approved text) and "Download .eml" (an unsent draft file), in Claude Code too. Only cards that offer Copy
   get them.
+- From a simulated Codex run: the critic's batches keep their numbers until their verdicts are in, so a command
+  given earlier still matches after `next`; hand-send step texts no longer say "in parallel", "with sending on" or
+  `/floorboss:start` (Claude Code's are unchanged); the critic's instructions and the Codex skill agree on the batch
+  file; the outbox's "N of M sent" counts recorded sends; the shortlist gives a LinkedIn-only person's link as `to`;
+  `verdicts --ids ""` says the ids are empty.
+- Second round: a critic verdict counts only for the text the critic was shown (the step's command carries each
+  draft's fingerprint), and a batch numbered afresh starts with no old reply file; a rescheduled meeting drops the
+  outcome of its old time; the mock event's settings save and the CRM web-app log window follow hand-send's rules;
+  a subject holding an encoded word (`=?…?=`) is flagged by the checks and encoded whole in the .eml; the CSVs keep a
+  cell as text when a formula sign follows spaces or a line break, or is full-width; command output in hand-send
+  names no slash command or Claude Code tool; the unattended job's install, remove and on refuse a shell with any
+  Codex marker, terminal or not.
+- The outbox page's own CRM log CSV keeps a formula-like cell as text by the same rule as the other CSVs.
 
 ### Meeting outcomes
 - Record how each booked meeting went (held, no-show, cancelled, rescheduled) and walk-ups, in your own words; the

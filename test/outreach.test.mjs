@@ -45,7 +45,7 @@ const labels = ['Tue 27 Oct, 10:00 Lisbon time', 'Wed 28 Oct, 14:30 Lisbon time'
 const optout = "If this isn't relevant, say so and I won't follow up.";
 const good = {
   channel: 'email', subject: 'Freight Forward: 20 minutes on carrier onboarding',
-  body: `Hi Marta, saw you're at Freight Forward. Northwind opened a Rotterdam hub last month, and that usually means new carriers to onboard. We cut onboarding from 9 days to 4 for a freight company your size. Could you do ${labels[0]} or ${labels[1]}, 30 minutes near Hall 2?\n\nBest,\nSam\n\n${optout}`,
+  body: `Hi Marta, saw you're at Freight Forward. Northwind opened a Rotterdam hub last month, and that usually means new carriers to onboard. We cut onboarding from 9 days to 4 for a freight company your size. Could you do Tue 27th at 10:00 or Wed 28th at 14:30, 30 minutes at Freight Forward?\n\nBest,\nSam\n\n${optout}`,
 };
 const ctx = { contact, slotLabels: labels, eventName: 'Freight Forward', optout, pasteLimit: 600, otherNames: ['Dev Patel'] };
 

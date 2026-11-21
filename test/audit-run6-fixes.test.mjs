@@ -479,7 +479,7 @@ test('a follow-up saved before the message before it had any text goes back once
     const j = jobs.find((x) => x.id === ana && x.touch === touch);
     assert.ok(j, `job ${touch}: ${JSON.stringify(jobs.map((x) => x.touch))}`);
     const d = draftFor({ ...t, insights: [] }, { ...j, slot_labels: j.slot_labels || [] });
-    const s = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', ana, '--touch', String(touch), '--json', JSON.stringify({ subject: 'Test Expo', body: d.body + suffix, brief: 'x', structure: d.structure, fact_source: d.fact_source, ...(d.insight ? { insight: d.insight } : {}) })]);
+    const s = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', ana, '--touch', String(touch), '--json', JSON.stringify({ subject: 'Test Expo', body: d.body + suffix, brief: 'x, no research profile', structure: d.structure, fact_source: d.fact_source, ...(d.insight ? { insight: d.insight } : {}) })]);
     assert.ok(!s.ERROR, s.ERROR);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', ana, '--touch', String(touch), '--text', 'PASS']);
   };

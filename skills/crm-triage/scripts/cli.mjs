@@ -34,7 +34,7 @@ import { modeFor, daysUntilEvent } from '../../event-outreach/scripts/leadtime.m
 import { plannedDays, followupDay, spacingWords } from '../../../lib/spacing.mjs';
 import { HARD_HOLDS } from './resolve.mjs';
 import { plainOwnerValue, ownerQuoted, ownerSaid } from '../../../lib/names.mjs';
-import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
+import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, segmentOf, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
 import { inventoryView } from '../../../lib/harness.mjs';
 
 // A list file named on the command line: in a folder floorboss reads from, not a key place, a list's kind of
@@ -479,6 +479,8 @@ function fit(opts) {
       who: 'floorboss',
       id: f.id,
       segment: f.unsure ? null : f.segment || null,
+      // An unsure fit keeps the segment it read as a guess: a "reach … because" from the user then has it.
+      ...(f.unsure && f.segment ? { guess: f.segment } : {}),
       reason: String(f.reason || '').trim(),
       score: f.score == null || f.score === '' ? null : Number(f.score),
       unsure: !!f.unsure,
@@ -840,10 +842,12 @@ function view(opts) {
       name: x.name,
       title: x.title,
       company: x.company,
-      to: x.email,
+      // Where a message would go: the email, else (a reach person with only a LinkedIn link) the link, as todo.json's
+      // job has it; with neither, no "to" at all rather than an empty one.
+      ...(x.email || x.profile_url ? { to: x.email || x.profile_url } : {}),
       group: r.group,
       says: r.says,
-      segment: c.state.fits[id]?.segment || null,
+      segment: segmentOf(c.state.fits[id], r.group),
       ...(r.account_note ? { account_note: r.account_note } : {}),
       ...(r.coworker ? { coworker: `${r.coworker}'s contact${r.coworker_warn ? ": you're warned before sending" : ''}` } : {}),
       ...(r.coworker_also ? { coworker_also: `${r.coworker_also} also works this company` } : {}),
@@ -994,6 +998,8 @@ function view(opts) {
     with_two_times: Object.values(v.assignments).filter((x) => x.length === 2).length,
     with_one_time: Object.values(v.assignments).filter((x) => x.length === 1).length,
     open_ask: v.openAsk.length,
+    // Times go only on :00 or :30: said plainly when that leaves someone with fewer than two to choose from.
+    few_times_note: fewTimesNote(v),
     // No free time given yet is not "ran out": times come once it is.
     open_ask_note: v.openAsk.length
       ? v.slots.length
@@ -1445,6 +1451,7 @@ function plan(opts) {
     // The days between messages: the user's own gap, or what the lead-time table gives today.
     follow_up_spacing: routeLength(c.settings) > 1 ? spacingWords(c.settings, mode) : undefined,
     mode,
+    few_times: fewTimesNote(v),
     no_times: v.openAsk.length
       ? v.slots.length
         ? `${v.openAsk.length} of them get no time to choose from (your free slots ran out): add free time, or keep fewer.`
@@ -1747,6 +1754,14 @@ function enrichImport(opts) {
       : {}),
     next: `load --event ${c.slug}, then the gate again.`
   };
+}
+
+// Who gets fewer than two times because floorboss offers only times on the hour or the half hour: said plainly,
+// never filled with an invented time.
+function fewTimesNote(v) {
+  const short = (v.shortOfTwo || []).length + (v.openAsk || []).length;
+  if (!v.offGrid || !short) return undefined;
+  return `${short} ${short === 1 ? 'person gets' : 'people get'} fewer than two times to choose from: floorboss offers only times on the hour or the half hour, and ${v.offGrid} of your free ${v.offGrid === 1 ? 'slot starts' : 'slots start'} at another minute (after a busy block or a gap). Add free time that starts on :00 or :30, or keep fewer people.`;
 }
 
 export { mustMeetHits };

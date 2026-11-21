@@ -6,6 +6,7 @@
 // one name that doesn't resolve, or matches two people, and nothing is recorded.
 import { sameName, companyRelated, noteText } from '../../../lib/normalize.mjs';
 import { zonedToUtc, todayKeyIn, labelInZone, weekdayOf } from '../../../lib/tz.mjs';
+import { awayNote } from './commands/context.mjs';
 
 export const WHATS = [
   'sent',
@@ -409,7 +410,7 @@ export function planRecord(items, ctx) {
           [...blocks, slot].map((b) => bookedAt.get(b)).find((other) => other && other !== id) ||
           meetings.find((x) => x.id !== id && x.s0 < s1 && x.s1 > s0)?.id;
         if (clash) {
-          errors.push(`${where}: ${labelInZone(start, ctx.zone)} overlaps a meeting already booked with ${ctx.byId[clash]?.name || clash}`);
+          errors.push(`${where}: ${labelInZone(start, ctx.zone, { city: ctx.city })} overlaps a meeting already booked with ${ctx.byId[clash]?.name || clash}`);
           return;
         }
         const moved = !!st.booked;
@@ -431,7 +432,7 @@ export function planRecord(items, ctx) {
         st.booked_start = start;
         st.booked_blocks = blocks;
         lines.push(
-          `${moved ? 'moved' : 'booked'}: ${who}, ${labelInZone(start, ctx.zone)}${exact ? '' : ' (not one of your slots; the slots it overlaps are now taken)'}`
+          `${moved ? 'moved' : 'booked'}: ${who}, ${labelInZone(start, ctx.zone, { city: ctx.city })}${exact ? '' : ' (not one of your slots; the slots it overlaps are now taken)'}`
         );
         break;
       }
@@ -450,7 +451,8 @@ export function planRecord(items, ctx) {
         );
         break;
       }
-      // An out-of-office reply: not a reply to the message. The day they're back is noted; follow-ups keep their days.
+      // An out-of-office reply: not a reply to the message. The day they're back is noted; follow-ups keep their days
+      // in Claude Code, and wait for the first working day after it in hand-send (context.mjs awayNote).
       case 'away': {
         const until = String(item.until || '').trim();
         if (!validDay(until) || until < today) {
@@ -458,7 +460,7 @@ export function planRecord(items, ctx) {
           return;
         }
         entries.push({ type: 'paused', ...base, until });
-        lines.push(`${who} is away until ${until}: follow-ups go on as planned`);
+        lines.push(`${who} is ${awayNote(until)}`);
         break;
       }
       case 'replied': {
@@ -477,6 +479,8 @@ export function planRecord(items, ctx) {
           ...(noteText(item.text, 4000) ? { text: noteText(item.text, 4000) } : {})
         });
         lines.push(`${who} replied: no more follow-ups`);
+        // Nothing of theirs recorded as sent: said, so a send never recorded (or a reply put on the wrong person) shows.
+        if (!Object.keys(st.sent).length && !st.booked) notes.push(`${who}: they weren't marked sent; recorded anyway`);
         // A time in the reply is a meeting to settle: said now, and asked next (book it, or not yet).
         const tm = timeInReply(`${item.said || ''} ${item.text || ''}`, ctx.eventDays || []);
         if (tm) {
@@ -510,17 +514,17 @@ export function planRecord(items, ctx) {
           return;
         }
         if (Date.parse(st.booked_start) > ctx.now.getTime()) {
-          errors.push(`${where}: ${who}'s meeting is at ${labelInZone(st.booked_start, ctx.zone)}, still to come: mark it once it's time`);
+          errors.push(`${where}: ${who}'s meeting is at ${labelInZone(st.booked_start, ctx.zone, { city: ctx.city })}, still to come: mark it once it's time`);
           return;
         }
         const was = [...(ctx.state[id]?.meeting_outcomes || [])].reverse().find((o) => o.start === st.booked_start);
         if (was?.outcome === item.what) {
-          notes.push(`${who}: the meeting at ${labelInZone(st.booked_start, ctx.zone)} is already marked ${word}`);
+          notes.push(`${who}: the meeting at ${labelInZone(st.booked_start, ctx.zone, { city: ctx.city })} is already marked ${word}`);
           return;
         }
         entries.push({ type: 'meeting_outcome', ...base, outcome: item.what, slot: st.booked, start: st.booked_start });
         lines.push(
-          `${who}: the meeting at ${labelInZone(st.booked_start, ctx.zone)} ${item.what === 'held' ? 'happened' : 'was a no-show'}${was ? ` (it was marked ${was.outcome === 'held' ? 'held' : 'a no-show'} before)` : ''}`
+          `${who}: the meeting at ${labelInZone(st.booked_start, ctx.zone, { city: ctx.city })} ${item.what === 'held' ? 'happened' : 'was a no-show'}${was ? ` (it was marked ${was.outcome === 'held' ? 'held' : 'a no-show'} before)` : ''}`
         );
         break;
       }

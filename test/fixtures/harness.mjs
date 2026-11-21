@@ -115,13 +115,17 @@ export const idOf = (H, name) => JSON.parse(readFileSync(join(H.dir, 'derived', 
 // Draft, PASS and approve everything todo hands out.
 export function draftApprove(H, now = NOW, answers = 'approve all') {
   const r = todoJobs(H, now);
-  const opt = r.t.optout_sentence;
+  const longerSequences = new Set(r.jobs.filter((j) => j.kind === 'message' && j.touch >= 4).map((j) => j.id));
   for (const j of r.jobs) {
     const first = j.contact.name.split(' ')[0];
-    const times = j.slot_labels?.length ? `Could you do ${j.slot_labels.join(' or ')}?` : 'Could we find 30 minutes at Test Expo?';
+    const times = j.slot_labels?.length ? `Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?` : 'Could we find 30 minutes at Test Expo?';
     const d = j.kind === 'coordinate' ? { body: `${j.holder}, ${j.contact.name} is at Test Expo. Want to reach out?` }
       : j.kind === 'confirmation' ? { subject: 'Re: Test Expo', body: `Hi ${first}, confirming ${j.slot_labels.join('')}. See you at Test Expo.\n\nBest, Sam` }
-        : (({ body, structure, fact_source, insight }) => ({ subject: 'Test Expo', body: j.slot_labels?.length ? body : body.replace(/Could you do .*\?/, times), brief: 'x', structure, fact_source, ...(insight ? { insight } : {}) }))(draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] }));
+        : (({ body, structure, fact_source, insight }) => ({ subject: 'Test Expo', body: j.slot_labels?.length ? body : body.replace(/Could you do .*\?/, times), brief: 'x, no research profile', structure, fact_source, ...(insight ? { insight } : {}) }))(draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] }));
+    // Leave room for a shorter third message in longer sequences.
+    if (j.kind === 'message' && j.touch === 2 && longerSequences.has(j.id)) {
+      d.body = d.body.replace('\n\nBest, Sam', ' We could compare shift handoffs across teams.\n\nBest, Sam');
+    }
     cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify(d)], now);
     if (j.kind !== 'coordinate') cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', 'PASS'], now);
   }

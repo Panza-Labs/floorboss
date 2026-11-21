@@ -24,7 +24,7 @@ const copyable = (H) =>
 // A saved draft's text, with a line of the user's own added (times and sign-off kept, so its checks still pass).
 const editedText = (H, id, line) => {
   const d = JSON.parse(readFileSync(join(H.dir, 'work', 'drafts', `${id}-t1.json`), 'utf8'));
-  return { subject: d.subject, body: d.body.replace(/\n\n/, `\n\n${line}\n\n`), brief: 'x', structure: d.structure || 'question-first', fact_source: d.fact_source || 'list' };
+  return { subject: d.subject, body: d.body.replace(/\n\n/, `\n\n${line}\n\n`), brief: 'x, no research profile', structure: d.structure || 'question-first', fact_source: d.fact_source || 'list' };
 };
 const bodyOf = (H, key) => cards(H).find((m) => `${m[1]}:${m[2]}` === key)?.[0] || '';
 const file = (H, name, o) => {

@@ -76,6 +76,8 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
       if (v === undefined && s.ask.id === 'company_research') v = 'go';
       if (v === undefined && s.ask.id === 'agenda_news') v = 'go';
       if (v === undefined && s.ask.id === 'message_route') v = 'email, email (no other channels)';
+      if (v === undefined && s.ask.id === 'touches') v = '3';
+      if (v === undefined && s.ask.id === 'sending') v = "no, I'll send them myself";
       if (v === undefined && s.ask.id === 'followup_gap') v = 'the default: set by how far off the event is (recommended)';
       if (v === undefined) throw new Error(`The persona has no answer for "${s.ask.id}": ${s.ask.question}`);
       // A simulated run answers only what the flow asks: never out of turn (FLOORBOSS_OUT_OF_TURN is for unit tests).
@@ -112,7 +114,7 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
     if (s.agents) {
       for (const ag of s.agents) {
         if (ag.input_file && /critic/.test(ag.name)) { const inp = JSON.parse(readFileSync(ag.input_file, 'utf8')); writeFileSync(ag.write, persona.judge.critic(inp)); const r = cli(H, skillOf(ag.then), ag.then.slice(2)); if (r.ERROR) throw new Error(`${s.step} then: ${r.ERROR}`); continue; }
-        const reply = ag.input?.mode === 'briefing' ? (persona.judge.briefing ? persona.judge.briefing(ag.input) : { news: [], searched: [`${ag.input.company} news`] }) : ag.input?.mode === 'company' ? (persona.judge.company ? persona.judge.company(ag.input) : { sells: `${ag.input.company} (simulated)`, relation_to_us: 'prospect: simulated persona, no public tie', existing_vendors: 'none found', what_they_would_want: 'what the sender offers', do_not_tell_them: 'their own product', industry_news_none: 'simulated persona: no market to search', sources: [`https://${String(ag.input.company).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.example/about`] }) : persona.judge.research ? persona.judge.research(ag.input) : null;
+        const reply = ag.input?.mode === 'briefing' ? (persona.judge.briefing ? persona.judge.briefing(ag.input) : { news: [], searched: [`${ag.input.company} news`] }) : ag.input?.mode === 'company' ? (persona.judge.company ? persona.judge.company(ag.input) : { sells: `${ag.input.company} (simulated)`, relation_to_us: 'prospect: simulated persona, no public tie', existing_vendors: 'none found', what_they_would_want: 'what the sender offers', do_not_tell_them: 'their own product', industry_news_none: 'simulated persona: no market to search', sources: [`https://${String(ag.input.company).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.example/about`] }) : persona.judge.research ? persona.judge.research(ag.input) : defaultResearch(ag.input);
         if (reply == null) throw new Error(`The persona can't play "${ag.name}"`);
         writeFileSync(ag.write, typeof reply === 'string' ? reply : JSON.stringify(reply));
         const r = cli(H, skillOf(ag.then), ag.then.slice(2)); if (r.ERROR) throw new Error(`${s.step} then: ${r.ERROR}`);
@@ -123,7 +125,7 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
       const input = s.agent.input_file ? JSON.parse(readFileSync(s.agent.input_file, 'utf8')) : s.agent.input;
       // A company brief: the persona's own, or a plain stand-in (a prospect wanting what the sender offers).
       const companyBrief = (x) => (persona.judge.company ? persona.judge.company(x) : { sells: `${x.company} (simulated)`, relation_to_us: 'prospect: simulated persona, no public tie', existing_vendors: 'none found', what_they_would_want: 'what the sender offers', do_not_tell_them: 'their own product', industry_news_none: 'simulated persona: no market to search', sources: [`https://${String(x.company).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.example/about`] });
-      const reply = input?.mode === 'company' ? companyBrief(input) : persona.judge.critic && /critic/.test(s.agent.name) ? persona.judge.critic(input) : persona.judge.research ? persona.judge.research(input) : null;
+      const reply = input?.mode === 'company' ? companyBrief(input) : persona.judge.critic && /critic/.test(s.agent.name) ? persona.judge.critic(input) : persona.judge.research ? persona.judge.research(input) : defaultResearch(input);
       if (reply == null) throw new Error(`The persona can't play "${s.agent.name}"`);
       writeFileSync(s.agent.write, typeof reply === 'string' ? reply : JSON.stringify(reply));
       const r = cli(H, skillOf(s.agent.then), s.agent.then.slice(2)); if (r.ERROR) throw new Error(`${s.step} then: ${r.ERROR}`);
@@ -170,21 +172,43 @@ const BANK = {
   ],
   // Insight-first and peer notes lead with an insight from the profile (the only thing they may claim).
   'insight-first': [['Something you may not have seen:', 'Worth knowing before the event:', 'In case it is useful:', 'A pattern worth a look:', 'One thing that stood out:', 'A quick data point:'], null],
+  // The plain form opens with the reader's side, never the sender ("I sell…" fails floorboss's checks).
   'plain-request': [
-    ['I sell software for', 'My team builds tools for', 'I work on a product for', 'We make a platform for', 'I look after accounts in', 'Our product helps with'],
+    ['Your work in', 'Teams like yours in', 'People who run', 'Leaders in', 'Whoever owns', 'Your side of'],
     ['fraud operations', 'financial-crimes teams', 'case management', 'alert triage', 'payments risk', 'investigations'],
   ],
   'peer-note': [['Comparing notes:', 'From one ops person to another:', 'You may see this too:', 'A note from my side:', 'Curious if this matches yours:', 'Quick one between peers:'], null],
 };
 const pickN = (key, n) => parseInt(createHash('sha256').update(key).digest('hex').slice(0, 8), 16) % n;
+const CLOSING_LINES = [
+  (days) => `One last question: cross paths ${days}?`,
+  (days) => `Final check for ${days}: up for a chat?`,
+  (days) => `Would a quick chat ${days} work? Last note.`,
+  (days) => `Last call before the show: meet ${days}?`,
+  (days) => `Can we compare notes ${days}? Final ask.`,
+  (days) => `Last note on this: any interest ${days}?`,
+  (days) => `Worth a brief conversation ${days}? Final note.`,
+  (days) => `Final invitation for ${days}: want to talk?`,
+  (days) => `Would you meet ${days}? My last message.`,
+  (days) => `Interested in talking ${days}? Last check from me.`,
+  (days) => `Final nudge for the show: say hello ${days}?`,
+  (days) => `Any appetite to meet ${days}? Last question.`
+];
+const CLOSING_SUBJECTS = ['A quick chat', 'At the show', 'Comparing notes', 'A closing note', 'Meeting at the show', 'One more thought'];
+
+// A person researched by a persona that brought no research: one sourced claim about their company.
+const defaultResearch = (x) => (x?.id ? { identity_confirmed: true, role_seen: x.title, person_claims: 0, complete: true, claims: [{ text: `${x.company} runs its own counters and a regional team.`, url: `https://${String(x.company).toLowerCase().replace(/[^a-z0-9]+/g, '-')}.example/about` }] } : null);
 export function draftFor(todo, j, attempt = 0) {
   const first = j.contact.name.split(' ')[0];
   const sign = `\n\nBest, Sam\n\n${todo.optout_sentence || "If this isn't relevant, say so and I won't follow up."}`;
-  if (j.kind === 'coordinate') return { id: j.id, touch: j.touch, body: `${j.holder}, ${j.contact.name} is at the event. Want to reach out?`, brief: 'x' };
-  if (j.kind === 'confirmation') return { id: j.id, touch: j.touch, subject: 'See you there', body: `Hi ${first}, confirming ${j.slot_labels.join('')}. See you at our stand.\n\nBest, Sam`, brief: 'x' };
+  if (j.kind === 'coordinate') return { id: j.id, touch: j.touch, body: `${j.holder}, ${j.contact.name} is at the event. Want to reach out?`, brief: 'x, no research profile' };
+  if (j.kind === 'confirmation') return { id: j.id, touch: j.touch, subject: 'See you there', body: `Hi ${first}, confirming ${j.slot_labels.join('')}. See you at our stand.\n\nBest, Sam`, brief: 'x, no research profile' };
   const structure = j.structure || 'plain-request';
-  const fact = (j.fact_sources || ['list'])[0];
-  const times = j.slot_labels.join(' or ');
+  const fs = j.fact_sources || ['list'];
+  // A researched person is written to from the research (the check requires it).
+  const fact = fs.includes('research') ? 'research' : fs[0];
+  // Times the way a person types them ("Tue 10th at 10:00"), not the label.
+  const times = j.slot_labels.map((l) => { const m = /^(\w{3}) (\d{1,2}) \w{3}, (\d{2}:\d{2})/.exec(l); return m ? `${m[1]} ${m[2]}th at ${m[3]}` : l; }).join(' or ');
   const ev = todo.event_name || todo.event?.name || 'the event';
   const key = `${j.id}:${j.touch}:${attempt}`;
   const [stems, ends] = BANK[structure];
@@ -194,14 +218,31 @@ export function draftFor(todo, j, attempt = 0) {
   const open = {
     'question-first': `${a} ${b}?`,
     'insight-first': `${a} ${b}.`,
-    'plain-request': `${a} ${b}.`,
+    'plain-request': `${a} ${b} is what my software is for.`,
     'peer-note': `${a} ${b}.`,
   }[structure];
   const ask = times ? `Would 20 minutes at ${ev} work, ${times}?` : `Could we find 20 minutes at ${ev}?`;
   // A capped note (a LinkedIn invitation): the drafter keeps to it, as the skill says.
   let body = `Hi ${first},\n\n${open} ${ask}${sign}`;
+  let subject = j.touch > 1 ? 'One more thought' : 'At the summit';
+  // A follow-up is shorter than the message before it; the last one is a closing note: it says it's the last, names
+  // the days at the show and asks only yes or no.
+  if (j.followup && j.last_touch) {
+    const d = /^(\w{3})\b.* to (\w{3})\b/.exec(todo.event?.dates || '');
+    const days = d ? `${d[1]} to ${d[2]}` : todo.event?.dates || 'all week';
+    body = CLOSING_LINES[pickN(`closing:${key}`, CLOSING_LINES.length)](days) + sign;
+    subject = CLOSING_SUBJECTS[pickN(`closing-subject:${key}`, CLOSING_SUBJECTS.length)];
+  }
+  else if (j.followup) {
+    // Short openings, so it is always shorter than the first message (which also says "Would 20 minutes at … work").
+    const few = (n) => b.split(' ').slice(0, n).join(' ');
+    const short = structure === 'question-first' ? `${a} ${few(2)}?` : structure === 'plain-request' ? `${a} ${b}.` : `${a} ${few(3)}.`;
+    // Times the way a person types them ("Tue 10th at 10:00"), not the label.
+    const typed = j.slot_labels.map((l) => { const m = /^(\w{3}) (\d{1,2}) \w{3}, (\d{2}:\d{2})/.exec(l); return m ? `${m[1]} ${m[2]}th at ${m[3]}` : l; }).join(' or ');
+    body = `Hi ${first},\n\n${short} ${typed ? `${typed}?` : `Meet at ${ev}?`}${sign}`;
+  }
   if (j.char_limit && body.length > j.char_limit) body = `Hi ${first},\n\n${ask}${sign}`.slice(0, j.char_limit);
-  return { id: j.id, touch: j.touch, subject: j.touch > 1 ? 'One more thought' : 'At the summit', body, brief: 'x', insight: ['insight-first', 'peer-note'].includes(structure) ? insightId : null, structure, fact_source: structure === 'plain-request' && fact === 'none' ? 'none' : fact };
+  return { id: j.id, touch: j.touch, subject, body, brief: 'x, no research profile', insight: ['insight-first', 'peer-note'].includes(structure) ? insightId : null, structure, fact_source: structure === 'plain-request' && fact === 'none' ? 'none' : fact };
 }
 
 // A plain persona that says yes to everything and writes one template per message.
@@ -213,6 +254,8 @@ export function simplePersona(over = {}) {
     asks: { disclaimer: 'ok', setup_level: 'full', colleague_notes: 'no, just leave them to my coworker', stuck_drafts: 'leave them for now', inventory: 'yes', goal_type: 'selling', goal: 'ops leaders at 3PLs', meetings_wanted: 'about 10', company_caps: 'by company size: 1 at a small firm, 2 at a mid-size one, up to 5 at a very large one (recommended)', must_meet: 'none', home_tz: 'Europe/Amsterdam', about_you: { sign_off: 'Best, Sam', sender_name: 'Sam Rivera, Lanecraft', city: 'Amsterdam' }, app: 'none', company: { own_company: 'Lanecraft', own_domains: ['lanecraft.example'] }, team: 'just me', accounts: 'none', dnc: 'none', crm_where: 'a spreadsheet', crm_use: 'I\'ll give you an export instead', tools: { crm: 'export', mailbox: false, calendar: false }, crm_export: 'skip', crm_name: 'Sam Rivera', customers: 'recommended', lost_deals: '12 months', optout_known: 'yes, on every email', known_contacts: 'skip', mailbox_use: 'no', calendar_use: 'no', free_time: { free: 'Tue 10 Nov 10-12, Wed 11 Nov 14-16', zone: 'Europe/Amsterdam' }, list_source: 'an export from the organiser', drafting_mode: 'floorboss writes everything', import_context: 'no', posture: 'a seller with a clear offer', seller_framing: 'no', profile: { name: 'buyers' }, segments: 'ok', material: 'ok', insights: 'none', about: 'the founder, I run sales myself', offer: 'ok', true_claims: 'ok', samples: 'ok', drafter_sample: 'ok', voice_samples: 'skip', rate: rateAll, languages: 'English only', app_notes: 'ok', basics: 'ok', sending: 'none', coworker_contacts: 'leave them alone (recommended)', crm_log: 'make a CRM task for each', crm_create_contacts: 'no, just list them for me', crm_fill_blanks: 'no, don\'t change existing contacts', crm_log_window: 'yes, log them now', crm_create_ok: (st) => ({ answer: 'no', ids: st.ask.ids }), map_columns_attendees: 'ok', map_columns_crm: 'ok', gate: 'ok', research_scale: 'none', approve: 'approve all', replies_since: 'none', ...(over.asks || {}) },
     judge: {
       scan: () => ({ tools: [] }),
+      // Hand-send's sign-off step: the first name the agent knows (here, the account's).
+      'onboarding:about_you': () => ({ first_name: 'Sam', from: 'account' }),
       fit: (rows) => rows.map((r) => ({ id: r.id, segment: 'ops-leaders', reason: `${r.title} at ${r.company}`, score: 80 })),
       draft: (todo, ids) => todo.jobs.filter((j) => ids.includes(`${j.id}:${j.touch}`)).map((j) => { const k = `${j.id}:${j.touch}`; tries[k] = (tries[k] ?? -1) + 1; return draftFor(todo, j, tries[k]); }),
       critic: (batch) => (batch.drafts || batch).map((d) => `${d.id}:${d.touch} PASS`).join('\n'),

@@ -28,6 +28,7 @@ import { randomInt } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { home } from '../lib/paths.mjs';
+import { CODEX_MARKERS } from '../lib/harness.mjs';
 import { writeJson, readJson } from '../lib/jsonio.mjs';
 import {
   JOBS,
@@ -76,19 +77,22 @@ const domain = () => `gui/${process.getuid()}`;
 // before anything is read or written:
 // - a real terminal on both ends (--yes skips the question, never this): a command run from a pipe, a script, a
 //   scheduler or Claude Code's shell has none;
-// - not a shell Claude Code started, which says so in its environment (the variable set at all, even to nothing).
+// - not a shell Claude Code started, which says so in its environment (the variable set at all, even to nothing),
+//   nor one Codex started (any of its markers, lib/harness.mjs CODEX_MARKERS, set at all): a Codex shell can have a
+//   terminal of its own.
 // Neither is a lock against someone who can run any program as you (a terminal can be faked); the guard's rules on
 // what a session may run are the other half, and SECURITY.md says what is left.
 // (scripts/self-check.mjs holds this function to this exact text.)
 function notYours(what) {
   const claude = 'CLAUDECODE' in process.env;
-  if (!claude && terminalPresent()) return false;
-  refused(what, claude);
+  const codex = CODEX_MARKERS.some((k) => k in process.env);
+  if (!claude && !codex && terminalPresent()) return false;
+  refused(what, claude ? 'Claude Code' : codex ? 'Codex' : null);
   return true;
 }
-function refused(what, claude) {
+function refused(what, session) {
   say(
-    `floorboss: ${what} is done by you, in your own terminal window${claude ? ', not from a Claude Code session' : ', not from a script or a pipe (this command has no terminal)'}. Open a terminal and run:\n\n  ${cmdLine(process.argv[2])}\n\nNothing was changed.`
+    `floorboss: ${what} is done by you, in your own terminal window${session ? `, not from a ${session} session` : ', not from a script or a pipe (this command has no terminal)'}. Open a terminal and run:\n\n  ${cmdLine(process.argv[2])}\n\nNothing was changed.`
   );
   process.exitCode = 1;
 }

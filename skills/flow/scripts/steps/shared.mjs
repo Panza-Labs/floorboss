@@ -12,6 +12,7 @@ import { readCsv } from '../../../../lib/csv.mjs';
 import { TASKS } from '../../../connectors/scripts/tasks.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { script } from '../context.mjs';
+import { connected } from '../../../../lib/harness.mjs';
 
 export const TASK_FORMAT_ENRICH = TASKS['enrich.person'].format;
 export const node = (skill, ...args) => ['node', script(skill), ...args];
@@ -97,6 +98,16 @@ export const answersFor = (r) =>
       ]
     : [...(r.holder || (r.alternatives || []).some((a) => a.holder) ? ['hold (leave them to their owner)'] : []), 'reach', 'warm', 'skip'];
 export const step = (id, why, action) => ({ step: id, why, ...action });
+// Who the shortlist holds as floorboss reads it now (resolved.json: reach and warm), sorted: what the user said yes to
+// at the shortlist, kept to compare with after a reloaded list.
+export const shortlistIds = (derived) =>
+  Object.entries(readJson(join(derived, 'resolved.json'), {}))
+    .filter(([, r]) => ['reach', 'warm'].includes(r.group))
+    .map(([id]) => id)
+    .sort();
+// Hand-send (Codex, or any program but Claude Code: lib/harness.mjs): a step's words name no Claude Code way of
+// working (agents in parallel, a send floorboss makes, a slash command). Claude Code's own words stay as they are.
+export const handSend = () => !connected();
 // The user may decline the critic: their words are saved, and those drafts go to approval marked unreviewed.
 export const SKIP_REVIEW_HINT = {
   answer: '"skip review all" or "skip review <ids>"',

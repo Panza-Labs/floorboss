@@ -61,7 +61,7 @@ test('delegate: the user\'s drafter gets a full brief; its draft is saved as its
   assert.match(brief(bo), /meeting request carries them\. Do not put times in the note/);
   assert.doesNotMatch(brief(bo), /End with this sentence/, 'opt-out off for app notes');
   const j = jobs.find((x) => x.id === ana);
-  const saved = cli(H, 'event-outreach', ['save-drafts', '--event', H.slug, '--drafts', JSON.stringify([{ id: ana, touch: 1, subject: 'Test Expo', body: `Hi Ana, we're both at Test Expo. Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x', drafted_by: 'acme-sdr' }])]);
+  const saved = cli(H, 'event-outreach', ['save-drafts', '--event', H.slug, '--drafts', JSON.stringify([{ id: ana, touch: 1, subject: 'Test Expo', body: `Hi Ana, we're both at Test Expo. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x, no research profile', drafted_by: 'acme-sdr' }])]);
   assert.ok(!saved.ERROR, saved.ERROR);
   assert.equal(JSON.parse(readFileSync(join(H.dir, 'work', 'drafts', `${ana}-t1.json`), 'utf8')).drafted_by, 'acme-sdr');
   const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all']);

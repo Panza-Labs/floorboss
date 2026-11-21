@@ -12,7 +12,7 @@ import { replySteps } from './steps/replies.mjs';
 import { draftSteps } from './steps/drafting.mjs';
 import { approvalSteps } from './steps/approval.mjs';
 import { sendSteps } from './steps/sending.mjs';
-import { step } from './steps/shared.mjs';
+import { step, handSend } from './steps/shared.mjs';
 import { unattendedSeenStep, unattendedOfferStep } from './steps/unattended.mjs';
 export { ROOT, script, context } from './context.mjs';
 export { followupsModeOf } from './steps/shared.mjs';
@@ -25,7 +25,7 @@ export { otherChannelStep, appStep, noteUnsettled, appOutcomeTarget, askedChanne
 function datesStep({ c }) {
   const e = c.event;
   if (e?.dayState?.state !== 'unreadable') return null;
-  const why = `${e.event.name || e.event.slug}: ${e.dayState.why}. Nothing is drafted or sent for it until then; once the file is fixed, run /floorboss:start again.`;
+  const why = `${e.event.name || e.event.slug}: ${e.dayState.why}. Nothing is drafted or sent for it until then; once the file is fixed, ${handSend() ? 'run floorboss again' : 'run /floorboss:start again'}.`;
   return step('done', why, { done: true, dates_unreadable: true, tell_user: why });
 }
 

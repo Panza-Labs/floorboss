@@ -12,7 +12,7 @@ import { buildReport, renderReport, reportCsvRows, CSV_HEADERS, OUTCOME_LABEL } 
 export function reportCmd(opts) {
   need(opts, 'event');
   const c = ctxOf(opts.event, opts);
-  const r = buildReport(c.entries, { byId: c.byId, zone: c.event.time_zone, now: c.now, minutes: Number(c.settings.meeting_minutes) || 30 });
+  const r = buildReport(c.entries, { byId: c.byId, zone: c.event.time_zone, city: c.event.city || null, now: c.now, minutes: Number(c.settings.meeting_minutes) || 30 });
   const page = join(c.paths.dir, 'report.html');
   const csv = join(c.paths.dir, 'report.csv');
   writeText(page, renderReport(r, { event: c.event, generatedAt: `${c.now.toISOString().slice(0, 16).replace('T', ' ')} UTC` }));

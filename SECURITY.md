@@ -94,10 +94,54 @@ the user sends each message from their own mail app. The README's [Run it in Cod
   nothing stops the model calling a mail, CRM or browser tool the user connected, editing floorboss's records, or
   typing `CLAUDECODE=1` before a script. floorboss's own scripts never send in any mode. The control there is the
   user's: connect no such tool, keep Codex's approvals on, and read each message before pressing Send.
+- **Codex runs as you.** Anything that runs as you can write floorboss's data folder, a ticket and an authorisation
+  included, as "Limits we know about" says (the install script's tests, and "Unattended drafts"). The hand-send view
+  and the refusals above keep floorboss's own commands from switching anything on from Codex; they don't stop a
+  Codex session writing those files itself. The install script refuses to install, remove or switch on the
+  unattended job from a shell with any Codex marker, terminal or not. Claude Code started from a Codex shell
+  inherits the marker: its guard then refuses attended sends and lets reads and unattended drafts through only as it
+  would without the marker (`test/guard-codex-marker.test.mjs`).
+
+### Auto-send in Codex: floorboss trusts the model with sending
+
+With auto-send on for an event, a ChatGPT scheduled task in the user's own account calls the Gmail connector's send
+tool with nobody there. There is no guard in Codex. floorboss trusts the model with sending: it tells the model which
+tool to call and with which arguments, and nothing stops the model calling it differently, sending more, or writing
+its own approvals into the data repo.
+
+What floorboss's code decides, if the model follows its steps: who is due and when (due day or the day after,
+weekdays 09:00 to 17:00 event time, not after the event, one message a day per person, opt-outs at every event); the
+exact subject, body and single address, bound by hash to both of the user's approvals (the HTML body sent is built
+from that approved text alone); that the connected Gmail account (the profile tool, first step of every run) is the
+sending address recorded at the second yes, or the run stops before any search or send; whether the follow-up's
+thread (read by its recorded thread id; with none recorded the follow-up is held) holds any message not from that
+address, and whether the Gmail search shows a reply, bounce or auto-reply, any of which stops that person; that an
+answer missing its list, or carrying an error or failed status at any level, is never read as a clean inbox or a
+send; that a send is marked in the user's repo before it happens, and claimed with an exclusive file create, so two
+overlapping steps never both get it and it is never sent twice; that a send step expires a few minutes after its
+reply check, and an answer written after that is unclear; and that the run stops at the first error and never
+retries an unclear send.
+
+What it can't decide: that the model called the tool it was told to, with those arguments; that the search and send
+answers it saved are the tools' own; that nobody edited the data repo. The user's controls: the Gmail connection's
+permissions in ChatGPT, a mailbox they accept this for, a repo token scoped to one private repo, pausing the
+scheduled task, and "stop auto-send" in Codex.
+
+floorboss's scripts run `git` on the data folder in this mode (pull, commit, push to the user's own remote). They make
+no other network call. The task prompt signs git in with a global credential helper that reads the `GITHUB_TOKEN`
+secret when git asks (never the token in a URL); floorboss still refuses to run git in a data repo whose own
+`.git/config` sets any `credential.*`, `include.*` or other program-starting setting. Nothing runs on infrastructure the floorboss maintainers run.
+
+Where it is built: `lib/autosend/` (the approval, the planner, the reply decision, the send record, the git sync) and
+`skills/autosend/scripts/` (the cloud run's steps). Every auto-send command refuses in Claude Code. git is started by
+`lib/autosend/sync.mjs` only, with fixed options (no shell, no prompts, the data repo's hooks and signing off), and
+`npm run self-check` holds that file to it. Tests: `test/autosend-*.test.mjs`, `test/sims/codex-autosend.test.mjs` (a
+fake Gmail and a bare repo in a temp folder as the remote; nothing is sent and nothing leaves the machine).
 
 ## Where your data can go
 
-floorboss's own scripts make no network calls (`npm run self-check` checks this). Your lists, CRM records and
+floorboss's own scripts make no network calls (`npm run self-check` checks this), except `git pull` and `git push` of
+the user's own data repo when auto-send is on in Codex ([above](#auto-send-in-codex-floorboss-trusts-the-model-with-sending)). Your lists, CRM records and
 mail leave your machine only through Claude and the tools you connected, and the guard holds those calls
 while a run is under way:
 
@@ -404,7 +448,8 @@ It changes nothing, installs nothing and makes no network call. It checks, and p
 - every import is a Node.js built-in or one of floorboss's own files;
 - no script, and no test it runs, uses a network module, `fetch` or a remote import (a pattern search, not proof);
 - the only processes floorboss starts are Node.js running its own scripts, and your system's opener for the
-  outbox page and the morning brief's page (it prints each place);
+  outbox page and the morning brief's page (it prints each place), and, for auto-send in Codex, git in
+  `lib/autosend/sync.mjs` only, with its fixed options;
 - `launchctl` is started by one script only, `scripts/unattended.mjs`, the install you run in a terminal, by
   its full path (the guard also names it, to refuse it); the scheduled launcher starts two processes, the
   opener by its full path and, for the follow-up drafts, Claude Code by the path the install recorded, with the

@@ -25,7 +25,10 @@ function field(label, id, value, copy = true) {
 
 // Nothing to copy: it can't go any more, or not today, it waits for approval, floorboss let it through and it may
 // have gone, or it is in your drafts folder already (a copy pasted by hand would be a second message).
-export const offersCopy = (c) => !(c.not_going || c.not_today) && !c.pending && !c.may_have_gone && !c.staged;
+// Nor one the cloud's auto-send sends on its day (c.autosend: the user's second yes for this exact text and address).
+// Nor one held because a time it offers is now taken (time_taken). A missed auto-send step (autosend_missed) is the
+// user's again: it offers its buttons.
+export const offersCopy = (c) => !(c.not_going || c.not_today) && !c.pending && !c.may_have_gone && !c.staged && !c.autosend && !c.time_taken;
 
 // The send buttons of an email card (mailto.mjs), only where the card offers Copy and the user sends email themselves
 // (you_send: never when floorboss sends email for this event): the approved subject and body, to the address it was
@@ -43,10 +46,19 @@ export function mailOf(c) {
   return { to, href: m.href, long: m.why === 'long', file: emlName(c.id, c.touch), eml };
 }
 
-function sendButtons(c) {
+// hand: in hand-send, Copy address, Copy subject and Copy message too, for a mail app that mangles the link: each copies
+// the approved text exactly (the address from its own element, the subject and message from the card's fields).
+function sendButtons(c, hand = false) {
   const m = mailOf(c);
   if (!m) return '';
-  return `<div class="send" data-send="1">${m.href ? `<a class="sendbtn primary" href="${e(m.href)}">Open in your mail app</a>` : ''}<a class="sendbtn" href="mail/${e(m.file)}" download="${e(m.file)}">Download .eml</a>
+  const id = `${c.id}-t${c.touch}`;
+  const copies = hand
+    ? `<button type="button" class="copy" data-copy="${e(`${id}-to`)}">Copy address</button>${c.subject ? `<button type="button" class="copy" data-copy="${e(`${id}-subject`)}">Copy subject</button>` : ''}<button type="button" class="copy" data-copy="${e(`${id}-body`)}">Copy message</button>
+    <p class="sub">If the mail-app button doesn't work, copy these three into a new email. To: <span id="${e(`${id}-to`)}">${e(m.to)}</span></p>
+    `
+    : '';
+  return `<div class="send" data-send="1">${m.href ? `<a class="sendbtn primary" href="${e(m.href)}">Open in your mail app</a>` : ''}<a class="sendbtn" href="mail/${e(m.file)}" download="${e(m.file)}">Download .eml</a>${copies ? `
+    ${copies}` : ''}
     <p class="sub">${m.href ? '' : 'Too long for a mail link: use Download .eml and open the file. '}To ${e(m.to)}. Press Send in your mail app, then tick Sent below and use Copy status, or tell floorboss "sent". Opened from here it is a new email, not a reply in your thread with them.</p></div>`;
 }
 
@@ -106,7 +118,7 @@ function card(c, hosts = [], app = null, hand = false) {
   ${c.instruction_like ? '<p class="failnote">Their entry on the list reads like an instruction to an AI. The scripts didn\'t act on it. Check this person yourself.</p>' : ''}
   ${c.pick_in_app?.length ? `<p class="follow">In the app's meeting request, pick ${e(c.pick_in_app.join(' or '))}.</p>` : c.pick_in_app ? '<p class="follow">In the app\'s meeting request, pick any open time.</p>' : ''}
   ${c.brief ? `<p class="brief">${e(c.brief)}</p>` : ''}
-  ${c.followup_note ? `<p class="follow">${e(c.followup_note)}</p>` : ''}
+  ${c.followup_note ? `<p class="follow">${e(c.followup_note)}</p>` : ''}${c.autosend ? `<p class="follow">floorboss sends this on its day, from your ChatGPT cloud task: don't send it yourself. Say "stop auto-send" to send it by hand instead.</p>` : ''}${c.autosend_missed ? `<p class="follow">Auto-send missed its day (${e(c.autosend_missed)} or the day after), so it is yours to send now. Or ask floorboss to plan it again for auto-send.</p>` : ''}${c.time_taken ? `<p class="follow">Held: a time it offers is now booked with someone else. floorboss writes it again with free times; approve it, then give auto-send a fresh yes.</p>` : ''}
   ${failed}
   ${c.checks_stuck?.length ? `<p class="failnote">Still fails floorboss's checks after three rewrites: ${e(c.checks_stuck.join('; '))}. Edit it or drop it; it isn't offered for approval as it is.</p>` : ''}
   ${c.not_going ? `<p class="failnote">Not going: ${e(c.not_going)}. Don't send it.</p>` : c.not_today ? `<p class="failnote">Not today: ${e(c.not_today)}. Send it on another day: one message a day to a person, across all your events.</p>` : ''}
@@ -118,7 +130,7 @@ function card(c, hosts = [], app = null, hand = false) {
   }
   ${c.subject ? field('Subject', `${c.id}-t${c.touch}-subject`, c.subject, copy) : ''}
   ${field(c.kind === 'coordinate' ? 'Note' : 'Message', `${c.id}-t${c.touch}-body`, c.body, copy)}
-  ${sendButtons(c)}
+  ${sendButtons(c, hand)}
   <p class="stale" hidden>The earliest time offered here has passed. ${hand ? 'Run floorboss again' : 'Run /floorboss:event-draft again'} for new times before sending.</p>
   ${
     c.kind === 'coordinate' || c.pending
@@ -165,6 +177,8 @@ export function renderOutbox(data) {
   });
   const slotRows = (data.slots || []).map((s) => `<tr><td>${e(s.label)}</td><td>${e((s.holders || []).join(', ') || '—')}</td></tr>`).join('');
   const counts = data.counts || {};
+  // Sends floorboss has recorded (their cards are gone from the page): counted as sent, and in the total.
+  const recorded = Number.isInteger(data.recorded_sent) && data.recorded_sent > 0 ? data.recorded_sent : 0;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp()}">
@@ -208,11 +222,17 @@ td,th{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);font-
 a{color:var(--accent)}textarea{width:100%;min-height:90px;font:12px ui-monospace,Menlo,monospace;margin-top:8px}
 </style></head>
 <body><div class="wrap">
-<p class="banner">You're sending these yourself. Check the rules that apply to you and your recipients before you send. floorboss never sends anything.</p>
+<p class="banner">${
+  // An event set to auto-send from the cloud (event.json autosend: lib/autosend/): floorboss does send the messages it
+  // has the user's second yes for, so "floorboss never sends anything" would be false there.
+  data.event?.autosend === true
+    ? "Auto-send is on for this event: floorboss sends each message marked for auto-send on its day, from your ChatGPT cloud task. Send the rest yourself. Check the rules that apply to you and your recipients before anything goes."
+    : "You're sending these yourself. Check the rules that apply to you and your recipients before you send. floorboss never sends anything."
+}</p>
 <h1>${e(data.event.name)}</h1>
 ${data.waiting ? `<p class="banner">${data.waiting} ${data.waiting === 1 ? 'draft is' : 'drafts are'} waiting for your approval and ${data.waiting === 1 ? 'is' : 'are'} not shown here.</p>` : ''}
 <p class="sub">${e(data.event.city || '')} · ${e(data.event.start_date)} to ${e(data.event.end_date)} · times in ${e(data.event.time_zone)} · generated ${e(data.generatedAt)}</p>
-<div class="bar"><span><b id="sentCount">0</b> of <b>${msgs.length}</b> sent</span>
+<div class="bar"><span><b id="sentCount" data-recorded="${recorded}">${recorded}</b> of <b>${msgs.length + recorded}</b> sent</span>
 <span>${counts.coordinate || 0} held for a colleague · ${counts.suppressed || 0} left alone (do-not-contact, opted out, a lost deal) · ${counts.not_drafted || 0} not drafted (they don't fit, have no address, or wait on your call)</span>
 <button type="button" class="primary" id="copyStatus">Copy status</button></div>
 <textarea id="statusOut" readonly hidden aria-label="Status to paste into the next run"></textarea>
@@ -269,7 +289,8 @@ const OUTBOX_SCRIPT = `
       c.querySelectorAll('[data-send]').forEach(function(b){ b.hidden = !!stale; });
       var p = c.querySelector('.stale'); if (p) p.hidden = !stale;
     });
-    document.getElementById('sentCount').textContent = sent;
+    var sc = document.getElementById('sentCount');
+    sc.textContent = (Number(sc.dataset.recorded) || 0) + sent;
   }
   cards.forEach(function(c){
     c.querySelectorAll('[data-tick]').forEach(function(el){
@@ -330,8 +351,9 @@ const OUTBOX_SCRIPT = `
   document.getElementById('qSent').addEventListener('click', function(){ var c = cur(); if (!c) return; var s = state[keyOf(c)] || (state[keyOf(c)] = {}); s.sent = s.sent || today(); save(); refresh(); show(); });
   document.getElementById('qSkip').addEventListener('click', function(){ qi++; show(); });
   document.getElementById('qLog').addEventListener('click', function(ev){
-    // As lib/csv.mjs toCsv: a cell a spreadsheet would run as a formula (=, +, -, @, tab) is kept as text.
-    var esc = function(v){ v = String(v == null ? '' : v); if (/^[=+\\-@\\t\\r]/.test(v)) v = "'" + v; return /[",;\\t\\n\\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    // As lib/csv.mjs toCsv: a cell a spreadsheet would run as a formula (=, +, -, @, a tab or line break first; a sign
+    // after spaces or a line break; the full-width signs) is kept as text.
+    var esc = function(v){ v = String(v == null ? '' : v); if (/^[=+\\-@\\t\\r\\n]/.test(v) || /^[\\s\\u3000]*[=+\\-@\\uFF1D\\uFF0B\\uFF0D\\uFF20]/.test(v)) v = "'" + v; return /[",;\\t\\n\\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     var rows = [['name','company','profile_url','message','sent_on']];
     q.forEach(function(c){ var s = state[keyOf(c)] || {}; if (s.sent) rows.push([c.dataset.name, c.dataset.company, c.dataset.url, bodyOf(c), s.sent]); });
     copyText(rows.map(function(r){ return r.map(esc).join(','); }).join('\\n'), ev.currentTarget);

@@ -317,7 +317,7 @@ function rewrite(H, id, touch, now = NOW) {
   const j = jobs.find((x) => x.id === id && x.touch === touch);
   assert.ok(j, `job ${touch}: ${JSON.stringify(jobs.map((x) => x.touch))}`);
   const d = draftFor({ ...t, insights: [] }, { ...j, slot_labels: j.slot_labels || [] });
-  const out = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', id, '--touch', String(touch), '--json', JSON.stringify({ subject: 'Test Expo', body: `${d.body}\n\nRewritten.`, brief: 'x', structure: d.structure, fact_source: d.fact_source, ...(d.insight ? { insight: d.insight } : {}) })], now);
+  const out = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', id, '--touch', String(touch), '--json', JSON.stringify({ subject: 'Test Expo', body: `${d.body}\n\nRewritten.`, brief: 'x, no research profile', structure: d.structure, fact_source: d.fact_source, ...(d.insight ? { insight: d.insight } : {}) })], now);
   assert.ok(!out.ERROR, out.ERROR);
   cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', id, '--touch', String(touch), '--text', 'PASS'], now);
 }

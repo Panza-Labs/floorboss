@@ -248,7 +248,10 @@ export const PROFILE_SAVERS = {
               /linkedin/i.test(String(v)) ? 'linkedin' : null,
               /app|brella|grip|swapcard/i.test(String(v)) ? 'app' : null
             ].filter(Boolean);
-    return answers(c, { sending_channels: chans, sending_asked: true });
+    // Codex: a yes is the user's word for auto-send through Gmail drafts; the flow turns it on before approval.
+    const says = String(typeof v === 'string' ? v : v?.said || v?.answer || JSON.stringify(v ?? ''));
+    const wantsAuto = !connected() && !isNo(v) && !/^\s*no\b|myself|nowhere|prepare/i.test(says) && /^\s*(?:yes|y|yeah|yep|sure|ok|okay)\b|\bgmail\b|auto/i.test(says);
+    return answers(c, { sending_channels: chans, sending_asked: true, ...(wantsAuto ? { autosend_said: String(says || 'yes').slice(0, 200) } : {}) });
   },
   linkedin_send: (v, c) => answers(c, /accept/i.test(String(v)) ? { linkedin_send_ack: true } : { linkedin_send_declined: true }),
   send_setup: (v, c) => {

@@ -108,7 +108,11 @@ export function industryNews(company, items) {
 // their own company's result quoted back to them.
 export function writeCompanyBrief(dir, company, result, known = {}) {
   const r = result || {};
-  const nothing = r.nothing_found === true && (Array.isArray(r.searched) ? r.searched : []).filter(Boolean).length > 0;
+  // nothing_found with the queries tried; or, when web search is off, searched: [] with search_off: true (the skill's
+  // own words for that case: nothing was searched, and the brief says so). An empty list alone isn't a search.
+  const tried = (Array.isArray(r.searched) ? r.searched : []).filter(Boolean);
+  const searchOff = r.nothing_found === true && Array.isArray(r.searched) && !tried.length && r.search_off === true;
+  const nothing = r.nothing_found === true && (tried.length > 0 || searchOff);
   // The researcher may say "relation_to_us" or name the sender's company in the key: any relation_to_* field counts.
   const relKey = Object.keys(r).find((k) => /^relation_to_/.test(k));
   const relationText = clean(relKey ? r[relKey] : '', 300);
@@ -142,7 +146,7 @@ export function writeCompanyBrief(dir, company, result, known = {}) {
   // nothing is known, so a draft may say nothing about the company (the critic holds it to that).
   if (!sources.length && !nothing)
     errors.push(
-      'no source URL: every brief needs at least one page that was read (or, when searches found nothing at all, "nothing_found": true with the "searched" queries)'
+      'no source URL: every brief needs at least one page that was read (or, when searches found nothing at all, "nothing_found": true with the "searched" queries, or "searched": [] with "search_off": true when web search is off)'
     );
   const news = industryNews(company, r.industry_news);
   const noneWhy = clean(r.industry_news_none, 300);
@@ -157,7 +161,9 @@ export function writeCompanyBrief(dir, company, result, known = {}) {
       ? `**Mock event:** ${company} is invented for floorboss's mock event, so this brief is canned: nothing was searched.`
       : r.skipped
         ? '**Not researched:** you chose to skip company research, so nothing was searched.'
-        : '**Nothing public found.** Searches tried: ' + r.searched.map((q) => clean(q, 120)).join('; ') + '.';
+        : searchOff
+          ? '**Not researched:** web search was off, so nothing was searched.'
+          : '**Nothing public found.** Searches tried: ' + r.searched.map((q) => clean(q, 120)).join('; ') + '.';
     const lines = [
       `# ${company}`,
       '',
@@ -179,7 +185,8 @@ export function writeCompanyBrief(dir, company, result, known = {}) {
           nothing_found: true,
           ...(r.canned ? { canned: true } : {}),
           ...(r.skipped ? { skipped: true } : {}),
-          searched: r.searched,
+          ...(searchOff ? { search_off: true } : {}),
+          searched: tried,
           sources: [],
           industry_news: [],
           saved_at: new Date().toISOString()

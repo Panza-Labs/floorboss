@@ -41,10 +41,16 @@ export function buildCriticInput({
   mailboxNote,
   structure,
   factSource,
-  openingRule
+  openingRule,
+  lastTouch,
+  checkWarnings
 }) {
   return {
     draft: { channel: draft.channel, subject: draft.subject || null, body: draft.body, touch: draft.touch ?? 1 },
+    // The last message of the sequence: a short closing note that asks only yes or no, with no times.
+    ...(lastTouch ? { last_touch: true } : {}),
+    // What floorboss's own checks warn about without failing (a long subject, the long show name repeated).
+    ...(checkWarnings?.length ? { check_warnings: checkWarnings.map((w) => noteText(w, 300)) } : {}),
     // Written by the user's own outbound skill or agent: its structure, proof and angle are the user's choice.
     ...(draft.drafted_by && draft.drafted_by !== 'floorboss' ? { written_by_their_own_skill: draft.drafted_by } : {}),
     // A follow-up sits in the same thread: the earlier message is part of what the reader has seen.

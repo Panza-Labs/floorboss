@@ -4,7 +4,8 @@
 //
 // `npm run self-check`: checks, on your own copy, the claims SECURITY.md makes about what floorboss is and what
 // it can reach. It reads the repository and runs the security tests in a throwaway home; it changes nothing,
-// installs nothing and makes no network call. Each line says what was checked and whether it held.
+// installs nothing and makes no network call. Each line says what was checked and whether it held. (floorboss's one
+// network use, git pull and push of the user's own data repo when auto-send is on, is held to lib/autosend/sync.mjs.)
 //
 // What it is: a reading of the code's text. It finds the usual ways a script reaches the network or starts a
 // process, and it holds the few lines that matter most (which program the scheduled launcher and the install
@@ -85,11 +86,12 @@ const unexpected = spawns.filter(
     !/process\.execPath|spawn\(cmd, \[paths\.outbox\]/.test(s) &&
     !/^scripts\/scheduled\.mjs:\d+: const child = spawn\(cmd, \[page\], /.test(s) &&
     !/^scripts\/scheduled\.mjs:\d+: const child = spawn\(run\.program, run\.args, \{ stdio: \['ignore', 'ignore', 'pipe'\], env: run\.env, detached: true \}\);$/.test(s) &&
-    !/^scripts\/unattended\.mjs:\d+: return spawnSync\(LAUNCHCTL, args, /.test(s)
+    !/^scripts\/unattended\.mjs:\d+: return spawnSync\(LAUNCHCTL, args, /.test(s) &&
+    !/^lib\/autosend\/sync\.mjs:\d+: const r = spawnSync\(GIT, \[\.\.\.FIXED, \.\.\.args\], \{ cwd: home, encoding: 'utf8', env: gitEnv\(\), timeout: GIT_TIMEOUT_MS \}\);$/.test(s)
 );
 say(
   !unexpected.length,
-  'processes started are Node.js (floorboss scripts), the opener (outbox page, morning brief), Claude Code in the follow-up drafts launcher, and launchctl in scripts/unattended.mjs only',
+  'processes started are Node.js (floorboss scripts), the opener (outbox page, morning brief), Claude Code in the follow-up drafts launcher, launchctl in scripts/unattended.mjs, and git in lib/autosend/sync.mjs only',
   (unexpected.length ? unexpected : spawns).join('\n')
 );
 // The search above reads names; these hold the names to what they are.
@@ -106,8 +108,8 @@ const cpLines = code.flatMap((f) =>
 const cpOdd = cpLines.filter(([, l]) => !/^import \{ (spawn|spawnSync) \} from 'node:child_process';$/.test(l)).map(([f, l]) => `${f}: ${l.trim().slice(0, 120)}`);
 say(!cpOdd.length, "Node's process module is imported only as spawn or spawnSync, by name", cpOdd.join('\n'));
 const cpHere = [...new Set(cpLines.map(([f]) => f))].filter((f) => /^(scripts|lib)\//.test(f)).sort();
-const cpHereOk = cpHere.join() === 'scripts/scheduled.mjs,scripts/unattended.mjs';
-say(cpHereOk, 'under scripts/ and lib/, only the scheduled launcher and the install script can start a process (besides this check)', cpHereOk ? '' : cpHere.join('\n'));
+const cpHereOk = cpHere.join() === 'lib/autosend/sync.mjs,scripts/scheduled.mjs,scripts/unattended.mjs';
+say(cpHereOk, "under scripts/ and lib/, only the scheduled launcher, the install script and auto-send's git sync can start a process (besides this check)", cpHereOk ? '' : cpHere.join('\n'));
 // Nothing sets the switch that turns the tests' stand-ins on.
 const setsTest = code.filter((f) => /\.FLOORBOSS_TEST\s*=(?!=)|\[\s*['"`]FLOORBOSS_TEST['"`]\s*\]\s*=(?!=)|FLOORBOSS_TEST['"`]?\s*:|Object\.assign\(\s*process\.env/.test(noComments(read(f))));
 say(!setsTest.length, 'no script sets FLOORBOSS_TEST (the stand-ins for the opener and launchctl exist only under the tests)', setsTest.join('\n'));
@@ -211,8 +213,9 @@ sayAll("the launcher's watchdog ends the process at the limit and does nothing e
 const inst = noComments(read('scripts/unattended.mjs'));
 const GATE = `function notYours(what) {
   const claude = 'CLAUDECODE' in process.env;
-  if (!claude && terminalPresent()) return false;
-  refused(what, claude);
+  const codex = CODEX_MARKERS.some((k) => k in process.env);
+  if (!claude && !codex && terminalPresent()) return false;
+  refused(what, claude ? 'Claude Code' : codex ? 'Codex' : null);
   return true;
 }`;
 sayAll('the install script starts one process, /bin/launchctl, on its own launchd file, and installs, removes or switches on only in a terminal', {
@@ -225,6 +228,10 @@ sayAll('the install script starts one process, /bin/launchctl, on its own launch
   'the gate is the first thing installing, removing and on do after the platform test':
     inst.includes('  if (notYours(t.installing)) return;') && inst.includes('  if (notYours(t.removing)) return;') && inst.includes("  if (notYours('turning unattended runs back on')) return;"),
   'terminalPresent is named twice (its import and the gate)': count(inst, /\bterminalPresent\b/g) === 2,
+  "CODEX_MARKERS is lib/harness.mjs's, named twice (its import and the gate)":
+    inst.includes("import { CODEX_MARKERS } from '../lib/harness.mjs';") && count(inst, /\bCODEX_MARKERS\b/g) === 2,
+  'the Codex markers are the five Codex sets':
+    noComments(read('lib/harness.mjs')).includes("export const CODEX_MARKERS = Object.freeze(['CODEX_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_TOOL_CALL_ID', 'CODEX_SANDBOX', 'CODEX_SANDBOX_NETWORK_DISABLED']);"),
   'launchctl is called three ways only: bootout of its own job (twice) and bootstrap of its own file':
     count(inst, /\blaunchctl\(\[/g) === 3 &&
     count(inst, /launchctl\(\['bootout', `\$\{domain\(\)\}\/\$\{job\.label\}`\]\)/g) === 2 &&
@@ -245,6 +252,18 @@ sayAll('the launchd files run Node on the launcher with the word "brief" or "fol
   'the label is its job': lib.includes('    `  <key>Label</key>${s(j.label)}`,') && lib.includes('export const BRIEF_LABEL = `${LABEL_PREFIX}brief`;') && lib.includes('export const FOLLOWUPS_LABEL = `${LABEL_PREFIX}followups`;') && lib.includes("export const LABEL_PREFIX = 'com.floorboss.';"),
   'no KeepAlive, WatchPaths, StartInterval or shell': !/KeepAlive|WatchPaths|StartInterval|QueueDirectories|\/bin\/(ba|z)?sh/.test(noComments(lib)),
   'every value goes through the XML escape': lib.includes('  const s = (v) => `<string>${xmlText(v)}</string>`;')
+});
+// Auto-send's sync (Codex only): one process start, git, by a fixed name, with fixed options first, no shell.
+const syncCode = noComments(read('lib/autosend/sync.mjs'));
+sayAll("auto-send's sync starts one program, git, with no shell, its prompts, hooks and signing off", {
+  'exactly one call that starts a process': count(syncCode, STARTS) === 1,
+  'that call is spawnSync(GIT, [...FIXED, ...args], …) in the data folder': syncCode.includes("  const r = spawnSync(GIT, [...FIXED, ...args], { cwd: home, encoding: 'utf8', env: gitEnv(), timeout: GIT_TIMEOUT_MS });"),
+  'GIT is "git" and nothing else (declared once, used once)': syncCode.includes("const GIT = 'git';") && count(syncCode, /\bGIT\b/g) === 2,
+  'the fixed options turn hooks, fsmonitor, a custom ssh, ext:: remotes and signing off': syncCode.includes("const FIXED = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.sshCommand=ssh', '-c', 'protocol.ext.allow=never', '-c', 'commit.gpgsign=false', '-c', 'user.name=floorboss', '-c', 'user.email=autosend@floorboss.invalid'];") && count(syncCode, /\bFIXED\b/g) === 2,
+  'git never prompts, and gets no GIT_* variable but these': syncCode.includes("const gitEnv = () => ({ ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k))), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' });"),
+  "a data repo whose own settings could start a program is refused before git runs in it": syncCode.includes('  const why = repoConfigWhy(home);\n  return why ? { ok: false, out: \'\', err: why, refused: why } : run(home, args);'),
+  'no shell option anywhere': !/\bshell\s*:/.test(syncCode),
+  'spawnSync is named twice (its import and that call)': count(syncCode, /\bspawnSync\b/g) === 2 && syncCode.includes("import { spawnSync } from 'node:child_process';")
 });
 // A module can't be reached by a name put together at run time: no import() of anything but a quoted name, and
 // none of the calls that load a module by a computed name.

@@ -53,7 +53,7 @@ test('saved through the samples answer: the voice file gets "Opening: question",
     assert.match(j.opening_rule, /a question in the first lines/);
   }
   const j = msgs[0];
-  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi ${j.contact.name.split(' ')[0]}, how do you plan dock shifts for Test Expo week? Could you do ${j.slot_labels.join(' or ')}?\n\nBest, Sam`, brief: 'x', structure: 'question-first', fact_source: 'list' })]);
+  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `Hi ${j.contact.name.split(' ')[0]}, how do you plan dock shifts for Test Expo week? Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\nBest, Sam`, brief: 'x, no research profile', structure: 'question-first', fact_source: 'list' })]);
   const inp = cli(H, 'event-outreach', ['critic-input', '--event', H.slug, '--id', j.id, '--touch', '1']);
   assert.match(inp.opening_rule, /question-first/);
 });

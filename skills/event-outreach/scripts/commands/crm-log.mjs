@@ -13,6 +13,7 @@ import { validateCreated } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig } from '../../../../lib/config.mjs';
 import { ctxOf, crmPending, crmIdOf, led } from './context.mjs';
 import { recordText } from './saved-drafts.mjs';
+import { handSend, modeLine } from '../../../../lib/harness.mjs';
 
 // Everyone messaged at this event, for the CRM (import it so the next export knows) and for teammates (they
 // load it with --known, so nobody on the team pitches the same person cold).
@@ -348,6 +349,9 @@ export function crmLogged(opts) {
 // web app. Only the listed items' own text and details can be typed, and the user is asked before each
 // message's text goes in; the browser opens only the CRM's contact, record, search and task pages.
 export function openLogWindow(opts) {
+  // The window lets the browser type into the CRM, which only Claude Code's guard checks: never opened elsewhere (a
+  // window opened from Codex in a shared data folder would hold for a Claude Code session too).
+  if (handSend()) throw new Error(`Logging in the CRM's web app works only in Claude Code. ${modeLine()} Use the CRM log CSV instead.`);
   need(opts, 'event', 'said');
   const c = ctxOf(opts.event, opts);
   const items = readJson(join(c.paths.dir, 'crm-log-list.json'), []);

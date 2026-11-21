@@ -41,8 +41,8 @@ function fitsFor(needs) {
 function draftFor(job, ev) {
   const first = job.contact.name.split(' ')[0];
   if (job.kind === 'coordinate') return { body: `${job.holder}, ${job.contact.name} (${job.contact.title}, ${job.contact.company}) is at ${ev.name}. You hold this relationship; want to reach out, or should I?` };
-  const times = job.slot_labels.length ? `Could you do ${job.slot_labels.join(' or ')}?` : 'Could we find 30 minutes at the expo?';
-  return { subject: `${ev.name}: carrier onboarding`, body: `Hi ${first}, saw you're at ${ev.name}. ${job.reason}. ${times}\n\nBest, Sam\n\n${ev.optout}`, brief: `${job.segment?.name || job.group} → ${job.mode}` };
+  const times = job.slot_labels.length ? `Could you do ${job.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?` : 'Could we find 30 minutes at the expo?';
+  return { subject: `${ev.name}: carrier onboarding`, body: `Hi ${first}, saw you're at ${ev.name}. ${job.reason}. ${times}\n\nBest, Sam\n\n${ev.optout}`, brief: `${job.segment?.name || job.group} → ${job.mode}; no research profile` };
 }
 
 test('mock event end to end: setup → triage → draft → outbox → status → follow-up', () => {

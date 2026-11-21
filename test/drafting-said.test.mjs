@@ -89,7 +89,7 @@ test('save-drafts: one bad entry saves nothing', () => {
   const { jobs } = todoJobs(H);
   const [a] = jobs.filter((j) => j.kind === 'message');
   const f = join(H.HOME, 'batch.json');
-  writeFileSync(f, JSON.stringify([{ id: a.id, touch: 1, subject: 'Test Expo', body: 'Hi there, a fine draft.', brief: 'x' }, { id: 'c099', touch: 1, body: 'nobody' }, { id: a.id, touch: 1, body: '' }]));
+  writeFileSync(f, JSON.stringify([{ id: a.id, touch: 1, subject: 'Test Expo', body: 'Hi there, a fine draft.', brief: 'x, no research profile' }, { id: 'c099', touch: 1, body: 'nobody' }, { id: a.id, touch: 1, body: '' }]));
   const r = cli(H, 'event-outreach', ['save-drafts', '--event', H.slug, '--drafts-file', f]);
   assert.match(r.ERROR || '', /Nothing was saved: .*c099.*isn't in the current drafting list.*twice/);
   assert.ok(!existsSync(a.draft_file), 'the good entry was not written either');

@@ -36,6 +36,13 @@ test('mailto carries the exact subject and body, CRLF line breaks, and nothing e
   assert.ok(!/[#+?]/.test(q) && q.split('=').length === 3);
   // Every kind of line break becomes CRLF, exactly once.
   assert.equal(crlf('a\rb\nc\r\nd e'), 'a\r\nb\r\nc\r\nd\r\ne');
+  // Spaces at either end, blank lines at the start, middle and end: kept exactly, in the link and in the .eml.
+  const SPACED = `\n  Hi Zoë,  \n\n\n   20 minutes at the stand?   \n\nBest, Noor  \n${OPTOUT}\n\n  `;
+  const sp = parse(mailtoHref({ to: 'zoe@north-wind.example', subject: '  Dwell time  ', body: SPACED }).href);
+  assert.equal(sp.body, SPACED.replace(/\n/g, '\r\n'));
+  assert.equal(sp.subject, '  Dwell time  ');
+  const eml = emlText({ to: 'zoe@north-wind.example', subject: 'Dwell time', body: SPACED });
+  assert.equal(Buffer.from(eml.split('\r\n\r\n').slice(1).join('').replace(/\r\n/g, ''), 'base64').toString('utf8'), SPACED.replace(/\n/g, '\r\n'));
 });
 
 test('only one plain address gets a button: no name part, second recipient, header or odd character', () => {

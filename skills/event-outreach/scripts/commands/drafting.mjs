@@ -2,21 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // Drafting: saving a draft with its checks, the batch check, briefs for the drafter, revising and redrafting.
 import { optoutFor, optoutForReader } from '../../../../lib/config.mjs';
+import { handSend } from '../../../../lib/harness.mjs';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { allowedPath, realPath, readChecked } from '../../../../lib/paths.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { readJson, writeJson, writeText } from '../../../../lib/jsonio.mjs';
 import { insightCap, parseProof } from '../../../event-context/scripts/context-check.mjs';
-import { relativeWordsIn, modeFor, daysUntilEvent } from '../leadtime.mjs';
+import { relativeFlag, modeFor, daysUntilEvent } from '../leadtime.mjs';
 import { gapKey, gapFor, nextDue, offWeekend } from '../../../../lib/spacing.mjs';
 import { planFor } from '../../../../lib/sendcheck.mjs';
-import { checkDraft, timeMentioned, controlProblems, wordCount, confirmationLinks } from '../checks.mjs';
+import { checkDraft, draftWarnings, timeMentioned, controlProblems, wordCount, confirmationLinks } from '../checks.mjs';
 import { saveDraft as saveDraftFile } from '../../../../lib/drafts.mjs';
 import { buildBrief, instructionsPath } from '../drafter.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
 import { analyzeBatch, checkInsights } from '../sameness.mjs';
-import { structureProblems, structureSpread, inferStructure, openingOf, OPENINGS, warmReader } from '../structures.mjs';
+import { structureProblems, researchProblems, structureSpread, inferStructure, openingOf, OPENINGS, warmReader } from '../structures.mjs';
 import { whereAt, linkedinNoteCap, hashOf, toOf } from './routes.mjs';
 import { skillsOf, knownReader, ctxOf, otherAttendees, led, labelOf, signoffOf, idList, touchSpec } from './context.mjs';
 import { jobFor, insightsOf, lastEmailSubject, insightField, staleFor, resolveInsight, insightProblems, readTodo, ledgerTouch, touchBatch, earlierDraft, draftFiles, draftFile } from './saved-drafts.mjs';
@@ -25,12 +26,22 @@ function checkCtx(c, job, id, channel, others, lang = null) {
   // A LinkedIn message has no meeting fields: the app-note settings are for event apps only.
   const app = channel === 'paste' && whereAt(c, id, job.touch ?? 1) !== 'LinkedIn';
   const skills = skillsOf(c);
+  // A follow-up is shorter than the message before it, on the same channel (a short LinkedIn note before an email
+  // doesn't set the email's length).
+  const before = job.followup && !job.channel_changed ? job.previous_message || earlierDraft(c, id, touchBefore(c.state[id], job.touch))?.body || null : null;
   return {
     followup: !!job.followup,
+    previousBody: before,
+    // The sequence's last message: a short closing note (says it's the last, names the show's days, yes or no).
+    lastTouch: !!(job.followup && job.last_touch),
+    eventDays: daysOf(c.event),
+    // The user's own voice rule says to open with who they are: theirs to keep.
+    senderOpeningOk: openingOf(skills.voice || '') === 'plain' && /\b(?:who\s+(?:i|we)\s+(?:am|are)|my\s+name|our\s+name)\b/i.test(skills.voice || ''),
     contact: c.byId[id],
     slotLabels: app && c.settings.app_note_times === 'in_app' ? [] : job.slot_labels,
     eventName: app && c.settings.app_note_event_name === false ? null : c.event.name,
     eventCity: c.event.city || null,
+    meetingPlace: c.settings.meeting_place || null,
     eventAliases: app && c.settings.app_note_event_name === false ? [] : c.event.aliases,
     optout: app && c.settings.app_note_optout === false ? null : optoutForReader(c.settings, lang, knownReader(c, id)),
     // The user chose to leave the line off emails to people they know: one that carries it anyway is refused.
@@ -55,6 +66,15 @@ function checkCtx(c, job, id, channel, others, lang = null) {
       .filter(Boolean)
       .join('\n')
   };
+}
+
+// The event's days, first to last (YYYY-MM-DD).
+function daysOf(event) {
+  const out = [];
+  if (!event?.start_date || !event?.end_date) return out;
+  for (let d = new Date(`${event.start_date}T12:00:00Z`); out.length < 31 && d.toISOString().slice(0, 10) <= event.end_date; d.setUTCDate(d.getUTCDate() + 1))
+    out.push(d.toISOString().slice(0, 10));
+  return out;
 }
 
 // Whether the latest batch check of this touch, made after this draft was last saved, failed and asks for it to
@@ -175,13 +195,17 @@ export function saveDraft(opts, given = null) {
   let problems = [];
   if (job.kind === 'message') {
     const others = otherAttendees(c, job.id);
-    problems = checkDraft(draft, checkCtx(c, job, job.id, draft.channel, others, draft.language || null));
+    const ctx = checkCtx(c, job, job.id, draft.channel, others, draft.language || null);
+    problems = checkDraft(draft, ctx);
+    // What the checks warn about without failing: kept with the draft, read by the critic, said back to the drafter.
+    draft.warnings = draftWarnings(draft, ctx);
     draft.structure = input.structure || inferStructure(draft);
     draft.structure_assigned = job.structure || null;
     draft.fact_source = input.fact_source || (job.fact_sources || [])[0] || null;
     if (draft.fact_source && job.fact_sources && !job.fact_sources.includes(draft.fact_source) && draft.fact_source !== 'none')
       problems.push(`fact_source "${draft.fact_source}" isn't one this person has (${job.fact_sources.join(', ')})`);
     problems.push(...structureProblems(draft, { structure: draft.structure, factSource: draft.fact_source, insight: draft.insight, warm: warmReader(job) }));
+    problems.push(...researchProblems(draft, job));
     const current = resolveInsight(draft, insights);
     problems.push(
       ...(current?.gone && draft.insight_text
@@ -204,7 +228,7 @@ export function saveDraft(opts, given = null) {
     const bodyLow = draft.body.toLowerCase();
     if (placeWords.length && placeWords.filter((w) => bodyLow.includes(w)).length < Math.ceil(placeWords.length * 0.6))
       problems.push(`doesn't say where to meet (${job.meeting_place})`);
-    if (relativeWordsIn(draft.body).length) problems.push(`uses relative time words (${relativeWordsIn(draft.body).join(', ')}); write the day and date`);
+    if (relativeFlag(draft.body)) problems.push(relativeFlag(draft.body));
   }
   draft.checks = problems;
   // Log first: a crash between the two leaves a "drafted" entry with the old file, never new text in a card
@@ -255,7 +279,7 @@ export function saveDraft(opts, given = null) {
     draft.verdict = { verdict: read.verdict, reasons: read.reasons || [], hash: draft.hash, at: read.at };
   writeJson(job.draft_file, draft);
   c._batches?.clear();
-  return { id: job.id, touch, checks: problems.length ? problems : 'pass', attempts: draft.attempts };
+  return { id: job.id, touch, checks: problems.length ? problems : 'pass', ...(draft.warnings?.length ? { warnings: draft.warnings } : {}), attempts: draft.attempts };
 }
 
 // The follow-ups after `touch` in this person's sequence count from its planned day (day). One whose saved plan counts
@@ -473,9 +497,7 @@ export function briefs(opts) {
   return {
     briefs: out.length,
     by_drafter: out,
-    next: out.length
-      ? 'Give each brief to its drafter (the Skill tool for a skill, the Agent tool for an agent), then save each answer with save-draft --json, adding "drafted_by": "<drafter>". The checks and the critic read it like any draft.'
-      : "No jobs for the user's drafter in this run."
+    next: out.length ? briefsNext() : "No jobs for the user's drafter in this run."
   };
 }
 
@@ -567,3 +589,9 @@ export function redraft(opts) {
   }
   return { fresh_attempt: done, next: "Run flow next again: these are drafted again from scratch, with the critic's last reasons as a guide." };
 }
+
+// What to do with the user's own drafter's briefs. In hand-send, no Claude Code tool by name.
+export const briefsNext = () =>
+  handSend()
+    ? 'Give each brief to its drafter (the user\'s own skill or agent), one brief at a time and nothing else, then save each answer with save-draft --json, adding "drafted_by": "<drafter>". The checks and the critic read it like any draft.'
+    : 'Give each brief to its drafter (the Skill tool for a skill, the Agent tool for an agent), then save each answer with save-draft --json, adding "drafted_by": "<drafter>". The checks and the critic read it like any draft.';
