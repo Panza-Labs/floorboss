@@ -51,8 +51,8 @@ test('a draft the batch check moves off the insight gets another structure, and 
   const { t, jobs: js } = todoJobs(H);
   const j = js.find((x) => x.kind === 'message' && x.structure === 'insight-first');
   assert.ok(j, JSON.stringify(js.map((x) => x.structure)));
-  const body = (s) => `Hi ${j.contact.name.split(" ")[0]}, ${s}. Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
-  const save = (b, extra) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: b, brief: 'x', fact_source: 'list', ...extra })]);
+  const body = (s) => `Hi ${j.contact.name.split(" ")[0]}, ${s}. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
+  const save = (b, extra) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: b, brief: 'x, no research profile', fact_source: 'list', ...extra })]);
   const first = save(body('most onboarding delay is waiting on insurance certificates, not vetting'), { structure: 'insight-first', insight: 'I1' });
   assert.equal(first.checks, 'pass', JSON.stringify(first));
   assert.equal(first.attempts, 1);

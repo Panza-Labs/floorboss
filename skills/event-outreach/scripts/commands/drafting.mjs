@@ -17,7 +17,7 @@ import { saveDraft as saveDraftFile } from '../../../../lib/drafts.mjs';
 import { buildBrief, instructionsPath } from '../drafter.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
 import { analyzeBatch, checkInsights } from '../sameness.mjs';
-import { structureProblems, structureSpread, inferStructure, openingOf, OPENINGS, warmReader } from '../structures.mjs';
+import { structureProblems, researchProblems, structureSpread, inferStructure, openingOf, OPENINGS, warmReader } from '../structures.mjs';
 import { whereAt, linkedinNoteCap, hashOf, toOf } from './routes.mjs';
 import { skillsOf, knownReader, ctxOf, otherAttendees, led, labelOf, signoffOf, idList, touchSpec } from './context.mjs';
 import { jobFor, insightsOf, lastEmailSubject, insightField, staleFor, resolveInsight, insightProblems, readTodo, ledgerTouch, touchBatch, earlierDraft, draftFiles, draftFile } from './saved-drafts.mjs';
@@ -205,6 +205,7 @@ export function saveDraft(opts, given = null) {
     if (draft.fact_source && job.fact_sources && !job.fact_sources.includes(draft.fact_source) && draft.fact_source !== 'none')
       problems.push(`fact_source "${draft.fact_source}" isn't one this person has (${job.fact_sources.join(', ')})`);
     problems.push(...structureProblems(draft, { structure: draft.structure, factSource: draft.fact_source, insight: draft.insight, warm: warmReader(job) }));
+    problems.push(...researchProblems(draft, job));
     const current = resolveInsight(draft, insights);
     problems.push(
       ...(current?.gone && draft.insight_text

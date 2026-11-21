@@ -58,6 +58,7 @@ const ANSWER = (st, own = {}) => ({
   drafter: () => { st.cfg.drafter = { name: 'acme-sdr', gaps: [] }; }, drafter_sample: () => { st.ans.drafter_sample_ok = true; }, seller_framing: () => { st.ans.seller_framing = 'no'; },
   offer: () => { st.ans.offer_asked = true; }, true_claims: () => { st.ans.claims_confirmed = true; }, samples: () => { st.ans.samples_ok = true; }, languages: () => { st.cfg.languages = ['German', 'English']; }, basics: () => { st.ans.basics_asked = true; },
   sending: () => { st.ans.sending_asked = true; st.ans.sending_channels = own.channels || []; }, send_setup: () => { st.ans.send_setup_done = true; }, followups_mode: () => { st.cfg.sending = { followups: 'scheduled' }; },
+  touches: () => { st.ans.touches_asked = true; },
   message_route: () => { st.ans.message_route_asked = true; }, followup_gap: () => { st.ans.followup_gap_asked = true; }, crm_log: () => { st.cfg.crm_log = 'tasks'; }, colleague_notes: () => { st.ans.colleague_notes_asked = true; st.cfg.colleague_notes = false; },
   about: () => { st.ans.about_asked = true; }, insights: () => { st.ans.insights_asked = true; },
 });
@@ -132,7 +133,7 @@ test('tree: setup levels — quick asks the fewest and reads nothing connected, 
   assert.ok(ids(st.asked).includes('tools') && !ids(st.asked).includes('sending'), st.asked.join(' '));
   assert.ok(ids(f.asked).includes('sending'));
   assert.ok(q.asked.length < st.asked.length && st.asked.length < f.asked.length, `${q.asked.length} ${st.asked.length} ${f.asked.length}`);
-  assert.ok(q.asked.length <= 8, `quick: ${q.asked.join(' ')}`);
+  assert.ok(q.asked.length <= 9, `quick: ${q.asked.join(' ')}`);
   if (process.env.SHOW_LEVELS) console.log(JSON.stringify({ quick: q.asked, standard: st.asked, full: f.asked }));
   // The README's counts are this walk's (a seller working alone with a CRM, mailbox and calendar connected).
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');

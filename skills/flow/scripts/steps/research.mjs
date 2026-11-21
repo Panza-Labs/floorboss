@@ -83,7 +83,8 @@ export function researchSteps(x) {
     // About a minute a company in turn, as the live Codex run took.
     const mins = Math.max(1, todo.length);
     const unasked = hs && !e.state.answered.company_research;
-    const peopleToo = unasked && !quick && !e.state.answered.research_scale && shortN0 ? handSendScale(shortN0) : null;
+    // Hand-send researches the people in every setup level, quick included: it asks nothing, so nothing declined it.
+    const peopleToo = unasked && !e.state.answered.research_scale && shortN0 ? handSendScale(shortN0) : null;
     return step(
       'company_briefs',
       `Before any draft: what each of ${todo.length} companies sells, how it relates to ${companies.sender_company || 'your company'} and what it would want from you. ${handSend() ? 'Run each researcher in turn, then save each.' : 'Run every researcher at once (in parallel, one message), then save each.'}${!unasked && todo.length > 15 ? ` Tell the user first, in one line: ${todo.length} company researches, a few web searches each, a few minutes in all.` : ''}`,
@@ -160,7 +161,7 @@ export function researchSteps(x) {
     });
   // Hand-send (standard and full): the people are researched without a question, all of them up to 20, else the top 20.
   const scale =
-    (quick || mock) && !e.state.answered.research_scale
+    (mock || (quick && !handSend())) && !e.state.answered.research_scale
       ? 'none'
       : !e.state.answered.research_scale && handSend()
         ? handSendScale(shortN).scale

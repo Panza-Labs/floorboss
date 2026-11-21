@@ -22,6 +22,43 @@ import { whereAt, writtenInApp, routeOf, whereMoved, messageFields, channelChang
 import { ctxOf, skillsOf, takenTest, isOut, lastSentTouch, segmentInfo, knownReader, sameSlots, labelOf, wholeSequence } from './context.mjs';
 import { readTodo, staleFor, savedDraft, draftFile, ledgerTouch, criticFails, earlierDraft, resolveInsight, touchBatch, followupDayOf } from './saved-drafts.mjs';
 
+// The must-follow drafting rules (from skills/event-outreach/SKILL.md), at the top of the todo file the drafting
+// step reads.
+export const DRAFTING_RULES = [
+  "Open with the reader's researched fact (fact_source research) as one short clause, never as news.",
+  "Then what's in it for them and what you offer. Never open with I, we, \"I'd like\", \"I would like\", \"Let's\" or \"Let us\".",
+  'No meeting place (booth, hall, stand, table) before they say yes.',
+  'Times the way a person types them: "Tue 19th or Wed 20th at 9:00". No time zone, city, month or a.m./p.m.; on the hour or half hour.',
+  'No demo framing: ask for a conversation between peers.',
+  '60 to 100 words for a first email.',
+  'Subject under about 40 characters, no question mark, no first name.',
+  'A follow-up stands alone, adds one new thing, and is shorter than the message before it.',
+  'The opt-out line exactly as given (optout_sentence).',
+  'Invent nothing: no figure, claim or fact that is not in the research, the CRM, or the context text.',
+  'The voice text wins on tone; take proof points and insights only from what_you_bring.',
+  'Plain form only for a person with no research profile, and the brief says so.'
+];
+const CONTEXT_CAP = 6000;
+const contextPaths = (skills) => ({
+  who_to_meet: skills.dir ? join(skills.dir, 'who-to-meet', 'SKILL.md') : null,
+  what_you_bring: skills.dir ? join(skills.dir, 'what-you-bring', 'SKILL.md') : null,
+  voice: skills.dir ? join(skills.dir, 'voice', 'SKILL.md') : null
+});
+// The user's own material, inline, so a drafter that never opens the paths still has it. Cut at a cap, and said.
+function contextText(skills) {
+  const paths = contextPaths(skills);
+  const src = { voice: skills.voice, what_you_bring: skills.whatYouBring, who_to_meet: skills.whoToMeet };
+  const out = {};
+  const truncated = [];
+  for (const [k, t] of Object.entries(src)) {
+    const text = String(t || '');
+    out[k] = text.length > CONTEXT_CAP ? text.slice(0, CONTEXT_CAP) : text;
+    if (text.length > CONTEXT_CAP) truncated.push(`${k}: cut at ${CONTEXT_CAP} of ${text.length} characters; the rest is in ${paths[k]}`);
+  }
+  if (truncated.length) out.truncated = truncated;
+  return out;
+}
+
 // What a rewrite answers to, on the job the drafter gets: the user's words (an outreach revise, or the note on a
 // draft they rated 3 or less, which only the ledger holds) and the critic's reasons on the version being
 // replaced, both when both apply, with that version as revise_previous.
@@ -497,6 +534,10 @@ export function todo(opts) {
   // The day it was worked out for (event time) and the run: time passing changes what is due (a follow-up on its
   // day), so the flow works it out again on a new day and in a new run, not only when the ledger grows.
   writeJson(join(c.paths.derived, 'todo.json'), {
+    // First in the file, because the drafting step reads this file and may not open the help file (Codex).
+    rules: DRAFTING_RULES,
+    context: contextPaths(skills),
+    context_text: contextText(skills),
     at: c.now.toISOString(),
     ledger_lines: readLedger(c.paths.ledger).entries.length,
     built_for_day: today,
@@ -524,11 +565,7 @@ export function todo(opts) {
     optout_sentences: Object.fromEntries((c.settings.languages || []).map((l) => [l, optoutFor(c.settings, l)])),
     draft_language: c.settings.draft_language,
     paste_limit: c.settings.paste_limit,
-    context: {
-      who_to_meet: skills.dir ? join(skills.dir, 'who-to-meet', 'SKILL.md') : null,
-      what_you_bring: skills.dir ? join(skills.dir, 'what-you-bring', 'SKILL.md') : null,
-      voice: skills.dir ? join(skills.dir, 'voice', 'SKILL.md') : null
-    },
+    context: contextPaths(skills),
     drafting: {
       mode: c.settings.drafting_mode || 'floorboss',
       by_user: jobs.filter((j) => j.drafter?.by === 'user').length,

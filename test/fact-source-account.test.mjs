@@ -23,8 +23,8 @@ test('a draft for someone at the user\'s account: "crm" is refused, "account" is
   const j = jobs.find((x) => x.id === noah && x.kind === 'message');
   assert.ok(j.account_note, JSON.stringify(j).slice(0, 300));
   assert.deepEqual(j.fact_sources, ['account', 'list']);
-  const body = `Hi Noah, we already work with the Pebbleway finance team. Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
-  const save = (fs) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', noah, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x', structure: 'plain-request', fact_source: fs })]);
+  const body = `Hi Noah, we already work with the Pebbleway finance team. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
+  const save = (fs) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', noah, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x, no research profile', structure: 'plain-request', fact_source: fs })]);
   assert.ok(save('crm').checks.some((x) => /fact_source "crm" isn't one this person has \(account, list\)/.test(x)), 'crm refused');
   const ok = save('account');
   assert.ok(ok.checks === 'pass' || !ok.checks.some((x) => /fact_source/.test(x)), JSON.stringify(ok.checks));

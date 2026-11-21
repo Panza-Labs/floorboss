@@ -7,10 +7,10 @@ import { join } from 'node:path';
 import { setup, cli, triage, todoJobs } from './fixtures/harness.mjs';
 
 const PEOPLE = 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP Ops,Globex,bo@globex.test\nCy Ng,Head of Ops,Initech,cy@initech.test\n';
-const body = (j) => `Hi ${j.contact.name.split(' ')[0]},\n\nShippers re-tendering in Q1 are asking carriers for proof of insurance earlier. Is that showing up in your bids? ${j.slot_labels?.length ? `Could you do ${j.slot_labels.join(' or ')}?` : 'Could we find 30 minutes at Test Expo?'}\n\nBest, Sam`;
+const body = (j) => `Hi ${j.contact.name.split(' ')[0]},\n\nShippers re-tendering in Q1 are asking carriers for proof of insurance earlier. Is that showing up in your bids? ${j.slot_labels?.length ? `Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?` : 'Could we find 30 minutes at Test Expo?'}\n\nBest, Sam`;
 function saveAll(H) {
   const { jobs } = todoJobs(H);
-  for (const j of jobs.filter((x) => x.kind === 'message')) cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body: body(j), brief: 'x', structure: 'question-first', fact_source: 'list' })]);
+  for (const j of jobs.filter((x) => x.kind === 'message')) cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: 'Test Expo', body: body(j), brief: 'x, no research profile', structure: 'question-first', fact_source: 'list' })]);
   return jobs;
 }
 const jobOf = (H, id, touch = 1) => todoJobs(H).jobs.find((j) => j.id === id && j.touch === touch);
@@ -56,7 +56,7 @@ test('redraft: a planned follow-up that failed the critic carries its reasons to
   for (const j of saveAll(H)) if (j.touch === 1) cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--text', 'PASS']);
   const f = todoJobs(H).jobs.find((j) => j.touch === 2 && j.kind === 'message');
   assert.ok(f, 'a planned follow-up');
-  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', f.id, '--touch', '2', '--json', JSON.stringify({ body: `Hi ${f.contact.name.split(' ')[0]}, following up on my note. Still around at Test Expo?\n\nBest, Sam`, brief: 'x', structure: 'plain-request', fact_source: 'list' })]);
+  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', f.id, '--touch', '2', '--json', JSON.stringify({ body: `Hi ${f.contact.name.split(' ')[0]}, following up on my note. Still around at Test Expo?\n\nBest, Sam`, brief: 'x, no research profile', structure: 'plain-request', fact_source: 'list' })]);
   cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', f.id, '--touch', '2', '--text', 'FAIL: repeats the first message word for word']);
   assert.match(jobOf(H, f.id, 2)?.revise_feedback || '', /repeats the first message/);
 });

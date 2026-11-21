@@ -103,6 +103,24 @@ export function approvalSteps(x) {
       !touchOf(j).dropped &&
       (j.kind !== 'message' || touchOf(j).critic?.verdict === 'PASS' || touchOf(j).review_skipped)
   );
+  // Codex: the user said yes to sending from their Gmail at setup ("autosend_said"): auto-send in drafts mode is turned on
+  // here, before the approval, so the one approval covers whole sequences. Their Gmail address is asked once.
+  const sendSaid = c.ob?.ans?.autosend_said;
+  if (handSend() && sendSaid && !e.event?.autosend && needApprove.length) {
+    const own = e.event?.autosend_own || c.cfg?.own_email || null;
+    if (!own)
+      return step('autosend_own', 'You asked floorboss to send from your Gmail. It needs the address of that Gmail account.', {
+        ask: {
+          id: 'send_setup',
+          question: 'Which Gmail address should floorboss send from? (The account you use with ChatGPT or Codex.)',
+          answer_format: 'the address, e.g. "sam@gmail.com"'
+        }
+      });
+    return step('autosend_on', 'You asked floorboss to send your approved emails from your Gmail: turning auto-send on (Gmail drafts) before the approval.', {
+      run: node('autosend', 'on', '--event', e.event.slug, '--said', String(sendSaid), '--own', own, '--mode', 'drafts'),
+      help: '.agents/skills/floorboss/SKILL.md'
+    });
+  }
   // Drafts that stayed unapprovable after three tries (stuck, above): the user drops them or edits them, asked once a day.
   const stuckAsked = e.state.answered.stuck_drafts && String(e.state.answered.stuck_drafts.at).slice(0, 10) === c.now.toISOString().slice(0, 10);
   if (stuck.length && !stuckAsked)

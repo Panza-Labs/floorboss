@@ -292,7 +292,9 @@ export function draftSteps(x) {
   const ratedAny = Object.values(e.state.people).some((p) => p.ratings.length) || e.state.answered.rate;
   const passed = jobs.filter((j) => j.kind === 'message' && touchOf(j)?.critic?.verdict === 'PASS' && touchOf(j).critic.hash === touchOf(j).hash);
   const carried = !ratedAny && passed.length >= 3 ? ratingsCarry(e) : null;
-  if (!ratedAny && !carried && passed.length >= 3 && !Object.values(e.state.people).some((p) => Object.values(p.touches).some((t) => t.approved)))
+  // Codex (hand-send): no 1-to-10 rating step. The chat review at approval (a sample, the user's own words, then a
+  // rewrite) is how the copy is judged there; Claude Code keeps the blind ratings.
+  if (!handSend() && !ratedAny && !carried && passed.length >= 3 && !Object.values(e.state.people).some((p) => Object.values(p.touches).some((t) => t.approved)))
     return step(
       'rate',
       "Before the first approval: rate a blind set of the drafts as their readers would. Your ratings, not the critic's, are the measure of the copy; anything you rate 3 or less is written again.",

@@ -134,15 +134,18 @@ function threePeople(codex) {
   return steps;
 }
 
-test('3. hand-send step texts: no Claude Code wording (research, critic, rate, approve)', { timeout: 300000 }, () => {
+test('3. hand-send step texts: no Claude Code wording (research, critic, approve; no rating step)', { timeout: 300000 }, () => {
   const steps = threePeople(true);
   // (No scan step in hand-send: there is nothing connected to look at.)
   assert.equal(steps.scan, undefined);
-  for (const id of ['company_briefs', 'research_batch', 'critic', 'rate', 'approve']) assert.ok(steps[id], `${id} came up: ${Object.keys(steps).join(' ')}`);
+  for (const id of ['company_briefs', 'research_batch', 'critic', 'approve']) assert.ok(steps[id], `${id} came up: ${Object.keys(steps).join(' ')}`);
   for (const [id, list] of Object.entries(steps)) for (const s of list) for (const t of textsOf(s)) assert.doesNotMatch(t, CLAUDE_WORDS, `${id}: ${t}`);
   assert.equal(steps.critic[0].why, '3 drafts for the critic: 1 batch. Give each batch its whole file, exactly as written, one batch after another; never summarise it.');
   assert.match(steps.approve[0].why, /^3 messages are ready for the user's yes\. Each is shown in full; once approved, the user sends each one from their own mail app or copies it\.$/);
-  assert.match(steps.rate[0].ask.question, /^Show the user every draft in .+rate-set\.md, whole\. Then: for each, how likely is that reader to reply, 1 to 10\? A few words if something stands out\. Or skip\.$/);
+  // Codex has no 1-to-10 rating step: the chat review at approval is how the drafts are judged.
+  assert.equal(steps.rate, undefined, 'Codex is never asked to rate drafts 1 to 10');
+  assert.match(steps.approve[0].run_first.join(' '), /flow\b.*review/);
+  assert.match(steps.approve[0].ask.question, /candid feedback/);
   assert.match(steps.research_batch[0].why, /^Research 3 people on the web, one after another: public sources only, a URL on every claim\. Then save each\.$/);
   assert.match(steps.company_briefs[0].why, /Run each researcher in turn, then save each\./);
 });
@@ -220,4 +223,62 @@ test('6. verdicts with empty ids says the ids are empty', () => {
     assert.match(r.ERROR || '', /--ids is empty/, ids);
     assert.doesNotMatch(r.ERROR, /No verdict lines/);
   }
+});
+
+// Codex asks nothing about research, in every setup level: a quick setup still looks the people up, so a draft has a
+// researched fact to open with (a quick setup in Codex used to skip the people and every draft came out generic).
+test('3. Codex researches the people even on a quick setup', { timeout: 300000 }, () => {
+  const H = makeHome({
+    context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' },
+    attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.example\nBo Li,VP Ops,Globex,bo@globex.example\nCy Ng,Head of Ops,Initech,cy@initech.example\n'
+  });
+  Object.assign(H.env, CODEX);
+  delete H.env.CLAUDECODE;
+  const persona = simplePersona({ asks: { setup_level: 'quick', attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
+  const hit = untilStep(H, persona, 'research_batch', { maxSteps: 120 });
+  assert.equal(hit.step, 'research_batch', hit.trail.join(' '));
+});
+
+// Codex is asked whether floorboss sends from Gmail at every setup level (quick used to default it away, so
+// auto-send was never offered); a yes turns auto-send on in drafts mode before the approval; a no keeps hand-send.
+function quickSending(answer) {
+  const H = makeHome({
+    context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' },
+    attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.example\nBo Li,VP Ops,Globex,bo@globex.example\nCy Ng,Head of Ops,Initech,cy@initech.example\n'
+  });
+  Object.assign(H.env, CODEX);
+  delete H.env.CLAUDECODE;
+  const asked = [];
+  const persona = simplePersona({
+    asks: { setup_level: 'quick', attendee_list: join(H.HOME, 'inputs', 'attendees.csv'), sending: answer, send_setup: 'sam@gmail.example', touches: '4', voice_samples: 'skip' },
+    judge: { research: (x) => ({ identity_confirmed: true, role_seen: x.title, person_claims: 0, complete: true, claims: [{ text: `${x.company} runs regional warehouses.`, url: `https://${String(x.company).toLowerCase()}.example/about` }] }) }
+  });
+  const hit = untilStep(H, persona, (s) => {
+    if (s.ask?.id) asked.push(s.ask.id);
+    return s.step === 'approve' || s.step === 'autosend_on';
+  }, { maxSteps: 250 });
+  return { H, asked, hit };
+}
+const eventJson = (H) => {
+  const d = join(H.HOME, 'events');
+  return execFileSync('sh', ['-c', `cat ${d}/*/event.json`], { encoding: 'utf8' });
+};
+
+test('3. Codex quick setup asks whether floorboss sends from Gmail; yes turns on drafts mode before approval', { timeout: 300000 }, () => {
+  const { H, asked, hit } = quickSending('yes, send them from my Gmail');
+  assert.ok(asked.includes('sending'), `the sending question was asked: ${asked.join(' ')}`);
+  assert.equal(hit.step, 'autosend_on', hit.trail.join(' '));
+  assert.match(hit.last.run.join(' '), /autosend.*cli\.mjs on .*--mode drafts/);
+  assert.match(hit.last.run.join(' '), /--own sam@gmail\.example/);
+  // Run it: the event is then in drafts mode.
+  const out = JSON.parse(execFileSync(hit.last.run[0], hit.last.run.slice(1), { env: H.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  assert.equal(out.autosend, true);
+  assert.equal(out.mode, 'drafts');
+  assert.match(eventJson(H), /"autosend_mode":\s*"drafts"/);
+});
+
+test('3. Codex quick setup: a no keeps hand-send (no auto-send step)', { timeout: 300000 }, () => {
+  const { asked, hit } = quickSending("no, I'll send them myself");
+  assert.ok(asked.includes('sending'));
+  assert.equal(hit.step, 'approve');
 });

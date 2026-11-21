@@ -44,14 +44,14 @@ test('an insight a colleague at the same company already got is refused', () => 
   const [a, b] = jobs.filter((j) => j.kind === 'message');
   const ins = insights.find((x) => a.insight_options.includes(x.id) && b.insight_options.includes(x.id));
   assert.ok(ins, JSON.stringify(insights).slice(0, 200));
-  const body = (j) => `Hi ${j.contact.name.split(' ')[0]}, ${ins.insight} Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
-  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', a.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: body(a), brief: 'x', structure: 'insight-first', insight: ins.id, fact_source: 'list' })]);
+  const body = (j) => `Hi ${j.contact.name.split(' ')[0]}, ${ins.insight} Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
+  cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', a.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: body(a), brief: 'x, no research profile', structure: 'insight-first', insight: ins.id, fact_source: 'list' })]);
   // Ana's message is approved (out of this run): the drafting list worked out again has Fay avoid her insight.
   cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', a.id, '--touch', '1', '--text', 'PASS']);
   assert.ok(!cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${a.id}`]).ERROR);
   const again = todoJobs(H).jobs.find((j) => j.id === b.id && j.kind === 'message');
   assert.ok(again.avoid_insights.includes(ins.id), JSON.stringify(again.avoid_insights));
-  const r = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', b.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: body(b), brief: 'x', structure: 'insight-first', insight: ins.id, fact_source: 'list' })]);
+  const r = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', b.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: body(b), brief: 'x, no research profile', structure: 'insight-first', insight: ins.id, fact_source: 'list' })]);
   assert.ok(r.checks.some((x) => new RegExp(`insight ${ins.id} is one this person's colleagues already got`).test(x)), JSON.stringify(r.checks));
 });
 

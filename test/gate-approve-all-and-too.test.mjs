@@ -42,7 +42,7 @@ function drafted() {
   const r = todoJobs(H);
   const bo = idOf(H, 'Bo Li');
   for (const j of r.jobs) {
-    const d = (({ body, structure, fact_source, insight }) => ({ subject: 'Test Expo', body, brief: 'x', structure, fact_source, ...(insight ? { insight } : {}) }))(draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] }));
+    const d = (({ body, structure, fact_source, insight }) => ({ subject: 'Test Expo', body, brief: 'x, no research profile', structure, fact_source, ...(insight ? { insight } : {}) }))(draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] }));
     cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify(d)]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', j.id === bo ? 'FAIL\n- the subject is vague' : 'PASS']);
   }

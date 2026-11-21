@@ -38,7 +38,7 @@ function approveRounds(H, now = NOW) {
     const r = todoJobs(H, now);
     for (const j of r.jobs.filter((x) => (x.kind === 'message' || x.kind === 'confirmation') && !x.waits_for_previous)) {
       const d = j.kind === 'confirmation' ? { subject: 'Re: Test Expo', body: `Hi Ana, confirming ${(j.slot_labels || []).join('')}. See you at Test Expo.\n\nBest, Sam` } : draftFor({ ...r.t, insights: r.insights }, { ...j, slot_labels: j.slot_labels || [] });
-      cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: d.subject || 'Test Expo', body: d.body, brief: 'x', ...(d.structure ? { structure: d.structure, fact_source: d.fact_source } : {}), ...(d.insight ? { insight: d.insight } : {}) })], now);
+      cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--json', JSON.stringify({ subject: d.subject || 'Test Expo', body: d.body, brief: 'x, no research profile', ...(d.structure ? { structure: d.structure, fact_source: d.fact_source } : {}), ...(d.insight ? { insight: d.insight } : {}) })], now);
       if (j.kind !== 'confirmation') cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', String(j.touch), '--text', 'PASS'], now);
     }
   }

@@ -76,8 +76,8 @@ test('minor: the languages answer says what was saved, not the whole config; app
   // An approval with sending off doesn't claim it goes via email.send.
   const { jobs } = todoJobs(H);
   for (const j of jobs.filter((x) => x.kind === 'message')) {
-    const body = `Hi ${j.contact.name.split(' ')[0]}, carrier compliance for freight teams is the work I'd like to compare notes on. Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\nIf this isn't relevant, say so and I won't follow up.`;
-    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x', structure: 'plain-request', fact_source: 'list' })]);
+    const body = `Hi ${j.contact.name.split(' ')[0]}, carrier compliance for freight teams is the work I'd like to compare notes on. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam\n\nIf this isn't relevant, say so and I won't follow up.`;
+    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'x, no research profile', structure: 'plain-request', fact_source: 'list' })]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--text', 'PASS']);
   }
   const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', 'approve all']);

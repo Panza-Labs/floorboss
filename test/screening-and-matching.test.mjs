@@ -140,7 +140,7 @@ test('accented segments, user notes reach the critic, held drafts get a fresh at
   const job = JSON.parse(readFileSync(todo.todo_file, 'utf8')).jobs.find((j) => j.id === job0.id);
   assert.equal(job.user_note, 'met at the Rotterdam port forum last year');
   const dp = join(home, 'd.json');
-  writeFileSync(dp, JSON.stringify([{ id: job.id, touch: 1, subject: 'x', body: `Hi, 30 minutes at Harbour & Haul, ${job.slot_labels.join(' or ')}?\n\n${todo.optout_sentence}` }]));
+  writeFileSync(dp, JSON.stringify([{ id: job.id, touch: 1, subject: 'x', body: `Hi, 30 minutes at Harbour & Haul, ${job.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\n${todo.optout_sentence}` }]));
   cli('event-outreach', ['save-drafts', '--event', SLUG, '--drafts-file', dp]);
   assert.equal(cli('event-outreach', ['critic-batch', '--event', SLUG, '--ids', `${job.id}:1`])[0].input.user_note, 'met at the Rotterdam port forum last year');
   const vp = join(home, 'v.txt');
@@ -214,7 +214,7 @@ test('a booking gets a confirmation with the time and the meeting place', () => 
   const todo = cli('event-outreach', ['todo', '--event', SLUG]);
   const job = JSON.parse(readFileSync(todo.todo_file, 'utf8')).jobs.find((j) => j.kind === 'message' && j.channel === 'email');
   const dp = join(home, 'd.json');
-  writeFileSync(dp, JSON.stringify([{ id: job.id, touch: 1, subject: 'Onboarding', body: `Hi, 30 minutes at Harbour & Haul, ${job.slot_labels.join(' or ')}?\n\n${todo.optout_sentence}` }]));
+  writeFileSync(dp, JSON.stringify([{ id: job.id, touch: 1, subject: 'Onboarding', body: `Hi, 30 minutes at Harbour & Haul, ${job.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\n${todo.optout_sentence}` }]));
   cli('event-outreach', ['save-drafts', '--event', SLUG, '--drafts-file', dp]);
   const vp = join(home, 'v.txt');
   writeFileSync(vp, `${job.id} PASS`);
@@ -303,7 +303,7 @@ test('gate answers by name and by c017:2; drafts left out at the gate wait for t
   const todo = cli('event-outreach', ['todo', '--event', SLUG]);
   const jobs = JSON.parse(readFileSync(todo.todo_file, 'utf8')).jobs.filter((j) => j.kind === 'message').slice(0, 2);
   const dp = join(home, 'd.json');
-  writeFileSync(dp, JSON.stringify(jobs.map((j) => ({ id: j.id, touch: 1, subject: 'x', body: `Hi, 30 minutes at Harbour & Haul, ${j.slot_labels.join(' or ')}?\n\n${todo.optout_sentence}` }))));
+  writeFileSync(dp, JSON.stringify(jobs.map((j) => ({ id: j.id, touch: 1, subject: 'x', body: `Hi, 30 minutes at Harbour & Haul, ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}?\n\n${todo.optout_sentence}` }))));
   cli('event-outreach', ['save-drafts', '--event', SLUG, '--drafts-file', dp]);
   const vp = join(home, 'v.txt');
   writeFileSync(vp, jobs.map((j) => `${j.id} PASS`).join('\n'));

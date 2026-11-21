@@ -13,7 +13,7 @@ test('rate set: paste messages are labelled LinkedIn or the event app, never "fi
   for (const j of jobs.filter((x) => x.kind === 'message')) {
     const first = j.contact.name.split(' ')[0];
     const body = `Hi ${first}, carriers are being asked for insurance proof earlier this year. Is that showing up for you? Could you do ${(j.slot_labels || []).join(' or ') || 'a coffee at Test Expo'}?\n\nBest, Sam`;
-    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--json', JSON.stringify({ subject: j.channel === 'email' ? 'Test Expo' : undefined, body, brief: 'x', structure: 'question-first', fact_source: 'list' })]);
+    cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--json', JSON.stringify({ subject: j.channel === 'email' ? 'Test Expo' : undefined, body, brief: 'x, no research profile', structure: 'question-first', fact_source: 'list' })]);
     cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--text', 'PASS']);
   }
   const set = cli(H, 'event-outreach', ['rate-set', '--event', H.slug]);

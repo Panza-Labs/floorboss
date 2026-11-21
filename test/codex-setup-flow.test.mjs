@@ -220,7 +220,8 @@ test('7. hand-send: company research starts without a question, says what and ho
   assert.ok(!a.ERROR, a.ERROR);
   // No web research: each company gets its "not researched" brief and drafting goes on.
   const after = cli(H, 'flow', ['next', '--event', 'test-expo']);
-  assert.ok(['company_skip', 'draft'].includes(after.step), after.step);
+  // (Codex researches the people on a quick setup too, so the people's research can come next.)
+  assert.ok(['company_skip', 'research_batch', 'draft'].includes(after.step), after.step);
 });
 
 test('8. hand-send review in the chat: a varied sample, the total, one read-only document; feedback goes through revise', { timeout: 600000 }, () => {

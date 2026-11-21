@@ -16,8 +16,8 @@ test('the same text as a passed version, saved again after another: the gate app
   cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', 'defaults']);
   const { jobs, t } = todoJobs(H);
   const j = jobs.find((x) => x.id === idOf(H, 'Ana Berg') && x.touch === 1);
-  const times = j.slot_labels.join(' or ');
-  const A = { subject: 'Test Expo', body: `Hi Ana,\n\nYour ops tooling is where Lanecraft could help, and I would value 20 minutes at Test Expo. Could you do ${times}?\n\nBest, Sam${t.optout_sentence ? `\n\n${t.optout_sentence}` : ''}`, brief: 'x', structure: 'plain-request', fact_source: 'list' };
+  const times = j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ');
+  const A = { subject: 'Test Expo', body: `Hi Ana,\n\nYour ops tooling is where Lanecraft could help, and I would value 20 minutes at Test Expo. Could you do ${times}?\n\nBest, Sam${t.optout_sentence ? `\n\n${t.optout_sentence}` : ''}`, brief: 'x, no research profile', structure: 'plain-request', fact_source: 'list' };
   const B = { ...A, body: A.body.replace('would value', 'would like') };
   const save = (d) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify(d)]);
   assert.ok(!save(A).ERROR);

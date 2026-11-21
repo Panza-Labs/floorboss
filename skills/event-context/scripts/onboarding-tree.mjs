@@ -10,6 +10,7 @@
 
 import { connected, harness, HARNESSES } from '../../../lib/harness.mjs';
 import { systemZone } from '../../../lib/tz.mjs';
+import { leadDays, suggestedTouches } from '../../../lib/config.mjs';
 import { EVENT_ANSWERS } from '../../../lib/scope.mjs';
 import { plainText, noteOwnerQuestion, effectsHash } from '../../../lib/reading.mjs';
 import { ownerQuoted, plainOwnerValue } from '../../../lib/names.mjs';
@@ -80,7 +81,8 @@ const LEVEL_OF = {
   app_request_limit: 'full'
 };
 const levelOf = (s) => s.ans.setup_level || null;
-export const levelAllows = (id, level) => !level || LEVELS.indexOf(LEVEL_OF[id] || 'quick') <= LEVELS.indexOf(level);
+export const levelAllows = (id, level) =>
+  !level || (id === 'sending' && !connected()) || LEVELS.indexOf(LEVEL_OF[id] || 'quick') <= LEVELS.indexOf(level);
 const found = (s, k) => names(s, k);
 export function levelOptions(s) {
   const tools = [...found(s, 'crm'), ...found(s, 'email'), ...found(s, 'calendar')];
@@ -723,13 +725,15 @@ NODES.push(
     done: (s) => s.ans.sending_asked === true,
     ask: (s) =>
       !connected()
-        ? `floorboss is running in ${HARNESSES[harness()].label}, where it uses no connected tools, so it prepares each message for you to send yourself: on the outbox page, each email has a button that opens it in your mail app with everything filled in, and you press Send there. Then tell floorboss "sent" (or tick Sent and paste the page's status), and tell it what came back. OK?`
+        ? 'Should floorboss send your approved emails from your Gmail and send the follow-ups on their days, or prepare them for you to send? It never sends anything you have not approved, word for word, and a follow-up never goes to someone who replied.'
         : ![s.inv?.found?.email, s.inv?.found?.chat, s.inv?.found?.browser].some(any)
         ? 'Nothing in your setup can send messages (no mailbox, chat app or browser is connected), so floorboss will prepare each message for you to send yourself. If you want it to send later, connect your mailbox to Claude and run /floorboss:start again.'
         : `Should floorboss send the messages itself once you approve them, or prepare them for you to send? It never sends anything you haven't approved, word for word: you'll see each person's whole sequence (first message and follow-ups) before anything goes. Where may it send?`,
     // Only what this setup can do: a channel with nothing connected to send on isn't offered.
     options: (s) =>
-      [
+      !connected()
+        ? ['yes, send them from my Gmail', "no, I'll send them myself"]
+        : [
         ...(any(s.inv?.found?.email) ? ['email (your connected mailbox)'] : []),
         ...(s.ev?.app_name && any(s.inv?.found?.browser) ? [`${s.ev.app_name} (in your browser)`] : []),
         ...(any(s.inv?.found?.chat) ? [`${names(s, 'chat').slice(0, 2).join(' / ')} (not yet tested)`] : []),
@@ -737,7 +741,7 @@ NODES.push(
         "nowhere: I'll send them myself"
       ].slice(0, 4),
     saves:
-      'answers: sending_channels (a list of email, app, chat, linkedin; empty for none) and sending_asked; email and chat need their send connection set up (discovery, with one test message to the user themselves)'
+      'answers: sending_channels (a list of email, app, chat, linkedin; empty for none), autosend_said (Codex only: a yes to sending from Gmail) and sending_asked; email and chat need their send connection set up (discovery, with one test message to the user themselves)'
   },
   {
     id: 'linkedin_send',
@@ -806,6 +810,20 @@ NODES.push(
       `Which channel should each message go on, in order? The usual route is email, then ${s.ev?.app_name || 'the event app'}, then LinkedIn, then email. Anyone you can't reach on a step skips it. You can make it longer, shorter or a different order.`,
     options: () => ['email, app, linkedin, email (recommended)', 'email, email (no other channels)', 'your own order, like "email, linkedin, email"'],
     saves: 'config: route (a list of email, app, linkedin); answers: message_route_asked'
+  },
+  // How many emails each person gets, the first included: asked at every level, right after the sending question.
+  {
+    id: 'touches',
+    round: 'sending',
+    phase: 'later',
+    when: (s) => !!s.ans.sending_asked && !!s.ev,
+    done: (s) => s.ans.touches_asked === true,
+    ask: (s) => {
+      const n = leadDays(s.ev);
+      return `How many emails per person, first one included? 3 to 7. ${Number.isFinite(n) ? `For a show ${n} days away, floorboss suggests ${suggestedTouches(n)}.` : `floorboss suggests ${suggestedTouches(NaN)}.`}`;
+    },
+    options: (s) => [`${suggestedTouches(leadDays(s.ev))} (suggested)`, '3', '5', '7'],
+    saves: 'config: touches (3 to 7; the lead-time suggestion unless the user says another); answers: touches_asked'
   },
   // The days between follow-ups: the lead-time table unless the user says otherwise (any step takes the answer too).
   {
@@ -986,7 +1004,8 @@ export function defaultsFor(s0) {
     if (s.ans.list_source === 'app' && !s.ans.browser_choice) ans.browser_choice = 'never';
   }
   if (lvl && lvl !== 'full') {
-    if (s.ans.sending_asked !== true) {
+    // Codex (hand-send) is asked at every level: its yes can turn auto-send on, so it is never defaulted away.
+    if (s.ans.sending_asked !== true && connected()) {
       ans.sending_asked = true;
       ans.sending_channels = [];
     }

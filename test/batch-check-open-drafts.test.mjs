@@ -17,8 +17,8 @@ test('batch check: sent and held drafts are not counted towards the cap or named
   const { t, jobs } = todoJobs(H);
   const msgs = jobs.filter((j) => j.kind === 'message' && j.touch === 1);
   assert.equal(msgs.length, 8);
-  const body = (j, i, extra = '') => `Hi ${j.contact.name.split(' ')[0]}, a question about ${TOPICS[i]} at ${j.contact.company}${extra}: how do you handle it today? ${j.slot_labels.length ? `Could you do ${j.slot_labels.join(' or ')}` : 'Could we meet'} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
-  const save = (j, i, extra) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: `Test Expo: ${TOPICS[i]}`, body: body(j, i, extra), brief: 'x', structure: 'plain-request', fact_source: 'list', insight: i < 4 ? 'I1' : null })]);
+  const body = (j, i, extra = '') => `Hi ${j.contact.name.split(' ')[0]}, a question about ${TOPICS[i]} at ${j.contact.company}${extra}: how do you handle it today? ${j.slot_labels.length ? `Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')}` : 'Could we meet'} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
+  const save = (j, i, extra) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: `Test Expo: ${TOPICS[i]}`, body: body(j, i, extra), brief: 'x, no research profile', structure: 'plain-request', fact_source: 'list', insight: i < 4 ? 'I1' : null })]);
   const verdict = (j, text) => cli(H, 'event-outreach', ['verdict', '--event', H.slug, '--id', j.id, '--touch', '1', '--text', text]);
   msgs.forEach((j, i) => { save(j, i); verdict(j, i === 2 ? 'FAIL: too vague' : 'PASS'); });
   // The third one fails the critic twice: held for the user.

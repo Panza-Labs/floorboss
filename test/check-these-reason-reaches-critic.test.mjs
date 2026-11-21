@@ -28,7 +28,7 @@ test('check-these: "warm because we met at LogiFair" is the job\'s user_note and
   assert.match(j.user_note || '', /we met at LogiFair in the spring/);
   assert.match(j.warm_because || '', /you said: warm \(we met at LogiFair in the spring\)/, 'the card keeps its line');
   assert.ok(j.fact_sources.includes('user'), j.fact_sources.join(','));
-  const body = `Hi Sofia, since we met at LogiFair in the spring I've wanted to hear how the dock schedule is going at Nordkap. Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
+  const body = `Hi Sofia, since we met at LogiFair in the spring I've wanted to hear how the dock schedule is going at Nordkap. Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`;
   const saved = cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', sofia, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body, brief: 'warm, from LogiFair', structure: 'plain-request', fact_source: 'user' })]);
   assert.equal(saved.checks, 'pass', JSON.stringify(saved));
   const batch = cli(H, 'event-outreach', ['critic-batch', '--event', H.slug, '--ids', `${sofia}:1`, '--compact']);

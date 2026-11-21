@@ -32,7 +32,7 @@ function ready() {
   const job = (name) => r.jobs.find((x) => x.id === idOf(H, name) && x.kind === 'message');
   return { H, ...r, job };
 }
-const save = (H, j, body, fs, t) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `${body} Could you do ${j.slot_labels.join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x', structure: 'plain-request', fact_source: fs })]);
+const save = (H, j, body, fs, t) => cli(H, 'event-outreach', ['save-draft', '--event', H.slug, '--id', j.id, '--touch', '1', '--json', JSON.stringify({ subject: 'Test Expo', body: `${body} Could you do ${j.slot_labels.map((l) => l.replace(/^(\w{3}) (\d+) \w{3}, (\d\d:\d\d).*/, (m, w, d, t) => `${w} ${d}th at ${t}`)).join(' or ')} at Test Expo?\n\nBest, Sam\n\n${t.optout_sentence}`, brief: 'x, no research profile', structure: 'plain-request', fact_source: fs })]);
 const critic = (H, j) => cli(H, 'event-outreach', ['critic-batch', '--event', H.slug, '--ids', `${j.id}:1`, '--compact']).drafts[0].input;
 
 test('a colleague at a customer account with no CRM row of their own gets the account fact, and a draft from it passes', () => {

@@ -103,7 +103,12 @@ until it says `done`. Each answer has `step`, `why` and one action:
   - The sign-off is never asked: the `onboarding:about_you` step says how to take the first name (it signs "Best,"
     and the name). If the user asks for another sign-off at any point, save it with
     `answer --ask about_you` as `{"sign_off":"<as they sign>","sender_name":"<name, company>"}`.
-- `judge`: your own judgement. Read the `read` file, write your result to `write` in the `format`, then run
+- `judge`: your own judgement. **If the step has `help`, first read `FLOORBOSS/<help>` whole and follow it: it holds
+  the rules for this judgement.** For drafting (help `skills/event-outreach/SKILL.md`), also read
+  `FLOORBOSS/agents/outreach-writer.md` and `FLOORBOSS/skills/event-outreach/references/ai-writing-checklist.md`,
+  and the user's own voice or writing-style files if they have any (those win on tone). Every draft follows those
+  rules: open with the reader using their research fact, no meeting place before a yes, times the way a person types
+  them. Then read the `read` file, write your result to `write` in the `format`, then run
   `then`. **Always run `then` after writing the file, before anything else:** writing the file alone saves nothing,
   and floorboss asks the same step again until `then` has run. Run it exactly as given, every word in double quotes.
 - The blind ratings (`rate`): show every draft in the file, whole, numbered as there, and ask how likely each reader

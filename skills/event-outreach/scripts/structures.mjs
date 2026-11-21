@@ -293,3 +293,15 @@ export function structureSpread(drafts, { uncapped = [] } = {}) {
   }
   return reasons;
 }
+
+// A first message to someone floorboss researched must use the researched fact (fact_source "research"): the plain
+// form is for a person with no profile, and the brief says so.
+export function researchProblems(draft, job) {
+  if ((job.touch ?? 1) > 1 || job.followup) return [];
+  const has = (job.fact_sources || []).includes('research');
+  if (has && draft.fact_source !== 'research')
+    return ['use the researched fact: this person has a research profile, so the opening is built on one of its claims (fact_source "research")'];
+  if (!has && draft.structure === 'plain-request' && !/\bno (?:researched? |research )?(?:profile|research)\b/i.test(String(draft.brief || '')))
+    return ['the plain form is only for a person with no research profile: say so in the brief ("no research profile for this person")'];
+  return [];
+}
