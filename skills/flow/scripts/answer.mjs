@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // `flow answer`: saves one answer with the saver for its question id, and only for the question the flow is
 // asking now. Claude never chooses where an answer is saved.
-import { readLedger } from '../../../lib/ledger.mjs';
+import { readLedger, fold } from '../../../lib/ledger.mjs';
 import { need } from '../../../lib/args.mjs';
 import { context, nextStep } from './steps.mjs';
 import { NODES } from '../../event-context/scripts/onboarding-tree.mjs';
@@ -18,9 +18,10 @@ import { PROFILE_SAVERS } from './savers/profile.mjs';
 import { SHORTLIST_SAVERS } from './savers/shortlist.mjs';
 import { DRAFTS_SAVERS } from './savers/drafts.mjs';
 import { UNATTENDED_SAVERS } from './savers/unattended.mjs';
+import { INTAKE_SAVERS } from './savers/intake.mjs';
 
 // Every saver, by question id, in the order the questions were written (the order `asks` lists them in).
-const SAVERS = { ...SETUP_SAVERS, ...TOOLS_SAVERS, ...PROFILE_SAVERS, ...SHORTLIST_SAVERS, ...DRAFTS_SAVERS, ...UNATTENDED_SAVERS };
+const SAVERS = { ...SETUP_SAVERS, ...TOOLS_SAVERS, ...PROFILE_SAVERS, ...SHORTLIST_SAVERS, ...DRAFTS_SAVERS, ...UNATTENDED_SAVERS, ...INTAKE_SAVERS };
 
 // A question whose node saves one answer key and nothing else: the answer goes there as it is.
 function plainSaver(id) {
@@ -52,7 +53,13 @@ export function answer(opts) {
   // checks, so after that it changes only where a step offers it).
   const shortlistApproved = !!(c.event && readLedger(c.event.paths.ledger).entries.some((x) => x.type === 'answered' && x.ask === 'gate'));
   // In hand-send the sign-off isn't asked (it is "Best," and the first name): the user can change it whenever they say so.
-  const anyTime = ANY_TIME.has(opts.ask) || (opts.ask === 'setup_level' && !shortlistApproved) || (opts.ask === 'about_you' && handSend() && !!c.ob?.ans?.about_you_asked);
+  // "Did you send the message in the task for <name>?": taken whenever such a task waits for it, whatever step the
+  // flow shows now (the question comes from a CRM read, which may happen at any step); refused when none waits.
+  const taskSentWaits =
+    opts.ask === 'task_sent' &&
+    !!c.event &&
+    Object.values(fold(readLedger(c.event.paths.ledger).entries).people || {}).some((p) => Object.values(p.tasks || {}).some((t) => t.ask_sent));
+  const anyTime = taskSentWaits || ANY_TIME.has(opts.ask) || (opts.ask === 'setup_level' && !shortlistApproved) || (opts.ask === 'about_you' && !!c.ob?.ans?.about_you_asked);
   let asked = null;
   if (!anyTime && !(process.env.FLOORBOSS_TEST === '1' && process.env.FLOORBOSS_OUT_OF_TURN === '1')) {
     // The question asked in an ordinary run or an agenda run (its news heads-up), or one the step lists in its own
@@ -84,6 +91,19 @@ export function answer(opts) {
     if (!['gate', 'approve'].includes(opts.ask)) throw new Error('--interpreted is for the shortlist gate (gate) and the drafts\' approval (approve) only. Nothing was saved.');
     if (typeof opts.said !== 'string' || !opts.said.trim()) throw new Error("--interpreted needs the user's exact words in --said-file. Nothing was saved.");
     value = { [INTERPRETED]: true, answers: typeof value === 'string' ? value : JSON.stringify(value), said: opts.said.trim() };
+  }
+  // A numbered answer to a question with choices ("2", "1,3": the numbered list Codex shows) is read as those choices'
+  // values. Not where EVERY choice is itself a number (how many emails): there the number is the answer. One choice that
+  // starts with a digit ("3 months") doesn't make it so: "2" is the second option.
+  // A bare "3" in the answer file parses as the number 3: it is the text "3" here.
+  const asText = typeof value === 'number' ? String(value) : value;
+  const cur = asked || (typeof asText === 'string' && /^\s*\d/.test(asText) ? nextStep(c) : null);
+  const ch = cur?.ask?.id === opts.ask ? cur.ask.choices : null;
+  if (Array.isArray(ch) && ch.length && typeof asText === 'string' && /^\s*\d+(\s*[,\s]\s*\d+)*\s*$/.test(asText) && !ch.every((x) => /^\d/.test(String(x.value)))) {
+    const n = asText.split(/[,\s]+/).filter(Boolean).map(Number);
+    if (n.some((i) => i < 1 || i > ch.length)) throw new Error(`"${asText.trim()}" isn't one of the choices: 1 to ${ch.length}. Nothing was saved.`);
+    if (n.length > 1 && !cur.ask.multi) throw new Error('Ask again: pick one of the choices. Nothing was saved.');
+    value = cur.ask.multi ? n.map((i) => ch[i - 1].value) : ch[n[0] - 1].value;
   }
   setSavingAsk(opts.ask);
   let result;
@@ -121,6 +141,7 @@ export function answer(opts) {
       'crm_log_window',
       'app_outcome',
       'crm_contacts',
+      'daily_task',
       'unattended_seen'
     ].includes(opts.ask)
   ) {

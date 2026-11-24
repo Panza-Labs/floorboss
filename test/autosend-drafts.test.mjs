@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { world, ledgerLines, addLines, draftText, PEOPLE, NOW, OWN, EVENT, SLUG } from './fixtures/autosend-world.mjs';
 import { readback, approve } from '../lib/autosend/approval.mjs';
-import { SENTENCE } from '../lib/autosend/common.mjs';
+import { AUTO_PICK } from '../lib/autosend/pick.mjs';
 import { heldQuery, heldFrom, draftsNext, draftsAnswer, draftIds, verifyDraft, labelCreated, dueLabel, sendsAtApproval, draftArgs, overdueDays, overdueQuery, overdueFrom, overdueWords } from '../lib/autosend/drafts.mjs';
 import { htmlBody } from '../lib/autosend/sendrecord.mjs';
 import { dailyTaskText, chatgptLink, STOP_CHECKS, LINK_WARN_AT, dayTime } from '../lib/autosend/dailytask.mjs';
@@ -23,7 +23,7 @@ function setup({ now = NOW, people = [ANA] } = {}) {
   process.env.FLOORBOSS_HOME = w.HOME;
   const nowMs = Date.parse(now);
   const r = readback(w.evDir, nowMs);
-  approve(w.evDir, { digest: r.digest, said: SENTENCE }, nowMs);
+  approve(w.evDir, { digest: r.digest, said: AUTO_PICK }, nowMs);
   return { ...w, nowMs, rb: r };
 }
 const step = (w, s, answer, nowMs = w.nowMs) => {
@@ -295,7 +295,7 @@ test('the CLI: on --mode drafts, approve points at drafts next, daily-task print
   assert.equal(on.mode, 'drafts', JSON.stringify(on));
   const rb = autosend(w.HOME, ['readback', '--event', SLUG]);
   assert.match(rb.text, /Message 1 is sent as soon as you approve/);
-  const ap = autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, SENTENCE)]);
+  const ap = autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, AUTO_PICK)]);
   assert.match(ap.next, /drafts next --event harbor-expo --run new/, JSON.stringify(ap));
   const s = autosend(w.HOME, ['drafts', 'next', '--event', SLUG, '--run', 'new']);
   assert.equal(s.step, 'profile', JSON.stringify(s));

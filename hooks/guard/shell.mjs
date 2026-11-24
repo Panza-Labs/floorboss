@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The shell (Bash): recognising a call to one of floorboss's own scripts, holding such a call to plain
 // characters and plain quoting, and saving or forgetting a connection mid-run.
-import { join, sep } from 'node:path';
+import { join, sep, resolve as resolvePath } from 'node:path';
 import { homedir } from 'node:os';
 import { home, allowedPath, readChecked, realPath } from '../../lib/paths.mjs';
 import { sameServer } from '../../lib/security.mjs';
@@ -12,17 +12,44 @@ import { PLUGIN_ROOT, PLUGIN_SCRIPT } from '../plugin-root.mjs';
 import { promptLine } from './prompts.mjs';
 import { LABEL_PREFIX } from '../../lib/unattended.mjs';
 import { foundServer } from './connectors.mjs';
+import { ROUTINE_COMMANDS, CLAUDE_COMMANDS } from '../../lib/autosend/common.mjs';
+import { locate, wordPath } from './script-identity.mjs';
+import { RECORDS_NAME } from '../../lib/autosend/guard-record.mjs';
 
-// A Bash call that runs one of floorboss's own scripts: the run lock is tied to this session from now on.
+// The folder of the one-use records (lib/autosend/guard-record.mjs), named in a shell command in any way the guard
+// reads: refused, in any session. Text only: a name built when the command runs is not seen (SECURITY.md).
+const RECORDS_RE = new RegExp(RECORDS_NAME.replace(/-/g, '[-_]?'), 'i');
+export function recordsRefusal(command) {
+  const t = String(command ?? '');
+  if (!RECORDS_RE.test(t) && !RECORDS_RE.test(normPath(t)) && !RECORDS_RE.test(shellWords(t).join(' '))) return null;
+  return "this names the folder where floorboss's safety check keeps its notes of the commands it checked. Only the safety check writes there.";
+}
+
+// A Bash call that runs one of floorboss's own scripts: the run lock is tied to this session from now on. (autosend's
+// script runs in Claude Code only for an event sending through a daily Claude routine, and only the commands in
+// AUTOSEND_CLAUDE: the guard refuses its others there.)
 export const SCRIPT_CALL =
-  /(skills\/(flow|event-context|slot-finder|crm-triage|event-outreach|connectors|attendee-research)\/scripts\/cli\.mjs|examples\/mock-event\/load\.mjs)(?:["']?\s+([a-z][\w-]*))?/;
+  /(skills\/(flow|event-context|slot-finder|crm-triage|event-outreach|connectors|attendee-research|autosend)\/scripts\/cli\.mjs|examples\/mock-event\/load\.mjs)(?:["']?\s+([a-z][\w-]*))?/;
+export const AUTOSEND_CLAUDE = Object.freeze([...ROUTINE_COMMANDS, ...CLAUDE_COMMANDS]);
+// The daily routine's own commands read Gmail's answers and the ledger, and say what the routine did: like record,
+// they don't tie the run lock to the session (they come first in a session, before floorboss's other steps).
+export const AUTOSEND_UNSTAMPED = ROUTINE_COMMANDS;
 export function floorbossScriptCall(command) {
   // The script is the word after node, read as the shell reads it (bashRefusal holds a script call to that form),
   // so quotes in its path, or a script's name further along the command, can't make it look like another one.
   const words = shellWords(command);
   // The plain text must name a script too: that is what holds the command to bashRefusal's rules, so a name split
   // by quotes ("con""nectors") is no script call, and in a held session is refused as any other command.
-  const m = words[0] === 'node' && SCRIPT_CALL.test(String(command || '')) ? SCRIPT_CALL.exec(words[1] ?? '') : null;
+  // A run of slashes is one slash, as the system reads the path (review of audit run 11): "autosend//scripts" is the
+  // auto-send script, under its rules.
+  const one = (t) => String(t ?? '').replace(/\/{2,}/g, '/');
+  let m = words[0] === 'node' && SCRIPT_CALL.test(one(command)) ? SCRIPT_CALL.exec(one(words[1])) : null;
+  // Or the script by what it is on disk, through any other name for its folder (third review of audit run 11). The
+  // guard holds such a command to bashRefusal's rules too (pluginNodeRefusal runs it whatever the text says).
+  if (!m && words[0] === 'node' && words[1]) {
+    const rel = locate(wordPath(words[1])).script;
+    m = rel ? SCRIPT_CALL.exec(rel) : null;
+  }
   return m ? { sub: words[2] ?? null, skill: m[2] || null } : null;
 }
 // A command's words exactly as the shell reads them: "save-recipe" and sa''ve-recipe are both save-recipe, and a
@@ -104,12 +131,12 @@ export function connectorChange(command, sub, { held, subagent, config }) {
 }
 const PLAIN_CHAR = /[A-Za-z0-9_./:=@%+,-]/;
 const ROOT_VAR = /^\$(?:\{CLAUDE_PLUGIN_ROOT\}|CLAUDE_PLUGIN_ROOT(?![\w]))/;
-export function bashRefusal(command) {
+export function bashRefusal(command, { force = false } = {}) {
   const cmd = String(command || '');
   // A node command that names the plugin folder at all is held to the same rules, so a path spelled another way
   // ("scripts/./cli.mjs") is not let past as a command that isn't floorboss's.
   const namesPlugin = /^node\s/.test(cmd.trimStart()) && (cmd.includes('CLAUDE_PLUGIN_ROOT') || cmd.includes(PLUGIN_ROOT));
-  if (!PLUGIN_SCRIPT.test(cmd) && !SCRIPT_CALL.test(cmd) && !namesPlugin) return null;
+  if (!force && !PLUGIN_SCRIPT.test(cmd) && !SCRIPT_CALL.test(cmd) && !namesPlugin) return null;
   const subst = (what) =>
     `this runs a floorboss script with ${what} in the command. floorboss's commands take values from files instead: write the value to a file and pass it with --value-file (or the command's own --file flag).`;
   const joined = (op) =>
@@ -195,6 +222,8 @@ function scriptWordRefusal(cmd) {
   if (given.includes('$') || given.split('/').some((x) => x === '..' || x === '.')) return bad;
   // A relative path names the script in the folder the command runs in: it counts only if that is the plugin's.
   const path = (given.startsWith('/') ? given : `${process.cwd()}/${given}`).replace(/\/{2,}/g, '/');
+  // The script itself through another name for the plugin folder (a firmlink, a symlinked parent): by identity.
+  if (SCRIPT_REL.test(String(locate(path).script || ''))) return null;
   if (!path.startsWith(PLUGIN_ROOT + '/') || !SCRIPT_REL.test(path.slice(PLUGIN_ROOT.length + 1))) return bad;
   const rp = realPath(path),
     rr = realPath(PLUGIN_ROOT);
@@ -329,6 +358,9 @@ export function scheduleRefusal(command) {
   // name's end: ledger.json?, ledger*, release*.)
   if (mine && has(/ledger(?:\.jsonl|\.?(?:j(?:s(?:o(?:n)?)?)?)?\s*[*?[{])|(?<![\w.-])released[\\/]|(?<![\w.-])released?\s*[*?[{]/i) && has(/>|(?<![\w.-])(rm|mv|cp|ln|tee|dd|sed|awk|perl|python3?|ruby|node|truncate|unlink|mkfifo|touch|chmod|install|rsync)(?![\w.-])/i))
     return "this writes, moves or removes floorboss's ledger or its release marks, which only floorboss's own scripts and its guard write. Ask floorboss to record what happened instead (outreach record).";
+  // floorboss's holds index (holds-index.json, its .stamp and .tmp, in the cache folder beside the data folder): the same.
+  if (has(/holds-index/i) && has(/>|(?<![\w.-])(rm|mv|cp|ln|tee|dd|sed|awk|perl|python3?|ruby|node|truncate|unlink|mkfifo|touch|chmod|install|rsync)(?![\w.-])/i))
+    return "this writes, moves or removes floorboss's holds index, which only floorboss's own scripts write.";
   return null;
 }
 const litRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -472,4 +504,125 @@ export function mcpScheduleRefusal(tool, input, pathRefusal) {
   } catch {
     return TOO_LARGE.replace('is too large for floorboss to check; send it in smaller parts', "couldn't be checked by floorboss's guard, so it isn't let through; send it in smaller parts");
   }
+}
+
+// A command whose program is a JavaScript runtime (node, nodejs, bun, deno, also through env, npx, xargs, nice, exec,
+// command, time, or sh/bash/zsh -c) and whose script, --import/--require file, or leading cd is in floorboss's script
+// folders (skills/*/scripts, lib, examples) by what it is on disk, and that isn't one of floorboss's own script calls
+// past bashRefusal's rules, is refused (reviews of audit run 11). node --check, -e, -p run no file of floorboss's.
+// scripts/, test/ and the unattended rule are left to the rules that already cover them. A plain reason, or null.
+const JS_RUNTIME = /^(?:.*\/)?(?:node|nodejs|bun|deno)$/;
+const WRAP = new Set(['env', 'npx', 'xargs', 'nice', 'exec', 'command', 'time', 'nohup']);
+const SHELLS = /^(?:.*\/)?(?:sh|bash|zsh|dash)$/;
+// The command's simple commands, split at ; & | && || and new lines outside quotes.
+function segments(cmd) {
+  const out = [];
+  let cur = '',
+    q = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (q) {
+      if (ch === q) q = null;
+      else if (ch === '\\' && q === '"') {
+        cur += ch + (cmd[++i] ?? '');
+        continue;
+      }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") q = ch;
+    if (';&|\n\r()'.includes(ch)) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((x) => x.trim()).filter(Boolean);
+}
+// The files a runtime command runs: its script and --import/--require values. [] for --check, -e, -p.
+function runtimeTargets(words) {
+  const t = [];
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (['--check', '-c', '-e', '--eval', '-p', '--print', '--version', '-v', '--help', '-h'].includes(w)) return t;
+    if (['--import', '--require', '-r', '--loader', '--experimental-loader'].includes(w)) {
+      if (words[i + 1]) t.push(words[++i]);
+      continue;
+    }
+    if (/^--(?:import|require|loader|experimental-loader)=/.test(w)) {
+      t.push(w.slice(w.indexOf('=') + 1));
+      continue;
+    }
+    if (w.startsWith('-')) continue;
+    t.push(w);
+    return t;
+  }
+  return t;
+}
+function pluginTargets(cmd, cwd, depth = 0) {
+  let base = cwd;
+  let hit = false;
+  for (const seg of segments(cmd)) {
+    let w = shellWords(seg);
+    while (w.length && /^[A-Za-z_]\w*=/.test(w[0])) w = w.slice(1);
+    if (w[0] === 'cd') {
+      base = w[1] ? wordPath(w[1], base) : base;
+      if (locate(base).area) hit = true;
+      continue;
+    }
+    while (w.length && WRAP.has(w[0].replace(/^.*\//, ''))) {
+      w = w.slice(1);
+      while (w.length && (w[0].startsWith('-') || /^[A-Za-z_]\w*=/.test(w[0]))) w = w.slice(1);
+    }
+    if (w.length >= 3 && SHELLS.test(w[0]) && w[1] === '-c') {
+      if (depth < 3 && pluginTargets(w[2], base, depth + 1)) hit = true;
+      continue;
+    }
+    if (!w.length || !JS_RUNTIME.test(w[0])) continue;
+    for (const x of runtimeTargets(w)) if (locate(wordPath(x, base)).area) hit = true;
+  }
+  return hit;
+}
+export function pluginNodeRefusal(command, cwd = process.cwd()) {
+  const cmd = String(command || '');
+  if (!pluginTargets(cmd, cwd)) return null;
+  const why = bashRefusal(cmd, { force: true });
+  if (why) return why;
+  if (floorbossScriptCall(cmd)) return null;
+  return 'this runs node on one of floorboss\'s scripts in a way its guard doesn\'t read as floorboss\'s own script call. Run "node", then the script\'s full path under the plugin folder as floorboss writes it, then the command, with nothing before it.';
+}
+// Taking a person off a do-not-contact or opt-out hold (crm-triage lift-hold … --answer 1): the user's own yes at the
+// prompt, never the model's alone (spec 0.1.7 N1). The prompt shows floorboss's read-back, the person and the words
+// given as theirs. A subagent never does it; any other spelling of the answer that could lift is refused. Asking
+// (no --answer) and "--answer 2" (they stay held) go on as before.
+export function liftHoldCall(command, { subagent }) {
+  const w = shellWords(command);
+  // Each flag once (P1): the prompt and the command read the same person, event, answer and words.
+  for (const f of ['--event', '--id', '--answer', '--said'])
+    if (w.filter((x) => x === f || x.startsWith(`${f}=`)).length > 1) return { refuse: `lift-hold takes ${f} once.` };
+  const answers = w.filter((x) => /^--answer/.test(x));
+  if (!answers.length) return {};
+  if (answers.length > 1 || answers[0] !== '--answer') return { refuse: 'lift-hold takes its answer as --answer 1 or --answer 2, once.' };
+  const val = w[w.indexOf('--answer') + 1];
+  if (val === '2') return {};
+  if (val !== '1') return { refuse: 'lift-hold takes its answer as --answer 1 or --answer 2.' };
+  if (subagent) return { refuse: 'only the user, at the prompt, takes someone off a do-not-contact or opt-out hold: never a subagent.' };
+  const ev = w[w.indexOf('--event') + 1];
+  const said = w.includes('--said') ? w[w.indexOf('--said') + 1] : '';
+  if (w.indexOf('--event') < 0 || !/^[a-z0-9][a-z0-9-]*$/i.test(String(ev || ''))) return { refuse: 'lift-hold needs --event with the event\'s name.' };
+  let pending = null;
+  try {
+    pending = JSON.parse(readChecked(join(home(), 'events', ev, 'derived', 'lift-pending.json'), 64 * 1024));
+  } catch {
+    pending = null;
+  }
+  const id = w.includes('--id') ? w[w.indexOf('--id') + 1] : null;
+  if (!pending?.ask) return { refuse: 'nothing was read back to the user for this: run lift-hold with no answer first, and show the user what it says.' };
+  if (!id || (id !== pending.id && String(id).toLowerCase() !== String(pending.name || '').toLowerCase()))
+    return { refuse: 'this lift names someone other than the person the user was asked about: run lift-hold with no answer first for them.' };
+  return {
+    ask: `floorboss: take ${promptLine(pending.name || 'this person')} off the hold at ${promptLine(pending.event_name || ev)}?\n\nfloorboss asked: ${promptLine(pending.ask)}\nTheir words, as given: ${said ? promptLine(said) : '(none)'}\n\nAllow: they come off the hold in floorboss, and messages to them can be drafted and sent again. Deny: they stay held, and nothing changes.\n\nAllow only if the user said this themselves.`
+  };
 }

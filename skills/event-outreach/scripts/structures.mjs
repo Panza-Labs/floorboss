@@ -260,7 +260,7 @@ export function structureProblems(draft, { structure, factSource, insight, warm 
   const firstSentence = body.split(/(?<=[.?!])(?<!\b(?:Bros|Inc|Ltd|Co|Corp|Dr|Mr|Ms|Mrs|St|vs|e\.g|i\.e|Jr|Sr|No)\.)\s+/)[0] || '';
   if (structure === 'question-first' && !warm && !/\?\s*$/.test(firstSentence)) p.push('a question-first draft opens with a question');
   if (structure === 'insight-first' && !insight) p.push('an insight-first draft names the insight it leads with');
-  if (structure === 'plain-request' && body.split(/\s+/).length > 75) p.push('the plain form is short: under 75 words');
+  if (structure === 'plain-request' && body.split(/\s+/).length > 100) p.push('the plain form is short: at most 100 words, like any first message (60-100)');
   if (factSource === 'none' && structure && structure !== 'plain-request') p.push('with no fact about the reader, use the plain form');
   return p;
 }

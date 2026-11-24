@@ -9,7 +9,7 @@ import { anySessionHeld } from '../../../lib/runlock.mjs';
 import { unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { run, need } from '../../../lib/args.mjs';
-import { readJson, writeJson } from '../../../lib/jsonio.mjs';
+import { readJson, writeJson, parseJson } from '../../../lib/jsonio.mjs';
 import { loadConfig, saveConfig } from '../../../lib/config.mjs';
 import {
   TASKS,
@@ -33,7 +33,7 @@ import { connected, modeLine } from '../../../lib/harness.mjs';
 import { movedNow } from '../../../lib/clock.mjs';
 
 const now = () => (movedNow() ? new Date(movedNow()) : new Date()).toISOString();
-const readFileJson = (path) => JSON.parse(readChecked(allowedPath(path)));
+const readFileJson = (path) => parseJson(readChecked(allowedPath(path)), path);
 const listOf = (v) => (Array.isArray(v) ? v : Array.isArray(v?.tools) ? v.tools : v && typeof v === 'object' ? [v] : []);
 // A check of the live tool list counts for an hour; plan, triage and draft run it right before use.
 const CHECK_TTL_MS = 3600 * 1000;

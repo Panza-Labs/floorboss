@@ -92,10 +92,10 @@ test('customers follow the onboarding rule: closed recently, on the won deal, or
   assert.match(pre[idOf(H, 'Ike Else')].reason, /not on the won deal/, 'someone else at the customer is asked about');
 });
 
-test('customers with no rule keep the default: warm', () => {
+test('customers with no rule are held for the user\'s call: check', () => {
   const H = setup({ attendees: LIST, crm: CRM });
   triage(H);
-  assert.equal(groups(H)['Rae New'], 'warm');
+  assert.equal(groups(H)['Rae New'], 'check');
 });
 
 test('settings: customer_rule values are checked', () => {

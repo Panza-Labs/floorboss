@@ -2,38 +2,33 @@
 // leave some out; the per-person offer is sized to the shortlist ("the top 20" of 3 people is no offer).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeHome, drive, simplePersona, ROOT, cli as simCli } from './sims/lib/driver.mjs';
+import { makeHome, simplePersona, ROOT } from './sims/lib/driver.mjs';
+import { throughHeadsUp, say } from './fixtures/heads-up.mjs';
 
 const LIST = 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP Ops,Globex,bo@globex.test\nCy Ng,Head of Ops,Initech,cy@initech.test\n';
 
 test('company research: one heads-up naming the companies; "skip Globex" researches the rest', { timeout: 300000 }, () => {
+  // (Updated 2026-11-21: the heads-up is the company_briefs step in both hosts, with no question and no per-person offer;
+  // the same words are said there. What it checks is the same: every company is named first, an unclear skip is asked
+  // again, a plain one leaves the company unresearched and the rest are looked up, and the people count is the shortlist's.)
   const H = makeHome({ context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' }, attendees: LIST });
-  const asked = {};
-  const researched = [];
-  const persona = simplePersona({ asks: {
-    setup_level: 'standard', attendee_list: join(H.HOME, 'inputs', 'attendees.csv'),
+  const persona = simplePersona({ asks: { setup_level: 'standard', attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
+  let said;
+  const run = throughHeadsUp(H, persona, (up) => {
+    said = up;
     // Run 6, round 3: "the rest" beside a company makes a skip answer unclear, so it's asked again; the plain one reads.
-    company_research: (s) => {
-      asked.company_research = s.ask;
-      const f = join(H.HOME, 'work', 'cr.txt');
-      writeFileSync(f, 'skip Globex, the rest is fine');
-      assert.match(simCli(H, 'flow', ['answer', '--event', s.event, '--ask', 'company_research', '--value-file', f]).ERROR || '', /Name the companies/);
-      // (A lone company is decided at once only with "only" or "just": audit run 7.)
-      return 'skip only Globex';
-    },
-    research_scale: (s) => { asked.research_scale = s.ask; return 'none'; },
-  } });
-  const { trail, slug } = drive(H, persona, { onStep: (s) => { if (s.step === 'company_briefs') researched.push(...s.agents.map((a) => a.input.company)); } });
-  const q = asked.company_research;
-  assert.ok(q, trail.join(' '));
-  assert.match(q.question, /^3 companies to look up on the web: (Acme|Globex|Initech), (Acme|Globex|Initech), (Acme|Globex|Initech)\. Go, or skip some\? And the 3 shortlisted people: research all 3, the top 2, or none\?$/, 'the people question in the same ask');
-  assert.ok(trail.indexOf('company_research') < trail.indexOf('company_briefs'), 'asked before any researcher');
-  assert.deepEqual(researched.sort(), ['Acme', 'Initech']);
-  const brief = readFileSync(join(H.HOME, 'events', slug, 'companies', 'globex.md'), 'utf8');
+    assert.match(say(H, up, 'skip Globex, the rest is fine').ERROR || '', /Name the companies/);
+    // (A lone company is decided at once only with "only" or "just": audit run 7.)
+    assert.ok(!say(H, up, 'skip only Globex').ERROR);
+  });
+  assert.match(said.tell_user, /^Looking up the 3 shortlisted companies on the web now \((Acme|Globex|Initech), (Acme|Globex|Initech), (Acme|Globex|Initech)\)/, 'every company named first');
+  assert.ok(run.trail.indexOf('company_briefs') >= 0 && !said.ask, 'a heads-up before any researcher, not a question');
+  assert.deepEqual(run.companiesResearched.sort(), ['Acme', 'Initech']);
+  const brief = readFileSync(join(H.HOME, 'events', run.slug, 'companies', 'globex.md'), 'utf8');
   assert.match(brief, /Not researched/);
-  // Three people on the shortlist: no "top 20".
-  assert.match(asked.research_scale.question, /Research the 3 shortlisted people on the web before drafting\? All 3, the top 2, or none\?/);
-  assert.deepEqual(asked.research_scale.options, ['all 3', 'top 2', 'none']);
+  // Three people on the shortlist: said as 3, never "top 20".
+  assert.match(said.tell_user, /then the 3 shortlisted people\./);
+  assert.doesNotMatch(said.tell_user, /top 20/);
 });

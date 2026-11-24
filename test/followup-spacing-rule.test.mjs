@@ -185,7 +185,7 @@ test('B2 end to end: after a gap change nothing goes on a weekend; the answer an
   assert.match(g.stderr, /isn't due until Monday 19 October, Rotterdam time/);
   cli(H, 'event-outreach', ['open', '--event', H.slug, '--no-open'], at('2026-10-17'));
   const html = readFileSync(join(H.dir, 'outbox.html'), 'utf8');
-  assert.match(html.slice(html.indexOf(`data-id="${ana}"`), html.indexOf('</article>', html.indexOf(`data-id="${ana}"`))), /planned for 2026-10-19/);
+  assert.match(html.slice(html.indexOf(`data-id="${ana}"`), html.indexOf('</article>', html.indexOf(`data-id="${ana}"`))), /planned for Mon 19 Oct/);
   assert.ok(sendListed(H, at('2026-10-19')).sends.some(([i, t]) => i === ana && t === 2));
 });
 

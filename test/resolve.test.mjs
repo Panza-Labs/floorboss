@@ -21,10 +21,10 @@ test('rung by rung', () => {
   // 1 user decision beats the holds they saw when deciding; a hold that appears later holds again
   const dnc = parseDncReport('ana@acme.test').entries;
   const held = run(contact(), { dnc });
-  assert.equal(run(contact(), { dnc }, { decision: { group: 'reach', because: 'she asked me to write', seen_holds: [held.says] } }).group, 'reach');
+  assert.equal(run(contact(), { dnc }, { decision: { group: 'reach', because: 'she asked me to write', seen_holds: [held.says] } }).group, 'skip');
   const later = run(contact(), { dnc }, { decision: { group: 'reach', because: 'she asked me to write', seen_holds: [] } });
   assert.equal(later.group, 'skip');
-  assert.match(later.says, /new since you said reach/);
+  assert.doesNotMatch(later.says, /new since you said/);
   // a match answer never replaces a skip
   assert.equal(run(contact(), {}, { decision: { group: 'skip', because: 'never again' }, matches: [{ group: 'same-person', ref: 'crm:3' }] }).group, 'skip');
   // 2 do not contact

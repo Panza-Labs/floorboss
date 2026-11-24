@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { escapeHtml as e, safeUrl, jsonForScript } from '../../../lib/escape.mjs';
 import { profileLinkAllowed, isLinkedInProfile, eventHosts } from '../../../lib/security.mjs';
 import { mailtoHref, emlText, emlName, plainAddress } from './mailto.mjs';
+import { dayWords } from '../../../lib/tz.mjs';
 
 const csp = () => `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${SCRIPT_HASH}'; img-src 'none'; base-uri 'none'; form-action 'none'`;
 
@@ -28,7 +29,10 @@ function field(label, id, value, copy = true) {
 // Nor one the cloud's auto-send sends on its day (c.autosend: the user's second yes for this exact text and address).
 // Nor one held because a time it offers is now taken (time_taken). A missed auto-send step (autosend_missed) is the
 // user's again: it offers its buttons.
-export const offersCopy = (c) => !(c.not_going || c.not_today) && !c.pending && !c.may_have_gone && !c.staged && !c.autosend && !c.time_taken;
+// Nor one whose Gmail draft a daily Claude routine could still send (routine_draft: auto-send stopped, its delete not
+// confirmed yet).
+// Nor one the user chose to have put in their Gmail drafts at the final approval (gmail_drafts_pick), not there yet.
+export const offersCopy = (c) => !(c.not_going || c.not_today || c.app_gone) && !c.pending && !c.may_have_gone && !c.staged && !c.autosend && !c.time_taken && !c.routine_draft && !c.gmail_drafts_pick && !c.li_reply_unchecked;
 
 // The send buttons of an email card (mailto.mjs), only where the card offers Copy and the user sends email themselves
 // (you_send: never when floorboss sends email for this event): the approved subject and body, to the address it was
@@ -66,7 +70,9 @@ function sendButtons(c, hand = false) {
 // or the event's own site: a link from a list or a CRM field pointing anywhere else shows no link.
 // app: the event's own app, when one is set up (null: none, so no card points at an app).
 // hand: the page is built outside Claude Code (hand-send), where floorboss's slash commands don't exist.
-function card(c, hosts = [], app = null, hand = false) {
+function card(c, hosts = [], app = null, hand = false, today = null) {
+  const dueDay = c.due_on ?? c.planned_due ?? null;
+  const overdue = today && dueDay && /^\d{4}-\d{2}-\d{2}$/.test(dueDay) && dueDay < today && c.kind === 'message' && c.channel !== 'email' && !c.not_going;
   const raw = safeUrl(c.profile_url);
   const url = raw && profileLinkAllowed(raw, hosts) ? raw : null;
   // Where the message was approved to go (c.where) names the platform: a LinkedIn step whose link isn't shown is still
@@ -74,8 +80,10 @@ function card(c, hosts = [], app = null, hand = false) {
   const onLinkedIn = c.kind !== 'coordinate' && c.channel !== 'email' && c.where === 'LinkedIn';
   const inApp = c.routed === 'app';
   // A coordinate note goes to the colleague, not to the person: there is nothing to paste in an app.
-  const addr =
-    c.kind === 'coordinate'
+  const gone = c.kind !== 'coordinate' && c.channel !== 'email' && c.app_gone ? e(app || 'the event app') : null;
+  const addr = gone
+    ? `can't be delivered in ${gone}`
+    : c.kind === 'coordinate'
       ? `send it to ${e(c.holder || 'the colleague')} yourself (chat or email)`
       : c.channel === 'email'
         ? e(c.address || '')
@@ -91,11 +99,12 @@ function card(c, hosts = [], app = null, hand = false) {
   // A message that can no longer go (c.not_going: the event is over, or no day is left for it), or not today (c.not_today:
   // another event wrote to that address today), or one pending approval, is never in the LinkedIn queue: nothing on the
   // page offers it to send.
-  const hold = c.not_going || c.not_today;
-  const li = !hold && !c.pending && !c.may_have_gone && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
+  const hold = c.not_going || c.not_today || gone;
+  const li = !hold && !c.pending && !c.li_reply_unchecked && !c.may_have_gone && c.kind !== 'coordinate' && c.channel !== 'email' && !inApp && url && isLinkedInProfile(url);
   const copy = offersCopy(c);
-  const channel =
-    c.kind === 'coordinate'
+  const channel = gone
+    ? `Note for ${gone}`
+    : c.kind === 'coordinate'
       ? `note for ${e(c.holder || 'the relationship holder')}`
       : c.channel === 'email'
         ? 'Email'
@@ -118,9 +127,15 @@ function card(c, hosts = [], app = null, hand = false) {
   ${c.instruction_like ? '<p class="failnote">Their entry on the list reads like an instruction to an AI. The scripts didn\'t act on it. Check this person yourself.</p>' : ''}
   ${c.pick_in_app?.length ? `<p class="follow">In the app's meeting request, pick ${e(c.pick_in_app.join(' or '))}.</p>` : c.pick_in_app ? '<p class="follow">In the app\'s meeting request, pick any open time.</p>' : ''}
   ${c.brief ? `<p class="brief">${e(c.brief)}</p>` : ''}
-  ${c.followup_note ? `<p class="follow">${e(c.followup_note)}</p>` : ''}${c.autosend ? `<p class="follow">floorboss sends this on its day, from your ChatGPT cloud task: don't send it yourself. Say "stop auto-send" to send it by hand instead.</p>` : ''}${c.autosend_missed ? `<p class="follow">Auto-send missed its day (${e(c.autosend_missed)} or the day after), so it is yours to send now. Or ask floorboss to plan it again for auto-send.</p>` : ''}${c.time_taken ? `<p class="follow">Held: a time it offers is now booked with someone else. floorboss writes it again with free times; approve it, then give auto-send a fresh yes.</p>` : ''}
+  ${overdue ? `<p class="follow">Overdue since ${e(dayWords(dueDay))}.</p>` : ''}
+  ${c.next_waits ? `<p class="follow">Tick Sent here once you've sent it, then press Copy status and paste it into the chat${c.has_task ? ', or mark its task done in your CRM' : ''}: floorboss lists the follow-up after that.</p>` : ''}
+  ${c.task_changed ? '<p class="follow">This message changed after its task was made in your CRM: close that task. floorboss makes a new one.</p>' : ''}
+  ${c.next_goes_today ? `<p class="follow">${e(nextLine(c))}</p>` : ''}
+  ${c.li_reply_unchecked ? `<p class="follow">floorboss asks you first whether ${e(c.name)} replied on LinkedIn: answer that in the chat, and then this one is listed as due today.</p>` : ''}
+  ${c.followup_note ? `<p class="follow">${e(c.followup_note)}</p>` : ''}${c.autosend ? `<p class="follow">floorboss sends this on its day, from your ChatGPT cloud task: don't send it yourself. Say "stop auto-send" to send it by hand instead.</p>` : ''}${c.gmail_drafts_pick ? `<p class="follow">You chose Gmail drafts: floorboss puts this in your Gmail Drafts${c.touch > 1 ? ', in the thread of message 1, once message 1 has gone' : ''}. Send it from Drafts, not a copy of it. Nothing is sent automatically.</p>` : ''}${c.routine_draft ? `<p class="follow">Its Gmail draft is still queued for your daily Claude routine, which could send it: don't send it yourself until that draft is deleted (ask floorboss for the delete step, or delete it in Gmail Drafts).</p>` : ''}${c.autosend_missed ? `<p class="follow">Auto-send missed its day (${e(c.autosend_missed)} or the day after), so it is yours to send now. Or ask floorboss to plan it again for auto-send.</p>` : ''}${c.time_taken ? `<p class="follow">Held: a time it offers is now booked with someone else. floorboss writes it again with free times; approve it, then give auto-send a fresh yes.</p>` : ''}
   ${failed}
   ${c.checks_stuck?.length ? `<p class="failnote">Still fails floorboss's checks after three rewrites: ${e(c.checks_stuck.join('; '))}. Edit it or drop it; it isn't offered for approval as it is.</p>` : ''}
+  ${gone ? `<p class="failnote">${gone} says ${c.app_gone === 'not_found' ? "they've left the app" : 'their messages are off'}. This note can't be delivered there: don't paste it.</p>` : ''}
   ${c.not_going ? `<p class="failnote">Not going: ${e(c.not_going)}. Don't send it.</p>` : c.not_today ? `<p class="failnote">Not today: ${e(c.not_today)}. Send it on another day: one message a day to a person, across all your events.</p>` : ''}
   ${c.staged && !c.not_going ? `<p class="failnote">It is in your mailbox drafts${c.staged_unattended ? ', put there on its own' : ''}: send it from your drafts folder, not a copy of it.</p>` : ''}
   ${
@@ -136,7 +151,7 @@ function card(c, hosts = [], app = null, hand = false) {
     c.kind === 'coordinate' || c.pending
       ? ''
       : `<div class="ticks">
-    <label><input type="checkbox" data-tick="sent"> Sent</label>
+    ${c.li_reply_unchecked ? '' : '<label><input type="checkbox" data-tick="sent"> Sent</label>'}
     <label><input type="checkbox" data-tick="replied"> Replied</label>
     <label>Booked <select data-tick="booked"><option value="">no</option>${slotOpts}</select></label>
     <label><input type="checkbox" data-tick="stop"> Stop (don't contact again)</label>
@@ -165,6 +180,38 @@ export function renderOutOfDate({ name, why, slug, build = null }) {
 `;
 }
 
+// One plain sentence, said by the Due today list and by Copy status: a tick is only on the page until it is pasted.
+export const TICKS_LINE = 'Ticks stay on this page until you press Copy status and paste it into the chat: only then does floorboss record them.';
+
+// The by-hand messages due today or overdue (today: the event's today): a message sent by pasting it (LinkedIn or an
+// event app) that the page offers to copy, whose day is known and has come. A first message is due once approved.
+// What a LinkedIn card says on the day the next message is due (one message a day).
+const nextLine = (c) => `The next message to ${c.name} goes today: skip this LinkedIn message. It is dropped once that one goes.`;
+
+export function dueToday(cards, today) {
+  if (!today) return [];
+  return cards.filter((c) => {
+    if (!(c.kind === 'message' || c.kind === 'confirmation') || c.channel === 'email' || !offersCopy(c) || c.due_waits || c.li_reply_unchecked) return false;
+    const day = c.due_on ?? c.planned_due ?? null;
+    return !day || day <= today;
+  });
+}
+
+function dueItem(c, today, hosts) {
+  const raw = safeUrl(c.profile_url);
+  const url = raw && profileLinkAllowed(raw, hosts) ? raw : null;
+  const day = c.due_on ?? c.planned_due ?? null;
+  const id = `${c.id}-t${c.touch ?? 1}-due`;
+  const where = c.where === 'LinkedIn' ? (url && isLinkedInProfile(url) ? `<a href="${e(url)}" rel="noopener noreferrer">Open their LinkedIn profile</a>` : 'find them on LinkedIn') : url ? `<a href="${e(url)}" rel="noopener noreferrer">Open their profile</a>` : `paste it in ${e(c.where || 'the app')}`;
+  return `<div class="dueitem" data-id="${e(c.id)}" data-touch="${e(c.touch ?? 1)}" data-earliest="${e(c.earliest || '')}">
+  <p><b>${e(c.name)}</b>${c.company ? ` · ${e(c.company)}` : ''} · ${where}${day && /^\d{4}-\d{2}-\d{2}$/.test(day) && day < today ? ` · <span class="follow">overdue since ${e(dayWords(day))}</span>` : ''}</p>
+  ${c.next_goes_today ? `<p class="follow">${e(nextLine(c))}</p>` : ''}
+  <div class="field"><div class="k"><span>Message</span><button type="button" class="copy" data-copy="${e(id)}">Copy message</button></div><pre id="${e(id)}">${e(c.body)}</pre></div>
+  <label><input type="checkbox" data-tick="sent"> Sent</label>
+</div>
+`;
+}
+
 export function renderOutbox(data) {
   const msgs = data.cards.filter((c) => c.kind !== 'coordinate');
   const coords = data.cards.filter((c) => c.kind === 'coordinate');
@@ -179,6 +226,12 @@ export function renderOutbox(data) {
   const counts = data.counts || {};
   // Sends floorboss has recorded (their cards are gone from the page): counted as sent, and in the total.
   const recorded = Number.isInteger(data.recorded_sent) && data.recorded_sent > 0 ? data.recorded_sent : 0;
+  const due = dueToday(msgs, data.today);
+  const closeTasks = (data.close_tasks || [])
+    .map((x) => `<p class="banner" data-close="${e(x.key || '')}">${x.went ? `The message in the open task for ${e(x.name)} already went: close that task in your CRM, and don't send it.` : x.skipped ? `The LinkedIn message to ${e(x.name)} was ${e(x.why)}. Close the task for it in your CRM, and don't send it.` : `${e(x.name)} ${e(x.why)}: close the task for this message in your CRM, and don't send it.`} <label><input type="checkbox" data-closed> Closed</label></p>`)
+    .join('\n');
+  // LinkedIn messages dropped because the next message went first (nothing to do: said so the user isn't left looking).
+  const passed = (data.passed || []).map((x) => `<p class="sub" data-passed="${e(x.touch)}">LinkedIn message to ${e(x.name)}: skipped: the next message went first.</p>`).join('\n');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp()}">
@@ -216,6 +269,7 @@ pre{margin:0;padding:10px 12px;white-space:pre-wrap;word-wrap:break-word;font:in
 .queue{background:var(--card);border:2px solid var(--accent);border-radius:12px;padding:14px 16px;margin:16px 0;display:grid;gap:10px}
 .queue .who{font-size:17px}.queue .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.queue kbd{font:11px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-left:4px;color:var(--muted)}
 .queue button.primary kbd{color:#fff;border-color:rgba(255,255,255,.6)}
+.dueitem{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:6px}.dueitem p{margin:0}
 .queue pre{max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:9px}
 table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 td,th{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--muted);font-weight:500}
@@ -234,8 +288,16 @@ ${data.waiting ? `<p class="banner">${data.waiting} ${data.waiting === 1 ? 'draf
 <p class="sub">${e(data.event.city || '')} · ${e(data.event.start_date)} to ${e(data.event.end_date)} · times in ${e(data.event.time_zone)} · generated ${e(data.generatedAt)}</p>
 <div class="bar"><span><b id="sentCount" data-recorded="${recorded}">${recorded}</b> of <b>${msgs.length + recorded}</b> sent</span>
 <span>${counts.coordinate || 0} held for a colleague · ${counts.suppressed || 0} left alone (do-not-contact, opted out, a lost deal) · ${counts.not_drafted || 0} not drafted (they don't fit, have no address, or wait on your call)</span>
-<button type="button" class="primary" id="copyStatus">Copy status</button></div>
+<button type="button" class="primary" id="copyStatus">Copy status</button>
+<span class="sub">${TICKS_LINE}</span></div>
 <textarea id="statusOut" readonly hidden aria-label="Status to paste into the next run"></textarea>
+${closeTasks}
+${passed}
+${due.length ? `<section class="queue" id="dueToday" aria-label="Due today">
+<h2>Due today, ${e(dayWords(data.today))} (${due.length})</h2>
+<p class="follow" id="dueStale" data-day="${e(data.today)}" data-zone="${e(data.event?.time_zone || '')}" hidden>This page is from ${e(dayWords(data.today))}: open floorboss for today's list.</p>
+<p class="sub">Send these yourself today, then tick Sent. ${TICKS_LINE}</p>
+${due.map((c) => dueItem(c, data.today, hosts)).join('')}</section>` : ''}
 <section class="queue" id="liQueue" hidden aria-label="LinkedIn queue">
   <div class="row"><b>LinkedIn queue</b><span class="sub" id="qPos"></span></div>
   <div class="who" id="qWho"></div>
@@ -250,7 +312,7 @@ ${data.waiting ? `<p class="banner">${data.waiting} ${data.waiting === 1 ? 'draf
   <p class="sub" id="qDone" hidden>All LinkedIn messages here are marked sent. Use "Copy status" so floorboss records them, and "Copy CRM log" for HubSpot or a sheet.</p>
 </section>
 <h2>Messages (${msgs.length})</h2>
-${msgs.map((c) => card(c, hosts, data.event?.app_name || null, data.hand_send === true)).join('\n') || '<p class="sub">Nothing to send yet.</p>'}
+${msgs.map((c) => card(c, hosts, data.event?.app_name || null, data.hand_send === true, data.today || null)).join('\n') || '<p class="sub">Nothing to send yet.</p>'}
 ${coords.length ? `<h2>Coordinate notes (${coords.length})</h2><p class="sub">These people's relationship is held by someone else. Pass the note on instead of reaching out yourself.</p>${coords.map((c) => card(c, hosts)).join('\n')}` : ''}
 ${slotRows ? `<h2>Who was offered each time</h2><table><thead><tr><th>Time</th><th>Offered to</th></tr></thead><tbody>${slotRows}</tbody></table>` : ''}
 ${(data.visit || []).length ? `<h2>Visit list (${data.visit.length})</h2><table><thead><tr><th>Company</th><th>Booth</th></tr></thead><tbody>${data.visit.map((v) => `<tr><td>${e(v.company)}</td><td>${e(v.booth || '—')}</td></tr>`).join('')}</tbody></table>` : ''}
@@ -272,12 +334,27 @@ const OUTBOX_SCRIPT = `
   function save(){ try { localStorage.setItem(key, JSON.stringify(state)); } catch (err) {} }
   function today(){ var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
   var cards = Array.prototype.slice.call(document.querySelectorAll('.card[data-id]'));
+  var dueStale = document.getElementById('dueStale');
+  // A close-the-task line the user ticked as done goes away (kept on this page only).
+  var closedKey = key + ':closed', closed = {};
+  try { closed = JSON.parse(localStorage.getItem(closedKey) || '{}'); } catch (err) { closed = {}; }
+  document.querySelectorAll('[data-close]').forEach(function(p){
+    if (closed[p.dataset.close]) p.hidden = true;
+    var box = p.querySelector('[data-closed]');
+    if (box) box.addEventListener('change', function(){ if (box.checked) { closed[p.dataset.close] = true; try { localStorage.setItem(closedKey, JSON.stringify(closed)); } catch (err) {} p.hidden = true; } });
+  });
+  // Today in the event's time zone (the day the list is for), else the browser's.
+  function zoneDay(zone){
+    try { return new Intl.DateTimeFormat('en-CA', { timeZone: zone || undefined, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); } catch (err) { return today(); }
+  }
+  if (dueStale && dueStale.dataset.day && zoneDay(dueStale.dataset.zone) > dueStale.dataset.day) dueStale.hidden = false;
+  var ticked = cards.concat(Array.prototype.slice.call(document.querySelectorAll('.dueitem[data-id]')));
   function keyOf(c){ return c.dataset.id + ':' + (c.dataset.touch || '1'); }
   function refresh(){
     var sent = 0;
-    cards.forEach(function(c){
+    ticked.forEach(function(c){
       var s = state[keyOf(c)] || {};
-      if (s.sent) sent++;
+      if (s.sent && c.classList.contains('card')) sent++;
       c.classList.toggle('done', !!(s.replied || s.booked || s.stop));
       c.querySelectorAll('[data-tick]').forEach(function(el){
         var t = el.dataset.tick;
@@ -292,7 +369,7 @@ const OUTBOX_SCRIPT = `
     var sc = document.getElementById('sentCount');
     sc.textContent = (Number(sc.dataset.recorded) || 0) + sent;
   }
-  cards.forEach(function(c){
+  ticked.forEach(function(c){
     c.querySelectorAll('[data-tick]').forEach(function(el){
       el.addEventListener('change', function(){
         var s = state[keyOf(c)] || (state[keyOf(c)] = {});

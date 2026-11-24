@@ -86,10 +86,13 @@ test('2. hand-send: a setup question is a plain question for the user, with the 
   // With a name given already, the question is still the user's.
   const hinted = asMode(true, () => onboardingAsk({ ob: { ...OB, ans: { ...OB.ans, event_hint: 'Harbour Expo' } } }, 'first'));
   assert.doesNotMatch(hinted.ask.question, AGENT_WORDS, hinted.ask.question);
-  // Claude Code: the question as the tree words it, and nothing added.
+  // Claude Code reads as Codex since 2026-11-21 (one product for both hosts): the same plain question for the user, the
+  // tree's own wording going to the agent's notes (for_agent) apart from it, plus the same how_to_ask.
   const cc = asMode(false, () => onboardingAsk({ ob: OB }, 'first'));
-  assert.equal(cc.ask.question, NODES.find((n) => n.id === 'event').ask({ ...OB, ans: OB.ans }));
-  assert.equal('how_to_ask' in cc.ask, false);
+  assert.equal(cc.ask.question, codex.ask.question);
+  assert.doesNotMatch(cc.ask.question, AGENT_WORDS, cc.ask.question);
+  assert.equal(cc.ask.how_to_ask, codex.ask.how_to_ask);
+  assert.equal(cc.ask.for_agent, NODES.find((n) => n.id === 'event').ask({ ...OB, ans: OB.ans }));
 });
 
 test('2. hand-send: every question the beginner hit has a plain wording and a note to turn the answer into its shape', async () => {

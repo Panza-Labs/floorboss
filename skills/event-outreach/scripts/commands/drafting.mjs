@@ -28,7 +28,7 @@ function checkCtx(c, job, id, channel, others, lang = null) {
   const skills = skillsOf(c);
   // A follow-up is shorter than the message before it, on the same channel (a short LinkedIn note before an email
   // doesn't set the email's length).
-  const before = job.followup && !job.channel_changed ? job.previous_message || earlierDraft(c, id, touchBefore(c.state[id], job.touch))?.body || null : null;
+  const before = job.followup && !job.channel_changed ? job.previous_message || (touchBefore(c.state[id], job.touch) > 0 ? earlierDraft(c, id, touchBefore(c.state[id], job.touch))?.body : null) || null : null;
   return {
     followup: !!job.followup,
     previousBody: before,
@@ -48,9 +48,9 @@ function checkCtx(c, job, id, channel, others, lang = null) {
     optoutLeftOff: knownReader(c, id) && c.settings.optout_known === false ? optoutFor(c.settings, lang) : null,
     language: lang,
     languages: c.settings.languages || [],
-    // A first LinkedIn message to someone not connected goes as a connection note, which LinkedIn caps far
-    // below a message (the limit is a setting: LinkedIn changes it, and it differs by account type).
-    pasteLimit: channel === 'paste' && !app && (job.invite_note ?? !job.followup) ? linkedinNoteCap(c) : c.settings.paste_limit,
+    // Every LinkedIn message, first or follow-up, is held to the connection-note cap, so any of them can go as the
+    // note of a connection request (the limit is a setting: LinkedIn changes it, and it differs by account type).
+    pasteLimit: channel === 'paste' && !app ? linkedinNoteCap(c) : c.settings.paste_limit,
     otherNames: others,
     ownFacts: [skills.whatYouBring, skills.voice, c.settings.goal].filter(Boolean).join('\n'),
     // Everything else this message may quote a figure from: the research, the company brief, the CRM, the notes.
@@ -168,9 +168,11 @@ export function saveDraft(opts, given = null) {
     ...(userEdited ? { user_edited: true } : {}),
     // Keep what the outbox needs, so older cards still render fully after later runs.
     // The message before this one, as it was when this one was written: a rewrite of it makes this one stale.
-    previous_hash: touch > 1 ? c.state[job.id]?.touches?.[touch - 1]?.hash || null : null,
+    // A step whose every earlier step was skipped is a first message: written against no earlier text.
+    // (A step written again as the first message, after LinkedIn steps that never went: job.followup false, rule A1.)
+    previous_hash: touch > 1 && job.followup !== false && touchBefore(c.state[job.id], touch) > 0 ? c.state[job.id]?.touches?.[touch - 1]?.hash || null : null,
     // Every earlier message as it is now, so a skip can't hide which message this one was written for (staleFor).
-    before_hashes: touch > 1 ? Object.fromEntries(Array.from({ length: touch - 1 }, (_, i) => [i + 1, c.state[job.id]?.touches?.[i + 1]?.hash || null])) : null,
+    before_hashes: touch > 1 && job.followup !== false && touchBefore(c.state[job.id], touch) > 0 ? Object.fromEntries(Array.from({ length: touch - 1 }, (_, i) => [i + 1, c.state[job.id]?.touches?.[i + 1]?.hash || null])) : null,
     slot_ids: job.slot_ids || [],
     booked_slot: job.booked_slot || null,
     earliest: job.earliest || null,
@@ -184,8 +186,11 @@ export function saveDraft(opts, given = null) {
     draft.verdict = prev.verdict;
     draft.critic_runs = prev.critic_runs || 0;
   }
-  // The same text saved again (save-drafts run twice on an unchanged file) uses up no try.
-  if (prev && prev.body === draft.body && (prev.subject || '') === (draft.subject || '') && (prev.attempts || 0) > 0) draft.attempts = prev.attempts;
+  // The same text saved again (save-drafts run twice on an unchanged file) uses up no try, while it passed its checks.
+  // Failing them (the record's checks, not the working copy's), the same text again is a try like any other rewrite: a
+  // drafter that returns it word for word each round stops after three, or the draft step came back for ever.
+  const failedBefore = (c.folded?.people?.[job.id]?.touches?.[touch]?.checks || []).length > 0;
+  if (prev && prev.body === draft.body && (prev.subject || '') === (draft.subject || '') && (prev.attempts || 0) > 0 && !failedBefore) draft.attempts = prev.attempts;
   // A rewrite the batch check asked for (the draft passed its own checks; the batch reads too alike) uses up no
   // try either: the three tries are for the draft's own check fails, or a draft that passed got stuck.
   else if (prev && (prev.attempts || 0) > 0 && draft.attempts === prev.attempts + 1 && !(prev.checks || []).length && batchAskedRewrite(c, job.id, touch)) {
@@ -221,6 +226,9 @@ export function saveDraft(opts, given = null) {
       problems.push(
         `a confirmation carries no link or outside address (${links.slice(0, 3).join(', ')}): say the time and the place; your own email or a phone number is fine`
       );
+    // A confirmation on LinkedIn is held to the connection-note cap, like every LinkedIn message.
+    if (draft.channel === 'paste' && whereAt(c, job.id, 0) === 'LinkedIn' && String(draft.body || '').length > linkedinNoteCap(c))
+      problems.push(`paste message is ${String(draft.body || '').length} characters; the limit is ${linkedinNoteCap(c)}`);
     if (wordCount(draft.body) > 70) problems.push(`a confirmation is two or three lines (${wordCount(draft.body)} words; keep it under 70)`);
     for (const l of job.slot_labels || []) if (!timeMentioned(draft.body, l)) problems.push(`doesn't give the booked time (${l.replace(/ \(.*\)$/, '')})`);
     // The place's main words, not its exact text ("the North Lounge, table 4" matches "North Lounge table 4").
@@ -583,6 +591,8 @@ export function redraft(opts) {
     const f = draftFile(c.paths, id, touch);
     const d = readJson(f, null);
     if (!d) throw new Error(`${id} touch ${touch} has no draft.`);
+    // As revise: a message already sent stays as it went.
+    if (c.state[id]?.sent?.[touch]) throw new Error(`${id} touch ${touch} was already sent: it isn't drafted again. Nothing was changed.`);
     writeJson(f, { ...d, verdict: null, critic_rewrites: 0, last_fail: d.verdict || d.last_fail || null, fresh_attempt: (d.fresh_attempt || 0) + 1 });
     led(c, { type: 'fresh_attempt', id, touch, said: 'a fresh attempt, asked for by the user' });
     done.push(`${id}:${touch}`);

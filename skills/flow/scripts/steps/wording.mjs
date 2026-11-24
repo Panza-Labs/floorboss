@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Fixed wording: the disclaimer, the warning about running without the CRM, where asking.md explains each
 // question, and how special answers are written.
+import { personNames } from '../../../event-context/scripts/scan.mjs';
+import { readOnlyMail, readOnlyLine, crmPromise } from '../../../event-context/scripts/onboarding-tree.mjs';
 
 // A failed tool: ask the user whether it's back, or to go on without it.
 // What running without the CRM costs, said before the user confirms it.
@@ -24,6 +26,7 @@ export const DISCLAIMER =
 // Where asking.md says how to ask each question: the section's anchor (GitHub's heading slug).
 const ASKING = 'skills/flow/references/asking.md';
 const HELP_SECTIONS = {
+  'reference-the-intake-account_intake-show_intake-intake_summary': ['account_intake', 'show_intake', 'intake_summary', 'intake_website', 'intake_names', 'intake_material', 'crm_verify'],
   'reference-the-disclaimer-disclaimer': ['disclaimer'],
   'reference-how-much-setup-setup_level': ['setup_level', 'reuse_setup'],
   'reference-sign-off-and-home-city-about_you': ['about_you', 'home_tz'],
@@ -49,6 +52,7 @@ const HELP_SECTIONS = {
     'calendar_use',
     'known_contacts',
     'free_time',
+    'reach_channels',
     'sending',
     'touches',
     'linkedin_send',
@@ -201,19 +205,54 @@ export const HAND_SEND_ASKS = {
   },
   crm_name: {
     question: () => 'Which owner in your CRM is you? You can say "none of these" if you are not in it.',
-    how: `${SHAPE} Show the owners for_agent lists, numbered and quoted exactly as written there, so "2" means that one.`
+    how: `${SHAPE} The owners are in the question, numbered and quoted as written: show them exactly so, so "2" means that one. When the question is a reading waiting for a yes, show it word for word and save their own reply.`
   },
   samples: {
-    question: () =>
-      'Here are three ways your first message could open. Which is closest, and what would you change? If you have two to five emails you sent that got replies, paste them too, or say "none".',
+    question: (s) =>
+      `Here are three ways your first message could open. Which is closest, and what would you change?${s.ans?.account_intake && !String(s.ans.account_intake).split(',').includes('emails') ? '' : ' If you have two to five emails you sent that got replies, paste them too, or say "none".'}`,
     how: `${SHAPE} Write the three sample openings yourself (casual and plain, warm, formal: two or three lines each, in the user's language) and show them with the question.`
   },
   about_you: {
     question: () => 'How do you sign your messages (your name, and your company if you add it), and which city do you live in?',
     how: `${SHAPE} If for_agent names where to propose the sign-off or the city from, propose it and ask only to confirm; if it names nothing, ask plainly and never suggest a name.`
   },
+  segments: {
+    question: () => 'Here are the groups of people I would look for, one line each (role and kind of company). Right, or what should change?',
+    how: `${SHAPE} Propose the groups yourself from their goal (and the ICP of their own outbound skill, if there is one): one line each, roles and kind of company, and show them with the question.`
+  },
+  tools: {
+    question: (s) => {
+      const list = (k) => personNames((s.inv?.found || {})[k] || []);
+      const crm = list('crm').length && !s.ans?.crm_choice;
+      const ro = readOnlyMail(s);
+      const parts = [
+        crm ? `check everyone against your customer list (CRM), ${list('crm').join(' or ')}: who you know, who a coworker owns, who opted out` : null,
+        list('email').length ? `see who you've already emailed in ${list('email').join(', ')}${ro.length ? ` (${readOnlyLine(s)})` : ''}` : null,
+        list('calendar').length ? `read your free time from ${list('calendar').join(', ')}` : null
+      ].filter(Boolean);
+      return `floorboss can use what you have connected: ${parts.join('; ') || 'what it found'}.${crm ? ` ${crmPromise(list('crm').join(' or '))}` : ''} OK, or change any? Whether it may send is a separate choice later.`;
+    },
+    how: SHAPE
+  },
+  send_setup: {
+    question: (s) =>
+      /email/.test(String(s.ans?.sending_channels || '')) && !(s.inv?.found?.email_send || []).length && readOnlyMail(s).length
+        ? null
+        : /email/.test(String(s.ans?.sending_channels || ''))
+          ? `To send email itself, floorboss sends one test email to you first, and you check it arrived. ${s.cfg?.own_email ? `Do you send from ${s.cfg.own_email}?` : 'Which address do you send from?'}`
+          : 'To send chat messages itself, floorboss sends one test message to you first, and you check it arrived. Which number is yours?',
+    how: `${SHAPE} If the connected mailbox shows its own address, propose it and ask only to confirm it.`
+  },
+  customers: {
+    question: () => 'Some people on the list are at your customers (floorboss knows them from your customer list, the CRM). What should it do: a warm note, ask you each time, or leave them alone?',
+    how: `${SHAPE} Say first how many on the list are at customers (the counts are in the question, as data from the files). If the CRM has no close date or deal fields, ask the one question. Only with deal fields, ask the three cases: closed recently, on the won deal, someone else there.`
+  },
+  lost_deals: {
+    question: () => 'Some people on the list had a lost deal or said no before. How long since your last contact before floorboss may approach them again? Until then they are left out and listed with the reason.',
+    how: `${SHAPE} Say first how many on the list have a lost deal or a rejection in the CRM, and when they were last in touch (the counts are in the question, as data from the files).`
+  },
   coworker_contacts: {
     question: () => 'Some people on the list belong to a coworker in your CRM. How careful should floorboss be with them? It can differ per coworker.',
-    how: `${SHAPE} Say first how many people each coworker owns (the counts in for_agent).`
+    how: `${SHAPE} Say first how many people each coworker owns (the counts are in the question, as data from the files).`
   }
 };

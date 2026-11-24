@@ -16,7 +16,7 @@ function approved(opts = {}) {
   const w = world({ touches: 2, ...opts });
   process.env.FLOORBOSS_HOME = w.HOME;
   const r = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: r.digest, said: 'auto-send these sequences' }, at(NOW));
+  approve(w.evDir, { digest: r.digest, said: '1' }, at(NOW));
   return w;
 }
 const sentLines = (id, touch, date, when) => [{ at: when, type: 'sent', who: 'floorboss', id, touch, via: 'email.send', channel: 'email', date, source: 'autosend', message_id: `m-${id}-${touch}`, thread_id: `t-${id}` }];

@@ -6,16 +6,17 @@ import { run } from '../../../lib/args.mjs';
 import { todo } from './commands/todo.mjs';
 import { revise, briefs, redraft, batchCheck, saveDraft, saveDrafts } from './commands/drafting.mjs';
 import { skipReview, criticInput, criticBatch, verdict, verdicts } from './commands/review.mjs';
-import { openOutbox, render } from './commands/cards.mjs';
-import { approveRound, gate } from './commands/approval.mjs';
+import { openOutbox, render, linkedinDue } from './commands/cards.mjs';
+import { approveRound, gate, approvable } from './commands/approval.mjs';
 import { appResult, sendFailed, sendOutcome, toolFailed, toolBack, sendList, sentReceipts, browserSendCmd, stageList, staged } from './commands/sending.mjs';
 import { record, sync, syncList, status, summary } from './commands/outcomes.mjs';
 import { logList, crmLogged, openLogWindow, crmLogResults, contactList, crmRecords, exportContacted } from './commands/crm-log.mjs';
-import { taskList, tasksCreated, taskStatus } from './commands/tasks.mjs';
+import { taskList, tasksCreated, taskStatus, taskSent } from './commands/tasks.mjs';
 import { agendaDataCmd, agendaNews, agendaSave, agendaFacts, calendarBookings } from './commands/calendar.mjs';
 import { rateSet, rate, voiceSave } from './commands/ratings.mjs';
 import { authoriseUnattended, crmJudge, draftMissing } from './commands/unattended.mjs';
 import { reportCmd } from './commands/report.mjs';
+import { reachChanged } from './commands/reach.mjs';
 export { blockReason, sendingOn } from './commands/context.mjs';
 
 run({
@@ -29,6 +30,7 @@ run({
   'open-log-window': openLogWindow,
   'crm-log-results': crmLogResults,
   'app-result': appResult,
+  'reach-changed': reachChanged,
   'send-failed': sendFailed,
   'send-outcome': sendOutcome,
   'tool-failed': toolFailed,
@@ -47,7 +49,9 @@ run({
   sync,
   'sync-list': syncList,
   'task-list': taskList,
+  'linkedin-due': linkedinDue,
   'tasks-created': tasksCreated,
+  'task-sent': taskSent,
   'contact-list': contactList,
   'crm-records': crmRecords,
   'task-status': taskStatus,
@@ -71,5 +75,6 @@ run({
   verdicts,
   render,
   gate,
+  approvable,
   summary
 });

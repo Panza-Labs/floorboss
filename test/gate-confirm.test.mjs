@@ -486,7 +486,7 @@ test('F2: confirm and separate never lift a do-not-contact, opt-out or coworker 
   // A reading that holds one refused action names it up front, and saves only the rest on yes.
   const r = tgate(H, 'reach Di; reach c002');
   assert.equal(r.pending, true);
-  assert.match(r.say_to_user, /Not saved even on yes: "reach c002", c002 is held because opted out in the CRM/);
+  assert.match(r.say_to_user, /Not saved even on yes: "reach c002", Bo Li is held: opted out in your CRM/);
   tgate(H, 'yes');
   assert.deepEqual(reachedHeld(H), []);
   assert.ok(entries(H).some((e) => e.type === 'decide' && e.id === 'c004' && e.group === 'reach'));
@@ -640,14 +640,22 @@ test('round 6: the lifts in their own form still work after a skip; a lift said 
     const y = r.pending ? tgate(H, 'yes') : r;
     assert.ok(!y.ERROR && !(y.refused || []).length, `${a}: ${JSON.stringify(y).slice(0, 300)}`);
   }
-  // The do-not-contact entry lifts only by the user's own words (decide), and that holds after a later skip too.
+  // The do-not-contact entry lifts only through lift-hold's read-back (a decide or gate reach is refused), and that lift
+  // holds after a later skip too.
   const d = cli(H, 'crm-triage', ['decide', '--event', H.slug, '--id', 'c001', '--group', 'reach', '--because', 'Ana asked me to write after the call']);
-  assert.ok(!d.ERROR, d.ERROR);
+  assert.ok(d.ERROR, 'a decide reach no longer lifts a do-not-contact entry (lift-hold does)');
   const s = tgate(H, 'skip c001');
   if (s.pending) tgate(H, 'yes');
   const r = tgate(H, 'reach c001');
   const y = r.pending ? tgate(H, 'yes') : r;
-  assert.ok(!y.ERROR && !(y.refused || []).length, JSON.stringify(y).slice(0, 300));
+  assert.ok(y.ERROR || (y.refused || []).length, JSON.stringify(y).slice(0, 300));
+  cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', 'c001']);
+  assert.equal(cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', 'c001', '--answer', '1', '--said', 'Ana asked me to write after the call']).lifted >= 1, true);
+  for (const a of ['skip c001', 'reach c001']) {
+    const r2 = tgate(H, a);
+    const y2 = r2.pending ? tgate(H, 'yes') : r2;
+    assert.ok(!y2.ERROR && !(y2.refused || []).length, `after the lift, ${a}: ${JSON.stringify(y2).slice(0, 300)}`);
+  }
   // Someone nobody holds: skip then reach is just the user changing their mind.
   const z = tgate(H, 'skip Di Fox');
   if (z.pending) tgate(H, 'yes');

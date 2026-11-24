@@ -14,6 +14,7 @@ import { crmWitness } from '../hooks/guard/witness.mjs';
 import { ownerFromAnswer, namedCompanies, skipNames } from '../lib/names.mjs';
 import { readKnown } from '../skills/crm-triage/scripts/known.mjs';
 import { makeHome, drive, simplePersona, cli as simCli } from './sims/lib/driver.mjs';
+import { throughHeadsUp, say } from './fixtures/heads-up.mjs';
 import { ftu6 } from './fixtures/ftu6.mjs';
 
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version;
@@ -261,7 +262,7 @@ test("6. a CRM contact's name beside another address waits for the user before t
   assert.equal(tr2.pre[id].crm?.notes, 'DUMMY-PRIVATE renewal at 40k pending legal');
   // The CRM's own address: linked as before, warm. (Another mailbox at the same domain is asked about: test 6e.)
   for (const addr of ['ana@acme.test']) {
-    const S = setup({ attendees: `Name,Title,Company,Email\nAna Berg,COO,Acme,${addr}\n`, crm: `${CRM6}Ana Berg,ana@acme.test,Acme,Sam Rivera,Customer,no,DUMMY-PRIVATE renewal\n` });
+    const S = setup({ attendees: `Name,Title,Company,Email\nAna Berg,COO,Acme,${addr}\n`, crm: `${CRM6}Ana Berg,ana@acme.test,Acme,Sam Rivera,Customer,no,DUMMY-PRIVATE renewal\n`, settings: { customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' } } });
     triage(S);
     const t3 = JSON.parse(readFileSync(join(S.dir, 'derived', 'compat', 'triage.json'), 'utf8'));
     const sid = idOf(S, 'Ana Berg');
@@ -319,29 +320,21 @@ test('8. a refusal word that is also a lone company\'s whole name is read back, 
     assert.deepEqual(namedCompanies(t, listed), want, t);
 });
 test('8. through the flow: "skip altogether" with a company called Altogether starts no research', { timeout: 600000 }, () => {
+  // (Said at the research heads-up, company_briefs, since 2026-11-21: the company_research ask is gone.)
   const H = makeHome({ context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' }, attendees: COS });
+  const persona = simplePersona({ asks: { setup_level: 'standard', attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
   let tried = 0;
-  const persona = simplePersona({
-    asks: {
-      setup_level: 'standard',
-      research_scale: 'none',
-      attendee_list: join(H.HOME, 'inputs', 'attendees.csv'),
-      company_research: (s) => {
-        if (!tried++) {
-          assert.ok(['Altogether', 'The Lot', 'Acme'].every((x) => s.ask.companies.includes(x)), s.ask.companies.join(' '));
-          for (const said of ['skip altogether', 'skip the lot']) {
-            const f = join(H.HOME, 'work', 'cr.txt');
-            writeFileSync(f, said);
-            const r = simCli(H, 'flow', ['answer', '--event', s.event, '--ask', 'company_research', '--value-file', f]);
-            assert.match(r.ERROR || '', /skip only/, `${said}: ${JSON.stringify(r).slice(0, 300)}`);
-          }
-        }
-        return 'skip all';
-      }
+  const run = throughHeadsUp(H, persona, (up) => {
+    tried++;
+    assert.ok(['Altogether', 'The Lot', 'Acme'].every((x) => up.companies.includes(x)), up.companies.join(' '));
+    for (const said of ['skip altogether', 'skip the lot']) {
+      const r = say(H, up, said);
+      assert.match(r.ERROR || '', /skip only/, `${said}: ${JSON.stringify(r).slice(0, 300)}`);
     }
+    assert.ok(!say(H, up, 'skip all').ERROR);
   });
-  const run = drive(H, persona, { maxSteps: 200 });
   assert.ok(tried > 0, 'the step was reached');
+  assert.deepEqual(run.companiesResearched, [], 'no web research on companies');
   assert.ok(!run.trail.includes('company_briefs'), `no web research: ${run.trail.join(' ')}`);
   assert.match(readFileSync(join(H.HOME, 'events', run.slug, 'ledger.jsonl'), 'utf8'), /"ask":"company_research","value":"skip"/);
 });
@@ -350,7 +343,7 @@ test('8. through the flow: "skip altogether" with a company called Altogether st
 // A. Fix 6 at a shared mail domain, with no address, or with another LinkedIn link.
 test('6b. a name match at a shared mail domain, with no address or with another LinkedIn link waits for the user too', () => {
   const pre = (attendees, crm) => {
-    const H = setup({ attendees, crm });
+    const H = setup({ attendees, crm, settings: { customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' } } });
     triage(H);
     const tr = JSON.parse(readFileSync(join(H.dir, 'derived', 'compat', 'triage.json'), 'utf8'));
     return { H, p: tr.pre[idOf(H, 'Ana Berg')] };
@@ -448,7 +441,7 @@ test('6c. merged rows with the attacker\'s address first: never linked warm with
 });
 // 1c. A row with no address beside a record with one: asked about, but the record's own address may be filled in.
 test('6d. a row with no address is asked about until the CRM record\'s own address is filled in for it', () => {
-  const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,\nBo Li,VP Ops,Globex,bo@globex.test\n', crm: `${R3_CRM}Ana Berg,ana@acme.test,Acme,Sam Rivera,Customer,no,DUMMY-PRIVATE renewal\n` });
+  const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,\nBo Li,VP Ops,Globex,bo@globex.test\n', crm: `${R3_CRM}Ana Berg,ana@acme.test,Acme,Sam Rivera,Customer,no,DUMMY-PRIVATE renewal\n`, settings: { customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' } } });
   triage(H);
   assert.equal(preOf(H).group, 'check');
   const el = cli(H, 'crm-triage', ['enrich-list', '--event', H.slug, '--ids', idOf(H, 'Ana Berg')]);
@@ -609,7 +602,8 @@ test('6e. a CRM record lends its standing and notes only where the message goes 
   for (const [what, rowMail, rowLink, recMail, recLink, linked] of ID_CASES) {
     const H = setup({
       attendees: `Name,Title,Company,Email,LinkedIn\nAna Berg,COO,Acme,${rowMail},${rowLink}\nBo Li,VP Ops,Globex,bo@globex.test,\n`,
-      crm: `Name,Email,Company,Owner,Status,Opted Out,Notes,LinkedIn\nAna Berg,${recMail},Acme,Sam Rivera,Customer,no,DUMMY-PRIVATE renewal,${recLink}\n`
+      crm: `Name,Email,Company,Owner,Status,Opted Out,Notes,LinkedIn\nAna Berg,${recMail},Acme,Sam Rivera,Customer,no,DUMMY-PRIVATE renewal,${recLink}\n`,
+      settings: { customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' } }
     });
     triage(H);
     const p = preOf(H);

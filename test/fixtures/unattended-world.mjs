@@ -118,8 +118,9 @@ export const gdata = (H, fn) => {
 // Email sending is on: the whole sequence is approved up front, message 1 goes through the guard with its prompt, and
 // the unattended run puts the follow-ups in the drafts instead of sending them (release 2).
 // gserver: the Gmail recipes' server name (the claude.ai connector's by default).
-export function world({ crm = false, two = false, gmail = false, gserver = G } = {}) {
-  const H = setup({ attendees: two ? `${PEOPLE}Bo Lind,CFO,Bolt,${BO}\n` : PEOPLE, settings: { sending: { channels: ['email'], followups: 'scheduled' }, route: ['email', 'email', 'email'] } });
+// route, people: another sequence or list (a LinkedIn step by hand between the emails).
+export function world({ crm = false, two = false, gmail = false, gserver = G, route = ['email', 'email', 'email'], people = null } = {}) {
+  const H = setup({ attendees: people || (two ? `${PEOPLE}Bo Lind,CFO,Bolt,${BO}\n` : PEOPLE), settings: { sending: { channels: ['email'], followups: 'scheduled' }, route, ...(route.includes('linkedin') ? { linkedin_messages: true } : {}) } });
   const g = gRecipes(gserver);
   const conn = gmail ? { 'email.send': g.send, stage_draft: g.stage, 'email.messages': g.read } : { 'email.send': SEND, stage_draft: STAGE, 'email.messages': READ };
   writeFileSync(join(H.HOME, 'config.json'), JSON.stringify({ connectors: { ...conn, ...(crm ? { 'crm.activity': CRM } : {}) }, followup_gap: [1], own_email: OWN }));

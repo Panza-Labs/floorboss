@@ -4,6 +4,7 @@
 // no connector (event-app messages, LinkedIn, colleague notes, decisions for the user) becomes a CRM task,
 // and the task's completion and outcome come back into the contact log. One log, every channel.
 import { timeMentioned } from './checks.mjs';
+import { dayWords } from '../../../lib/tz.mjs';
 import { isLinkedInUrl } from '../../../lib/route.mjs';
 // A name in a task title: one line, no longer than a name.
 const short = (x) =>
@@ -27,7 +28,7 @@ const OUTCOME_HELP =
 // cards: outbox cards. review: [{id, reason}] decisions for the user. stops: contacts who said stop.
 // selfSends(card): floorboss sends this message itself (sending on for its channel): no "send it" task, or it
 // could go twice.
-export function taskItems({ cards, review = [], stops = [], created, event, byId, crmOf, today, now = new Date().toISOString(), selfSends = () => false, dayState = null }) {
+export function taskItems({ cards, review = [], stops = [], created, event, byId, crmOf, today, now = new Date().toISOString(), selfSends = () => false, dayState = null, taskOf = () => null }) {
   const items = [];
   // The CRM's own record id, or nothing: an email isn't a record id, and a task on no record still shows.
   const ref = (id) => crmOf(id)?.crm_id || null;
@@ -40,10 +41,38 @@ export function taskItems({ cards, review = [], stops = [], created, event, byId
     // rule, lib/spacing.mjs followupDay). None while that day can't be known yet (due_waits), and none at all when
     // it has no room left before the event ends (due_on null): a dropped step is never a task for today.
     const day = card.due_on === undefined ? card.planned_due : card.due_on;
-    if (card.due_waits || card.due_on === null || (day && day > today)) continue;
+    // A LinkedIn message (always sent by hand) gets its task as soon as its day is known, due that day, so the user has
+    // it in the CRM on the day itself, whether or not floorboss runs then.
+    const linkedin = card.channel === 'paste' && (card.where || whereTo(card, event)) === 'LinkedIn';
+    if (card.due_waits || card.due_on === null || (day && day > today && !linkedin)) continue;
     if ((card.kind === 'message' || card.kind === 'confirmation') && card.channel === 'paste' && !selfSends(card)) {
-      const key = `${card.id}:${card.touch}`;
+      // A task already made for this message: none again, unless its text or its day changed since (it was edited and
+      // approved again, or its day moved). Then the user is asked to close the old task, and a new one follows.
+      // (A task the user closed as not needed counts as none: the message gets a new one.)
+      const p0 = taskOf(card.id, card.touch);
+      // Asked whether it was sent: no new task until the user answers.
+      if (p0?.ask_sent) continue;
+      const prior = p0?.unneeded ? null : p0;
+      const knownDay = day || null;
+      const changed = prior && !prior.done && ((prior.hash && card.approved_hash && prior.hash !== card.approved_hash) || (prior.hash && (prior.day || null) !== knownDay));
+      const key = changed || p0?.unneeded ? `${card.id}:${card.touch}:${String(card.approved_hash || '').slice(0, 8)}-${knownDay || 'now'}` : `${card.id}:${card.touch}`;
+      if (prior && !changed) continue;
       if (created.has(key)) continue;
+      if (changed) {
+        const rkey = `${card.id}:review:changed-${prior.key}`;
+        if (!created.has(rkey) && !items.some((x) => x.key === rkey))
+          items.push({
+            key: rkey,
+            id: card.id,
+            touch: card.touch,
+            kind: 'review',
+            contact_ref: ref(card.id),
+            listed_at: now,
+            title: `floorboss needs you: ${short(card.name)} (${short(card.company)})`,
+            body: `The message in the open task for ${card.name} changed: close that task; a new one follows.`,
+            due: today
+          });
+      }
       // Not today: another event wrote to that address today (the card says why). Its task comes on another day.
       if (card.not_today) continue;
       // One message a day to one person: one send task for them in a list, the earliest step first.
@@ -57,9 +86,13 @@ export function taskItems({ cards, review = [], stops = [], created, event, byId
         contact_ref: ref(card.id),
         listed_at: now,
         title: `${card.kind === 'confirmation' ? 'Confirm the meeting with' : card.touch > 1 ? 'Follow up' : 'Message'} ${short(card.name)} (${short(card.company)}) in ${where}`,
-        body: `${card.body}\n\n---\n${where === 'LinkedIn' && card.profile_url ? `Profile: ${card.profile_url}\n` : ''}${OUTCOME_HELP}`,
-        // Due the day it should go out: floorboss lists a message when it's due, so that's today.
-        due: today
+        // A LinkedIn follow-up: floorboss can't read LinkedIn, so the task itself says to look for a reply first.
+        body: `${where === 'LinkedIn' && card.touch > 1 && /^\d{4}-\d{2}-\d{2}$/.test(card.prev_sent_on || '') ? `Before you send: look in LinkedIn for a reply from ${card.name} since ${dayWords(card.prev_sent_on)}. If they replied, don't send this; close the task and tell floorboss.\n\n` : ''}${card.body}\n\n---\n${where === 'LinkedIn' && card.profile_url ? `Profile: ${card.profile_url}\n` : ''}${OUTCOME_HELP}`,
+        // Due the day it should go out: a LinkedIn message's own day (listed ahead of it), else today, when it's listed.
+        due: linkedin && day && day > today ? day : today,
+        // What the task was made from: the approved text and its day, so a change to either is seen.
+        hash: card.approved_hash || null,
+        day: knownDay
       });
     }
     if (card.kind === 'coordinate') {
@@ -90,7 +123,8 @@ export function taskItems({ cards, review = [], stops = [], created, event, byId
       contact_ref: ref(r.id),
       listed_at: now,
       title: `floorboss needs you: ${short(ct.name)} (${short(ct.company)})`,
-      body: `${r.reason}\n\nAnswer it in floorboss (the next /floorboss:start run asks), then mark this task done.`,
+      // A task that only asks to close another (plain): nothing to answer in floorboss.
+      body: r.plain ? `${r.reason}\n\nMark this task done once you have closed it.` : `${r.reason}\n\nAnswer it in floorboss (the next /floorboss:start run asks), then mark this task done.`,
       due: today
     });
   }

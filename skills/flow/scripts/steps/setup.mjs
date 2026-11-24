@@ -7,8 +7,10 @@ import { planQuestions, NODES, defaultsFor } from '../../../event-context/script
 import { crmReaderHint } from '../../../connectors/scripts/tasks.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { step, node, handSend } from './shared.mjs';
+import { ownerSaid } from '../../../../lib/names.mjs';
 import { ANSWER_FORMAT, helpFor, DISCLAIMER, HAND_SEND_ASKS, withWhy } from './wording.mjs';
 import { coworkerCounts, customerCounts, lostCounts } from './counts.mjs';
+import { intakeSteps } from './intake.mjs';
 
 // The next onboarding question of one phase, or null when that phase is done.
 export function onboardingAsk(c, phase) {
@@ -16,36 +18,53 @@ export function onboardingAsk(c, phase) {
   if (plan.done || !plan.questions.length) return null;
   const q = plan.questions[0];
   const n = NODES.find((x) => x.id === q.id);
+  // The counts the three CRM questions say, worked out here from the files. They are shown to the user in the question
+  // itself, never left in the agent's notes. Every name in them comes from the user's files or the CRM, so each is shown as
+  // data (as written when it is plainly a name, else in quotes, ownerSaid) and nothing in a cell can pose as an instruction.
+  let counted = '';
   // How many people on the list each coworker owns in the CRM, worked out here, so the question can say it.
   if (q.id === 'coworker_contacts') {
     const counts = coworkerCounts(c);
     if (counts)
-      q.ask = `${q.ask} The counts: ${counts.map((x) => `${x.owner} owns ${x.on_list} on the list (${x.records} in the CRM)${x.through_accounts ? `, plus ${x.through_accounts} held through their accounts` : ''}`).join('; ') || 'no coworker owns anyone on the list'}.`;
+      counted = `The counts: ${counts.map((x) => `${ownerSaid(x.owner)} owns ${x.on_list} on the list (${x.records} in the CRM)${x.through_accounts ? `, plus ${x.through_accounts} held through their accounts` : ''}`).join('; ') || 'no coworker owns anyone on the list'}.`;
   }
   // And who on the list is at the user's customers, for the customers question.
   if (q.id === 'customers') {
     const at = customerCounts(c);
     if (at)
-      q.ask = `${q.ask} The count: ${at.people ? `${plural(at.people, 'person', 'people')} on the list at ${plural(at.companies.length, 'customer')}: ${at.companies.map((x) => `${x.company} (${x.names.join(', ')})`).join('; ')}` : 'nobody on the list is at one of your customers'}.`;
+      counted = `The count: ${at.people ? `${plural(at.people, 'person', 'people')} on the list at ${plural(at.companies.length, 'customer')}: ${at.companies.map((x) => `${ownerSaid(x.company)} (${x.names.map(ownerSaid).join(', ')})`).join('; ')}` : 'nobody on the list is at one of your customers'}.`;
   }
   // And who on the list has a lost deal or a rejection, for the lost-deals question.
   if (q.id === 'lost_deals') {
     const lost = lostCounts(c);
     if (lost)
-      q.ask = `${q.ask} The count: ${lost.length ? `${plural(lost.length, 'person', 'people')} on the list: ${lost.map((x) => `${x.name} (${x.why}${x.at ? `, last in touch ${x.at}` : ', no date'})`).join('; ')}` : 'nobody on the list has a lost deal or a rejection in the CRM'}.`;
+      counted = `The count: ${lost.length ? `${plural(lost.length, 'person', 'people')} on the list: ${lost.map((x) => `${ownerSaid(x.name)} (${x.why}${x.at ? `, last in touch ${x.at}` : ', no date'})`).join('; ')}` : 'nobody on the list has a lost deal or a rejection in the CRM'}.`;
+  }
+  // The CRM owner question: a reading of the last answer waiting for the user's yes is the question itself; otherwise the
+  // owners to pick from, numbered as the saver reads a number (crm-triage crmOwnerList) and shown as data.
+  let crmReading = '';
+  if (q.id === 'crm_name') {
+    const reading = String(c.ob?.crmOwnerReading?.text || '');
+    if (reading) crmReading = reading;
+    else {
+      const o = typeof c.ob?.crmOwners === 'function' ? c.ob.crmOwners() : [];
+      if (o.length)
+        counted = `The owners in your CRM: ${o.slice(0, 12).map((x, i) => `${i + 1}. ${ownerSaid(x)}`).join('; ')}${o.length > 12 ? `; and ${o.length - 12} more` : ''}.`;
+    }
   }
   // Hand-send: the sign-off isn't asked. "Best," and the first name the agent already knows, saved as the answer.
-  if (q.id === 'about_you' && handSend()) return signOffStep(c);
+  if (q.id === 'about_you') return signOffStep(c);
   // Hand-send: the user's question apart from the notes for the agent (wording.mjs HAND_SEND_ASKS).
-  const hs = handSend() ? HAND_SEND_ASKS[q.id] : null;
-  const plain = hs ? hs.question({ ...c.ob, ans: c.ob.ans || {}, cfg: c.ob.cfg || {} }) : null;
+  const hs = HAND_SEND_ASKS[q.id] || null;
+  const plain0 = hs ? hs.question({ ...c.ob, ans: c.ob.ans || {}, cfg: c.ob.cfg || {} }) : null;
+  const plain = crmReading || (plain0 && counted ? `${plain0} ${counted}` : plain0);
   return step(
     `onboarding:${q.id}`,
     `Onboarding (${phase === 'first' ? 'before the first look at the list' : phase === 'triage' ? (c.ob.ans.crm_choice && c.ob.ans.crm_choice !== 'none' ? 'now the CRM is read' : 'now the list is read') : 'after the shortlist'}): ${q.id.replace(/_/g, ' ')}.`,
     {
       ask: {
         id: q.id,
-        question: handSend() ? withWhy(q.id, plain || q.ask) : plain || q.ask,
+        question: withWhy(q.id, plain || (counted ? `${q.ask} ${counted}` : q.ask)),
         ...(hs ? { how_to_ask: hs.how, ...(plain ? { for_agent: q.ask } : {}) } : {}),
         options: q.options || undefined,
         answer_format: hs?.format || ANSWER_FORMAT[q.id] || (q.options ? "one of the options, or the user's own words" : "the user's words"),
@@ -109,7 +128,11 @@ export function setupSteps(x) {
     });
   // The mock event comes with its settings: after the disclaimer it goes straight to the lists.
   const mock = c.event?.event?.mock === true;
-  if (!c.ob.inv && !mock)
+  // "check again" after connecting a mailbox (mailbox_connect): the scan runs once more.
+  // An inventory saved before 0.1.7 doesn't say which mailboxes can send or draft: scanned again, never read as "can't".
+  const stale = !!c.ob.inv && (c.ob.inv.found?.email || []).length > 0 && !Array.isArray(c.ob.inv.found?.email_send);
+  const rescan = stale || (!!c.ob.inv && !!c.ob.ans?.rescan_at && !(String(c.ob.inv.scanned_at || '') >= String(c.ob.ans.rescan_at)));
+  if ((!c.ob.inv || rescan) && !mock)
     return step(
       'scan',
       "floorboss hasn't looked at what this Claude setup already has (skills, agents, connected tools). The scan decides which questions are worth asking.",
@@ -193,6 +216,9 @@ export function setupSteps(x) {
       run: node('event-context', 'onboarding-defaults'),
       show: ['saved']
     });
+  // The guided intake (intake.mjs): what floorboss can learn from, and who to reach at this show, one step per pick.
+  const intake = intakeSteps(c, { mock });
+  if (intake) return intake;
   // Onboarding, first phase: what's needed to show who on the list fits. One question at a time.
   const ask1 = !mock && onboardingAsk(c, 'first');
   if (ask1) return ask1;
@@ -201,8 +227,8 @@ export function setupSteps(x) {
     return step('event', 'Onboarding is done but no event is set: create it.', {
       ask: {
         id: 'event',
-        question: handSend() ? withWhy('event', 'Which event is this for? A name or a link.') : 'Which event is this for? A name or a link.',
-        ...(handSend() ? { how_to_ask: HAND_SEND_ASKS.event.how } : {}),
+        question: withWhy('event', 'Which event is this for? A name or a link.'),
+        how_to_ask: HAND_SEND_ASKS.event.how,
         answer_format: '{"name","city","start":"YYYY-MM-DD","end":"YYYY-MM-DD","zone":"Area/City"}'
       }
     });

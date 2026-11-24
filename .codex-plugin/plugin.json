@@ -1,6 +1,6 @@
 {
   "name": "floorboss",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "description": "Book meetings at an event: sort the attendee list, research who to meet, draft short messages and follow-ups, and open each approved email in your own mail app for you to send. Auto-send, if you turn it on for an event, uses Gmail: either your laptop sends the first emails and saves the follow-ups as labelled Gmail drafts that a daily ChatGPT scheduled task sends when due, or your own ChatGPT cloud task sends them all.",
   "keywords": ["conference", "events", "meetings", "outreach"],
   "skills": "./.agents/skills",

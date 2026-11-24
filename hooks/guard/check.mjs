@@ -5,6 +5,11 @@
 import { isBrowserServer, isBrowserTool, isScriptTool, isBrowserReadTool, URL_CAP, sameServer } from '../../lib/security.mjs';
 import { bareToolName, screenTool, checkRecipe, TASKS } from '../../skills/connectors/scripts/tasks.mjs';
 import { nowMs as clockNow } from '../../lib/clock.mjs';
+import { join as joinPath } from 'node:path';
+import { existsSync } from 'node:fs';
+import { home as fbHome } from '../../lib/paths.mjs';
+import { eventRecord } from '../../lib/sendcheck.mjs';
+import { contactable } from '../../lib/ledger.mjs';
 import { leaves, recent, fold } from './shared.mjs';
 import { lockNote } from './run.mjs';
 import { isBrowser, argRefusal, runReads, browserServerKnown, givenServer, readsOnly, foundServer, templateFits } from './connectors.mjs';
@@ -192,6 +197,12 @@ export function check(
         );
       if (!item)
         return 'this task isn\'t one floorboss listed in the last 30 minutes (title, body, contact and due date must match an item in task-list.json). Run "outreach task-list" again and use its text as written.';
+      // A do-not-contact or opt-out hold seen since the task was listed, and not lifted by the user (spec 0.1.7 F2):
+      // refused, never asked. Only this one rule; every other result stays as it was.
+      {
+        const why = holdOneRefusal(item._event, item.id, item.kind);
+        if (why) return why;
+      }
       // A task is a write in the user's CRM: they see what goes in before it does (the list is a file a
       // session could write, like the send list).
       tasks.push({
@@ -307,3 +318,29 @@ export function check(
   }
   return null;
 }
+
+// The task's person has an unlifted hold-1 line (a do-not-contact or opt-out hold): the reason, else null. It fails
+// closed (spec 0.1.7 N5): a task with no event or no person, or an event whose record can't be read, is refused.
+// Only a task to send them something is held: a task to mark them do-not-contact, or to cancel a send, goes on.
+function holdOneRefusal(slug, id, kind, homeDir = fbHome()) {
+  if (!slug || !/^[a-z0-9][a-z0-9-]*$/i.test(String(slug))) return 'this task names no event floorboss knows, so it can\'t check who it is for. No task was created.';
+  if (!id || !/^c\d+$/.test(String(id))) return 'this task names nobody on the list, so floorboss can\'t check it is allowed. No task was created.';
+  const evDir = joinPath(homeDir, 'events', slug);
+  if (!existsSync(joinPath(evDir, 'ledger.jsonl'))) return "this event has no record yet, so floorboss can't check who this task is for. No task was created.";
+  let folded;
+  try {
+    folded = eventRecord(evDir).folded;
+  } catch {
+    return "floorboss can't read that event's record, so it can't check this task. No task was created.";
+  }
+  if (kind !== 'send') return null;
+  // A damaged line that may name them, or the other events' holds unread, refuses as contactable does.
+  // The person's own lines at the user's other events too (contactable reads them, never the index's word).
+  const why = contactable(folded, id);
+  if (folded.carry_unreadable || folded.damaged_anyone || folded.people?.[id]?.damaged || Object.keys(folded.people?.[id]?.never_holds || {}).length || /at another of your events|can't check/.test(why || ''))
+    return `this task is for someone floorboss can't write to now (${why}). No task was created.`;
+  return null;
+}
+
+// For floorboss's own tests: the same check, given the home folder.
+export const holdOneRefusalForTest = (homeDir, slug, id, kind) => holdOneRefusal(slug, id, kind, homeDir);

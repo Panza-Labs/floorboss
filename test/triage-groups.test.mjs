@@ -15,7 +15,7 @@ test('keep N: people you know rank above strangers you said reach on check-these
     attendees: 'Name,Title,Company,Email\nCara Cust,COO,Acme,cara@acme.test\nOli Opp,COO,Globex,oli@globex.test\nSid Sql,COO,Initech,sid@initech.test\n'
       + 'Ann One,Head of things,S1,ann@s1.test\nBen Two,Head of things,S2,ben@s2.test\nCat Three,Head of things,S3,cat@s3.test\nDan Four,Head of things,S4,dan@s4.test\n',
     crm: 'Name,Email,Company,Owner,Status\nCara Cust,cara@acme.test,Acme,Sam Rivera,Customer\nOli Opp,oli@globex.test,Globex,Sam Rivera,Opportunity\nSid Sql,sid@initech.test,Initech,Sam Rivera,SQL\n',
-    settings: { status_map: { Customer: 'customer', Opportunity: 'warm', SQL: 'ignore' } },
+    settings: { status_map: { Customer: 'customer', Opportunity: 'warm', SQL: 'ignore' }, customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' } },
   });
   assert.ok(!cli(H, 'crm-triage', ['load', '--event', H.slug]).ERROR);
   const known = ['Cara Cust', 'Oli Opp', 'Sid Sql'].map((n) => idOf(H, n)), strangers = ['Ann One', 'Ben Two', 'Cat Three', 'Dan Four'].map((n) => idOf(H, n));

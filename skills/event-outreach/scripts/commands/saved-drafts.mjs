@@ -11,7 +11,7 @@ import { touchBefore } from '../../../../lib/route.mjs';
 import { followupDay, isDateKey, stateOf, backAfterAway } from '../../../../lib/spacing.mjs';
 import { handSend } from '../../../../lib/harness.mjs';
 import { planFor } from '../../../../lib/sendcheck.mjs';
-import { hashOf } from './routes.mjs';
+import { hashOf, wentBeforeAt } from './routes.mjs';
 import { skillsOf, isOut } from './context.mjs';
 
 // The working copy Claude writes and edits (attempts, verdict, notes for the outbox); the record is the
@@ -28,13 +28,16 @@ export const draftFile = (paths, id, t) => join(paths.work, 'drafts', `${id}-t${
 //   read: whether the critic read any version of it since then
 // How many times the critic failed this touch since the user last sent it back (revise or a fresh attempt),
 // counted in the ledger: the working copy's critic_rewrites is Claude's to write.
-export function criticFails(c, id, touch) {
+export const criticFails = (c, id, touch) => criticFailCount(c.entries || [], id, touch);
+// The same count from a list of record lines, for what the flow says beside a held draft (flow counts.mjs failCounts):
+// the hold and its words count alike.
+export function criticFailCount(entries, id, touch) {
   // A fail counts once per save: a verdict saved again with no new save in between isn't another fail.
   // A rewrite saved back as the very text that failed is another fail: the critic won't change its mind.
   let n = 0,
     saved = true,
     lastFail = null;
-  for (const e of c.entries || []) {
+  for (const e of entries) {
     if (e.id !== id || (e.touch ?? 1) !== touch) continue;
     if (e.type === 'revise' || e.type === 'fresh_attempt') {
       n = 0;
@@ -234,16 +237,32 @@ export const draftFiles = (c) => {
 // A save that recorded that message as having no text yet (saved before it) was written for no version of it: once it
 // has text, the follow-up is stale too.
 export function staleFor(c, id, t, d) {
-  const b = touchBefore(c.state[id], t),
+  // No earlier message left (wentBefore 0: every step before it skipped, or LinkedIn steps before it that haven't gone):
+  // nothing it could be stale against.
+  const b = t > 1 && wentBeforeAt(c, id, t) === 0 ? 0 : touchBefore(c.state[id], t),
     L = ledgerTouch(c, id, t),
-    now = c.state[id]?.touches?.[b]?.hash;
+    now = b > 0 ? c.state[id]?.touches?.[b]?.hash : null;
+  // It is the first message now, but it was written as a follow-up (to an earlier message's text): it is written again
+  // as a first message (owner answer A1).
+  if (firstNow(c, id, t, L, d) && writtenAsFollowup(L, d)) return true;
+  // No earlier message (every step before it was skipped): nothing it could be stale against.
   if (t > 1 && now && savedBeforeIt(L, b, t)) return true;
   const then = L.before_hashes?.[b] ?? (b === t - 1 ? (L.previous_hash ?? d?.previous_hash) : null);
   return !!(t > 1 && then && now && then !== now);
 }
+// Whether this step is the person's first message now (owner answer A1): every step before it was skipped; or (a route
+// that starts on LinkedIn, owner 0.1.7 section 12b) the LinkedIn steps before it haven't gone and its own planned day has
+// come, so they never went first. Before that day, the LinkedIn message may still go and this stays its follow-up.
+export function firstNow(c, id, t, L = ledgerTouch(c, id, t), d = null) {
+  if (t < 2) return false;
+  if (touchBefore(c.state[id], t) === 0) return true;
+  if (wentBeforeAt(c, id, t) !== 0) return false;
+  const pd = [L?.own?.planned_due, d?.planned_due].find(isDateKey);
+  return !pd || pd <= c.today;
+}
 // Did the ledger's save of this follow-up record message b as unsaved (null), rather than say nothing about it?
 export const savedBeforeIt = (L, b, t) =>
-  L?.before_hashes && typeof L.before_hashes === 'object' ? Object.prototype.hasOwnProperty.call(L.before_hashes, b) && L.before_hashes[b] == null : b === t - 1 && L?.previous_hash === null;
+  b < 1 ? false : L?.before_hashes && typeof L.before_hashes === 'object' ? Object.prototype.hasOwnProperty.call(L.before_hashes, b) && L.before_hashes[b] == null : b === t - 1 && L?.previous_hash === null;
 // The subject to reply under: the last email of this sequence before this message.
 export function lastEmailSubject(c, id, touch) {
   for (let t = touch - 1; t >= 1; t--) {
@@ -276,7 +295,16 @@ export function followupDayOf(c, id, t, d = savedDraft(c, id, t), prevSent = und
   // An event whose dates or zone can't be read has no day for anything (the guard's answer, said with its reason).
   if (stateOf(c).state === 'unreadable') return { day: null, waits: false, planned: null, why: 'unreadable' };
   const st = c.state[id] || {};
-  const b = touchBefore(st, t);
+  // A LinkedIn step before it that hasn't gone is passed over: its day counts from the message that went.
+  const b = wentBeforeAt(c, id, t);
+  // Every step before it was skipped: it goes as a first message would, today (the guard's rule, lib/sendcheck.mjs).
+  // Every step before it was skipped: it is the first message, on its own planned day (owner answer A1); with no plan,
+  // today. None once the event is over.
+  if (b === 0 && t > 1 && prevSent === undefined) {
+    if (stateOf(c).state === 'over') return { day: null, waits: false, planned: null, why: 'over' };
+    const pd = /^\d{4}-\d{2}-\d{2}$/.test(String(d?.planned_due || '')) && d.planned_due <= c.event.end_date ? d.planned_due : null;
+    return { day: pd && pd > c.today ? pd : c.today, waits: false, planned: pd };
+  }
   const p = b > 1 ? savedDraft(c, id, b) : null;
   const r = followupDay(c.settings, c.event, {
     prevSent: prevSent !== undefined ? prevSent : st.sent?.[b] || null,
@@ -313,3 +341,10 @@ export const latestSend = (st) =>
     .pop() || null;
 // Whether a step after `t` was recorded as sent.
 export const laterSent = (st, t) => Object.keys(st?.sent || {}).some((k) => Number(k) > t);
+
+// Was this draft written as a follow-up, against the text of an earlier message (its save names one)?
+export function writtenAsFollowup(L, d) {
+  const bh = L?.before_hashes ?? d?.before_hashes;
+  if (bh && typeof bh === 'object' && Object.values(bh).some((v) => v != null)) return true;
+  return (L?.previous_hash ?? d?.previous_hash) != null;
+}

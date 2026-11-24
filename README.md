@@ -181,7 +181,7 @@ The simpler way to auto-send, with no data repo. You approve twice in Codex as b
   `floorboss/held-check` so it is never sent, and tells you to delete it.
 
 Then one scheduled ChatGPT task sends the drafts on their days, once a day at a fixed time you pick (9:00 by default).
-`autosend daily-task --zone <your time zone>` gives you a chatgpt.com link with the setup already typed in, and a file
+`autosend daily-task` (its time is in the show's time zone) gives you a chatgpt.com link with the setup already typed in, and a file
 with the same text in case the link comes up empty. Use a chatgpt.com chat in the browser: a Codex desktop chat can
 only make a local task, which needs your laptop on. Before each draft the task checks for a reply from that address
 and for a bounce naming it; either one holds the draft (`floorboss/held-replied`, `floorboss/held-bounced`). A
@@ -222,7 +222,8 @@ that runs in OpenAI's cloud on your own account, with your computer off. It work
 Workspace, through OpenAI's Gmail connector. Nothing runs on any server of ours.
 
 You approve twice in Codex: the messages, as usual, then floorboss reads back each person, each message and the day it
-is planned for, and you type "auto-send these sequences". That approval is for that exact text to that exact address.
+is planned for, and you pick how they go: 1, approve and send automatically; 2, put them all in your Gmail drafts; 3,
+send them yourself; or 4, not yet. Pick 1 is for that exact text to that exact address.
 Change a message and it waits for you again.
 
 Each run first asks Gmail which account is connected; if it isn't the address you gave when you turned auto-send on
@@ -268,7 +269,8 @@ live account so far.
    that allows `github.com` and `codeload.github.com`.
 5. In Codex on the laptop, for the event: say yes when floorboss asks whether it should send on its own from the
    cloud (before the drafts, so every message of each sequence is written and approved up front), approve the
-   messages as usual, then floorboss reads back each person, message and day; type **auto-send these sequences**.
+   messages as usual, then floorboss reads back each person, message and day; reply **1** (approve and send
+   automatically).
    floorboss then pushes the data folder.
 6. In ChatGPT on the web: Scheduled, new standalone task, Work in Cloud. Paste the prompt `autosend setup` prints
    (it is `codex/autosend-task.md` with your repo and floorboss's pinned commit filled in), schedule
@@ -492,9 +494,9 @@ question is how much setup you want. You can change it any time by saying "more 
 
 | Setup | Setup questions | What you get |
 |---|---|---|
-| **Quick** | about 9 | Your list, who you want to meet and what you offer, your sign-off and free time. It assumes you work alone, with no CRM and no writing samples (it says so when you pick it). Nothing connected is read and nothing is sent; if a CRM is connected, it says plainly that it won't be checked. It asks before researching the shortlisted companies on the web. |
-| **Standard** | about 19 | Also checks the list against your CRM, mailbox and calendar (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, how long a lost deal keeps someone out, whether emails to people you already know end with the opt-out line, and sets your tone from samples and from emails of yours that got replies, if you have them. You send the messages. |
-| **Full** | about 24 | Everything in standard, plus floorboss sends what you approve, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), logs messages in your CRM, and asks how many days to leave between follow-ups. |
+| **Quick** | about 13 | Your list, who you want to meet and what you offer, your sign-off and free time. It assumes you work alone, with no CRM and no writing samples (it says so when you pick it). Nothing connected is read; whether floorboss sends what you approve is asked, as at every level; if a CRM is connected, it says plainly that it won't be checked. Web research on the shortlisted companies and people starts on its own, with a heads-up; say "skip" and it stops. |
+| **Standard** | about 23 | Also checks the list against your CRM, mailbox and calendar (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, how long a lost deal keeps someone out, whether emails to people you already know end with the opt-out line, and sets your tone from samples and from emails of yours that got replies, if you have them. |
+| **Full** | about 25 | Everything in standard, plus the order of channels, reads replies to stop follow-ups (LinkedIn and an event app only with your yes for each), logs messages in your CRM, and asks how many days to leave between follow-ups. |
 
 The counts are the setup questions after the level and the event, from walking the question tree for a
 seller who works alone and has a CRM, mailbox and calendar connected, and who has written nothing about themselves yet (standard and full ask for a line about you and what you know that buyers may not); a team, a CRM export, an event outside the English-speaking world, a job search or a list that's

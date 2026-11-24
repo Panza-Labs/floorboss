@@ -23,9 +23,10 @@ export function holdHistory(entries, id, name = id) {
     const h = entries[i];
     const after = entries.slice(i + 1);
     const by =
+      after.find((e) => e.type === 'hold_lifted' && e.id === id) ||
       after.find((e) => e.type === 'decide' && e.id === id && e.who === 'user' && ['reach', 'warm'].includes(e.group)) ||
       after.find((e) => e.type === 'input_added');
-    const what = by ? (by.type === 'decide' ? `your decide ${by.group}` : `input_added (a new ${by.kind} file)`) : 'nothing in the record';
+    const what = by ? (by.type === 'hold_lifted' ? 'your yes to take them off the hold' : by.type === 'decide' ? `your decide ${by.group}` : `input_added (a new ${by.kind} file)`) : 'nothing in the record';
     return `${who} matched "${scrub(h.says, 80)}" at ${h.at}, cleared by ${what}${by ? ` at ${by.at}` : ''}.`;
   });
 }
@@ -91,6 +92,8 @@ export const blockedSaid = { text: '' };
 export function ask(reason) {
   askReasons.push(reason);
 }
+// How many reasons wait for the prompt (the one-use record isn't written for a call an unattended run refuses).
+export const pendingAsks = () => askReasons.length;
 export function allow() {
   // In an unattended run (a token in the environment) nobody is there to read a prompt: a call that would ask is
   // refused, with what it would have asked, and the item waits for the user.

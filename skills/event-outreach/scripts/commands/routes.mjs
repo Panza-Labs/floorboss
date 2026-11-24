@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Where a message goes: the address, channel and step of each touch, and what that changes in the message.
 import { whereTo } from '../tracking.mjs';
-import { personRoute, stepLabel, sentKind, touchBefore, plannedStep } from '../../../../lib/route.mjs';
+import { personRoute, stepLabel, sentKind, touchBefore, plannedStep, wentBefore, linkedInPassed } from '../../../../lib/route.mjs';
 import { approvalHash, recipientOf } from '../../../../lib/sendcheck.mjs';
 
 // The fingerprint of a draft as it would go: channel, recipient, subject and body. The critic's verdict, the
@@ -13,12 +13,35 @@ export const hashOf = (c, d) => approvalHash(d, toOf(c, d));
 const whereOf = (c, id) => whereTo(c.byId[id], c.event, c.triage.channels?.[id]);
 // This person's route (lib/route.mjs), or null when one channel carries their whole sequence.
 export const routeOf = (c, id) => personRoute(c.byId[id], c.event, c.settings, c.triage.channels?.[id]);
+// The message a step waits for and counts its day from, passing over a LinkedIn step that hasn't gone (lib/route.mjs
+// wentBefore: a by-hand LinkedIn step never pauses the sequence), and whether a LinkedIn step was dropped because a later
+// step went first. The guard reads them the same way (lib/sendcheck.mjs).
+export const wentBeforeAt = (c, id, touch) => wentBefore(c.state[id], touch, (t) => routeOf(c, id)?.[t - 1] || null);
+export const passedAt = (c, id, touch) => linkedInPassed(c.state[id], touch, (t) => routeOf(c, id)?.[t - 1] || null);
 // The routing of one message: its route step, else the user's routing for the person.
 export const pickAt = (c, id, touch) => {
   const step = routeOf(c, id)?.[touch - 1];
   return step === 'app' ? 'app' : step ? null : c.triage.channels?.[id];
 };
 export const whereAt = (c, id, touch) => whereTo(c.byId[id], c.event, pickAt(c, id, touch));
+// The event app said this person can't be written to there: they left the app (not_found) or turned their messages off
+// (messages_off). The latest answer from that app about them counts, for every note of theirs to that app not yet sent,
+// until a later answer says otherwise. channel: the note's ('paste' for an app note; an email is never held by this).
+// Returns that answer ({result, page_says}), or null.
+export const appGone = (c, id, t, channel) => {
+  if (channel !== 'paste' || c.state[id]?.sent?.[t]) return null;
+  const where = whereAt(c, id, t);
+  if (where === 'LinkedIn') return null;
+  // In ledger order: the app's answers about them in that app, and sends there (a send the user confirmed writes no
+  // app answer, and shows they can be written to).
+  let last = null;
+  for (const e of c.entries || []) {
+    if (e.id !== id || e.touch == null || whereAt(c, id, Number(e.touch)) !== where) continue;
+    if (e.type === 'app_result') last = { result: e.result, page_says: e.page_says || null, at: e.at };
+    else if (e.type === 'sent' && (e.channel === where || e.source === 'app')) last = { result: 'sent' };
+  }
+  return last && ['not_found', 'messages_off'].includes(last.result) ? last : null;
+};
 // Which inbox this sent touch can be answered in (lib/route.mjs sentKind), with this person's route step to go on.
 export const kindAt = (c, id, t, x) => sentKind(x?.sent, { step: plannedStep(x, routeOf(c, id)?.[Number(t) - 1] || null), appName: c.event.app_name });
 // Approved to go somewhere else than where the route now sends it: back in todo, to be approved again for this place.
@@ -45,14 +68,16 @@ export function messageFields(c, id, touch, channel, followup) {
             optout_in_note: c.settings.app_note_optout !== false
           }
         : undefined,
-    char_limit: channel === 'paste' ? (inviteNote ? linkedinNoteCap(c) : c.settings.paste_limit) : undefined
+    // Every LinkedIn message is short enough to go as a connection note, follow-ups too.
+    char_limit: channel === 'paste' ? (where === 'LinkedIn' ? linkedinNoteCap(c) : c.settings.paste_limit) : undefined
   };
 }
 // A message on a different channel from the one before it: it isn't the same thread, and they may not have seen that one.
 export function channelChangeNote(c, id, touch) {
   const steps = routeOf(c, id);
   const before = touchBefore(c.state[id], touch);
-  if (!steps || touch < 2 || steps[touch - 1] === steps[before - 1]) return null;
+  // No earlier message (every step before it was skipped): nothing went before it to note.
+  if (!steps || touch < 2 || before < 1 || steps[touch - 1] === steps[before - 1]) return null;
   return `This goes on ${stepLabel(steps[touch - 1], c.event)}; the message before it went on ${stepLabel(steps[before - 1], c.event)}, and they may not have seen that one. It has to make sense alone: never quote it, mention it or say which channel it went on.`;
 }
 // The latest message before this one with a thread of the given kind (a sent message's or a staged draft's).
@@ -65,7 +90,7 @@ export const linkedinNoteCap = (c) => Math.min(c.settings.paste_limit, Number(c.
 
 // A fresh attempt for drafts held after failing the critic twice: the user asks for it by ID.
 // Where a message goes when floorboss sends it itself: email through the email.send recipe, a chat app
-// through chat.send, the event app or LinkedIn in the user's browser. Null when floorboss doesn't send it.
+// through chat.send, the event app in the user's browser. Null when floorboss doesn't send it, as for every LinkedIn step.
 export function sendRoute(c, id, channel, touch = 0) {
   const ch = c.settings.sending?.channels || [];
   const ct = c.byId[id];
@@ -76,10 +101,8 @@ export function sendRoute(c, id, channel, touch = 0) {
   const where = whereAt(c, id, touch);
   // A route step decides the channel: a phone number and chat sending don't turn an app or LinkedIn step into a chat.
   const routeStep = !!routeOf(c, id)?.[touch - 1];
-  if (where === 'LinkedIn')
-    return ch.includes('linkedin') && c.settings.sending?.linkedin_ack && (routeStep || !(ch.includes('chat') && ct.phone))
-      ? { via: 'browser', to: recipientOf(ct, 'paste', c.settings, { routeStep }), where }
-      : null;
+  // LinkedIn is never sent by floorboss (0.1.7): the user sends every LinkedIn step by hand.
+  if (where === 'LinkedIn') return null;
   if (!routeStep && ch.includes('chat') && ct.phone && c.config?.connectors?.['chat.send'] && (c.triage.channels?.[id] === 'chat' || channel !== 'email')) {
     const to = recipientOf(ct, 'paste', c.settings);
     // A chat number needs its country code; a local number ("0160 …") can't be guessed into one.

@@ -7,15 +7,15 @@
 import { companySizes } from './sizes.mjs';
 import { existsSync, readFileSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { allowedPath, notSensitive } from '../../../lib/paths.mjs';
+import { allowedPath, notSensitive, SLUG_RE } from '../../../lib/paths.mjs';
 import { readCsv, toCsv, decode } from '../../../lib/csv.mjs';
 import { readJson, writeJson, writeText } from '../../../lib/jsonio.mjs';
 import { loadEvent, contextFor, nowFrom } from '../../../lib/event.mjs';
 import { saveConfig } from '../../../lib/config.mjs';
 import { todayKeyIn, daysBetween } from '../../../lib/tz.mjs';
-import { readLedger, fold, append } from '../../../lib/ledger.mjs';
+import { readLedger, readOwnLedger, fold, append, isHoldOne, holdIndexOf, recipientCarried } from '../../../lib/ledger.mjs';
 import { lentBy } from '../../../lib/lent.mjs';
-import { companyKey, companyRelated, normPersonName, sameName, noteText, clean } from '../../../lib/normalize.mjs';
+import { companyKey, companyRelated, normPersonName, sameName, noteText, clean, emailBase } from '../../../lib/normalize.mjs';
 import {
   propose,
   applyMapping,
@@ -33,7 +33,7 @@ import {
 } from './sources.mjs';
 import { mergeRows, assignIds, mergeCrmRows } from './merge.mjs';
 import { gatherEvidence, indexCrm, readAccounts, accountsFromCrm, earlierEvents } from './evidence.mjs';
-import { resolve, sameHolder, ownerIsUserFor } from './resolve.mjs';
+import { resolve, sameHolder, ownerIsUserFor, holdBase } from './resolve.mjs';
 import { shortlist, mustMeetReport, mustMeetHits, reachable } from './shortlist.mjs';
 import { parseDncReport } from './dnc.mjs';
 import { readKnown } from './known.mjs';
@@ -110,7 +110,7 @@ export function mappingFor(c, kind, table) {
     }
     return have;
   }
-  const p = propose(table.headers, table.records, kind);
+  const p = propose(table.headers, table.records, kind, { appName: c.event?.app_name || null, appUrl: c.settings?.app_url || null, mock: c.event?.mock === true });
   // A status map saved in settings (older events, the mock) decides meanings the proposal only guessed.
   if (kind === 'crm' && c.settings.status_map)
     for (const [st, mean] of Object.entries(c.settings.status_map)) if (st in p.values.status) p.values.status[st] = mean === 'ask' ? null : mean;
@@ -227,7 +227,7 @@ export function readContacts(c) {
   const gone = Object.entries(c.state.people)
     .filter(([id, p]) => !p.merged_into && !contacts.some((x) => x.id === id))
     .map(([id, p]) => ({ id, name: p.name }));
-  return { table, mapping: m, contacts, visit: merged.visit, skipped: merged.skipped, filled: ov.filled, gone };
+  return { table, mapping: m, contacts, visit: merged.visit, skipped: merged.skipped, filled: ov.filled, gone, shared_links: merged.shared_links };
 }
 
 export function readCrm(c) {
@@ -403,12 +403,65 @@ export function readInputs(c, contacts) {
 // new address, so it doesn't). Before this, a person on the do-not-contact list was held only while the current
 // file named them: importing the list again without them let them through. Now the ledger's hold_seen line
 // holds them until the user's own decide reach or warm, made after seeing it, releases them (resolve.mjs).
-const STICKY = (h) => (h.rung === 'do_not_contact' && /^on your do-not-contact list/.test(h.says)) || (h.rung === 'opted_out' && !/bounced/.test(h.says));
+const STICKY = (h) => isHoldOne(h);
 export function pastHolds(entries, id) {
   const seen = new Map();
   for (const e of entries || [])
-    if (e.type === 'hold_seen' && e.id === id && STICKY(e) && !seen.has(e.says)) seen.set(e.says, { rung: e.rung, says: e.says, at: e.at });
+    if (e.type === 'hold_seen' && !e.carried && e.id === id && STICKY(e) && !seen.has(e.says)) seen.set(e.says, { rung: e.rung, says: e.says, at: e.at });
   return [...seen.values()];
+}
+
+// The holds the user lifted in their own words (lift-hold), by person: the hold's words without floorboss's suffixes.
+export function liftedHolds(entries, id) {
+  return (entries || []).filter((e) => e.type === 'hold_lifted' && e.id === id).map((e) => holdBase(e.says));
+}
+
+// Hold 1 from the user's other events (spec 0.1.7 §7): a do-not-contact entry or an opt-out seen at one event holds the
+// same person at every other, which may have no CRM of its own. Matched as inside one event: the address as mail
+// delivers it (plus-tags, Gmail dots, googlemail.com), or the same name at the same company (another address, or an
+// entry that named no address). A hold the user lifted at that event (hold_lifted) isn't carried. Only hold 1 is:
+// a customer, a coworker's record, an open or lost deal is read from the CRM each event is given (spec 0.1.7 §7b).
+// The mock and the real events never share them.
+// R1b: the index finds holds fast, but its silence is never taken as clear. With nothing found there, the other
+// events' own hold lines are read for this person (lib/ledger.mjs recipientCarried, as the last check does) before
+// anyone is drafted, given a card or listed. One that can't be read holds them.
+function confirmedHolds(c, ct, found) {
+  if (found.length || c.event.mock) return found;
+  try {
+    const h = recipientCarried(join(c.paths.dir, 'ledger.jsonl'), { email: ct.email, emails: ct.emails || [], name: ct.name, company: ct.company }, liftedHolds(c.entries, ct.id));
+    return h ? [{ rung: h.rung, says: h.says, event: h.event, base: h.says }] : [];
+  } catch (e) {
+    // Its own rung (S1): held as hold 1 is everywhere, but no lift and no decision ends it; the other file reading again does.
+    // A record that can't be read at all is named, as the last check names it (lib/sendcheck.mjs busyWhy).
+    const which = SLUG_RE.test(String(e?.slug || '')) ? `the record of your event "${e.slug}"` : "another of your events' records";
+    const says = `floorboss can't read ${which} right now, so it can't check whether ${ct.name || 'this person'} is on a do-not-contact list there. Nothing goes to them until it can.`;
+    return [{ rung: 'unchecked', says, base: says }];
+  }
+}
+
+export function otherEventHolds(c) {
+  const out = [];
+  const root = join(c.paths.dir, '..');
+  if (c.event.mock || !existsSync(root)) return () => [];
+  // From the index of every event's unlifted hold-1 lines (lib/ledger.mjs), not by reading each ledger again.
+  const idx = holdIndexOf(root);
+  for (const [slug, ev] of Object.entries(idx.events || {})) {
+    if (slug === c.slug || ev.mock) continue;
+    for (const h of ev.holds || []) out.push({ id: h.id, slug, base: h.says, rung: h.rung, says: h.says, event: ev.name, mails: h.mails || [], name: h.name, company: h.company });
+  }
+  const byMail = new Map(),
+    byName = new Map();
+  for (const h of out) {
+    for (const m of h.mails) (byMail.get(m) || byMail.set(m, []).get(m)).push(h);
+    if (h.name && h.company) (byName.get(`${h.name}|${h.company}`) || byName.set(`${h.name}|${h.company}`, []).get(`${h.name}|${h.company}`)).push(h);
+  }
+  return (ct) => {
+    const mails = [ct.email, ...(ct.emails || [])].map(emailBase).filter(Boolean);
+    const name = ct.name ? normPersonName(ct.name) : null;
+    const company = ct.company_key || (ct.company ? companyKey(ct.company) : null);
+    const seen = new Set();
+    return [...mails.flatMap((m) => byMail.get(m) || []), ...(name && company ? byName.get(`${name}|${company}`) || [] : [])].filter((h) => !seen.has(h.base) && seen.add(h.base));
+  };
 }
 
 // A CRM record told apart by who it is: the same name and address in the same row.
@@ -498,6 +551,7 @@ const rowHolds = (r, ownerIsUser) =>
 
 export function resolveAll(c, contacts, inputs) {
   const resolved = {};
+  const otherHolds = otherEventHolds(c);
   const carried = earlierMatches(c);
   for (const ct of contacts) {
     const p = c.state.people[ct.id] || {};
@@ -529,6 +583,8 @@ export function resolveAll(c, contacts, inputs) {
       crmPresent: !!inputs.crm,
       bounced: !!p.bounced,
       pastHolds: pastHolds(c.entries, ct.id),
+      otherHolds: confirmedHolds(c, ct, otherHolds(ct)),
+      lifted: liftedHolds(c.entries, ct.id),
       reachable: (x) => reachable(x, { ...c.settings, no_app: c.event.no_app }, x.channel)
     };
     resolved[ct.id] = resolve(ct, gatherEvidence(ct, inputs), ctx);

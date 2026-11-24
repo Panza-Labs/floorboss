@@ -327,10 +327,11 @@ test('the inputs the page records cover every file a build reads', () => {
   const code = `
     import fs from 'node:fs';
     import { syncBuiltinESMExports } from 'node:module';
+    import { resolve } from 'node:path';
     const seen = new Set(); let on = false;
     for (const fn of ['readFileSync', 'openSync', 'statSync', 'lstatSync', 'existsSync', 'readdirSync', 'accessSync']) {
       const orig = fs[fn];
-      const w = function (p, ...rest) { if (on && typeof p === 'string') seen.add(p); return orig.call(this, p, ...rest); };
+      const w = function (p, ...rest) { if (on && typeof p === 'string') seen.add(p.startsWith('/') ? p : resolve(p)); return orig.call(this, p, ...rest); };
       for (const k of Object.keys(orig)) w[k] = orig[k];
       fs[fn] = w;
     }
@@ -355,6 +356,8 @@ test('the inputs the page records cover every file a build reads', () => {
   // Every folder on the way to a recorded file (the path checks look at each).
   const ancestors = new Set();
   for (const p of watched) for (let d = dirname(p); d.length > 1 && d !== dirname(d); d = dirname(d)) ancestors.add(d);
+  // The top folder too: the read walk (lib/paths.mjs walkTo) starts there.
+  ancestors.add('/');
   const events = join(home, 'events');
   const outsideHome = (p) => !real(p).startsWith(real(home));
   const unwatched = seen.filter((p) => {

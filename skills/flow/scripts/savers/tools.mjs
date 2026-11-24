@@ -3,10 +3,13 @@
 // Savers for the questions about tools and data: coworkers' contacts, the inbox, the CRM (reading, logging,
 // new contacts), do-not-contact lists, connections, the mailbox, the calendar, where the attendee list is,
 // and looking up contact details.
+import { personName } from '../../../event-context/scripts/scan.mjs';
+import { connected } from '../../../../lib/harness.mjs';
 import { withLock } from '../../../../lib/lock.mjs';
 import { lookupCount } from '../../../../lib/normalize.mjs';
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { configPath as configPathOf } from '../../../../lib/paths.mjs';
 import { allowedPath, expandHome, readChecked } from '../../../../lib/paths.mjs';
 import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { context, nextStep } from '../steps.mjs';
@@ -19,11 +22,13 @@ import { ctxOf as triageCtx, viewOf } from '../../../crm-triage/scripts/view.mjs
 import { ownerIsUserFor, sameHolder } from '../../../crm-triage/scripts/resolve.mjs';
 import { shown, plainText, isAgreement, holdOwnerReading, dropOwnerReading, ownerReadingFor, effectsHash, ownerQuestionFor } from '../../../../lib/reading.mjs';
 import { HOLDING_GROUPS } from '../../../event-outreach/scripts/commands/context.mjs';
-import { parseRoute } from '../../../../lib/route.mjs';
+import { parseRoute, routePlan, personRoute, plannedStep, stepLabel } from '../../../../lib/route.mjs';
+import { readReach, reachSaid, reachNext, roomLine } from '../../../../lib/reach.mjs';
 import { answersFor } from '../../../../lib/scope.mjs';
 import { parseGap, gapWords } from '../../../../lib/spacing.mjs';
-import { TOUCHES_MIN, TOUCHES_MAX, suggestedTouchesFor } from '../../../../lib/config.mjs';
+import { TOUCHES_MIN, TOUCHES_MAX, suggestedTouchesFor, effectiveSettings } from '../../../../lib/config.mjs';
 import { approvedDays, gapNote } from './gap.mjs';
+import { savePeople } from './intake.mjs';
 import { crmOwners, config, answers, ledger, windowYes, cli, isNo, fileAnswer, writeWorkText, namedFile, pathOf, writeWork, listSourceOnly } from './helpers.mjs';
 
 // What saving `to` as the user's CRM owner would change at each of the user's events (not the mock): who changes group,
@@ -300,10 +305,43 @@ export const TOOLS_SAVERS = {
     if (!mode) throw new Error("Say one of: in the browser, tasks, CSV, or don't log them.");
     return config(c, { crm_log: mode, ...(typeof v === 'object' && v.crm_name ? { crm_name: String(v.crm_name).slice(0, 40) } : {}) });
   },
+  // Besides email, where to reach people: the event app, LinkedIn, both, or email only (an offered answer, its number,
+  // or the user's words). Only the choice is saved: the user's route and count stay as they set them, and the choice
+  // is applied each time the route is read (lib/route.mjs routePlan). Approved steps on a channel no longer chosen are
+  // taken back, in every event (reach-changed); a step that already went is never touched.
+  reach_channels: (v, c) => {
+    const t = String(Array.isArray(v) ? v.join(',') : typeof v === 'object' && v ? v.reach ?? v.answer ?? JSON.stringify(v) : v);
+    const app = String(c.event?.event?.app_name || c.event?.app_name || '');
+    const read = readReach(t, app);
+    if (!read) throw new Error('Ask again: besides email, where should floorboss reach people? The event app, LinkedIn, both, or email only.');
+    const before = Array.isArray(c.cfg?.reach) ? c.cfg.reach : null;
+    const reach = read.reach;
+    const saved = config(c, { reach });
+    answers(c, { reach_asked: true });
+    const ev = c.event?.event || null;
+    const lines = [];
+    if (read.readBack) lines.push(`So: ${reachSaid(reach)}. If that's not right, say so.`);
+    const fit = routePlan(effectiveSettings({ ...c.cfg, reach }, ev));
+    // What the route really used has between its emails (the user's own order may have no step on a chosen channel).
+    lines.push(reachNext(['app', 'linkedin'].filter((x) => fit.route.includes(x)), ev));
+    // The user's own sequence has no step on a channel they chose: said, with how to add one.
+    if (Array.isArray(c.cfg?.route))
+      for (const x of reach.filter((y) => !fit.route.includes(y)))
+        lines.push(x === 'app' ? `Your own sequence has no app step, so the event app isn't used; say "change my sequence" to add one.` : `Your own sequence has no LinkedIn step, so LinkedIn isn't used; say "change my sequence" to add one.`);
+    if (fit.raised) lines.push(roomLine(reach, ev, fit.raised));
+    if (!before || before.length !== reach.length || before.some((x) => !reach.includes(x))) {
+      const changed = takenBack(c, before);
+      if (changed) lines.push(changed);
+    }
+    return { ...saved, say_to_user: lines.join(' ') };
+  },
   message_route: (v, c) => {
     const t = String(Array.isArray(v) ? v.join(',') : v).toLowerCase().replace(/\([^)]*\)/g, '').trim();
     // Marked asked only once it saved: an answer it can't read is asked again.
-    const saved = config(c, { route: parseRoute(t) });
+    const parsed = parseRoute(t);
+    // The count the user gave wins (touches): the route is fitted to it.
+    const n = c.ob?.ans?.touches_asked === true && Number.isInteger(c.cfg?.touches) ? c.cfg.touches : null;
+    const saved = config(c, { route: n ? Array.from({ length: n }, (_, i) => parsed[Math.min(i, parsed.length - 1)]) : parsed });
     answers(c, { message_route_asked: true });
     return saved;
   },
@@ -316,9 +354,26 @@ export const TOOLS_SAVERS = {
     const m = /\b([1-9]\d?)\b/.exec(t);
     if (!m && !/suggest|default|yes|ok|fine|sure/i.test(t)) throw new Error('Ask again: how many emails per person, the first one included? A number from 3 to 7.');
     const n = m ? Math.max(TOUCHES_MIN, Math.min(TOUCHES_MAX, Number(m[1]))) : null;
-    const saved = config(c, { touches: n ?? suggestedTouchesFor(c.event?.event || c.event || null) });
+    const count = n ?? suggestedTouchesFor(c.event?.event || c.event || null);
+    // A route saved before (the full setup's channel order) is fitted to this count: cut, or carried on with its last
+    // step. The user's count wins; the route only says which channel each message goes on.
+    const route = Array.isArray(c.cfg?.route) && c.cfg.route.length ? c.cfg.route : null;
+    // A route that ends with an email keeps its last email when the count cuts it.
+    const fitted = route
+      ? count < route.length && route.at(-1) === 'email'
+        ? [...route.slice(0, count - 1), 'email']
+        : Array.from({ length: count }, (_, i) => route[Math.min(i, route.length - 1)])
+      : null;
+    const saved = config(c, { touches: count, ...(fitted ? { route: fitted } : {}) });
     answers(c, { touches_asked: true });
-    return { ...saved, say_to_user: n && m && Number(m[1]) !== n ? `Each person gets ${n} emails (floorboss takes 3 to 7).` : undefined };
+    const reach = Array.isArray(c.cfg?.reach) ? c.cfg.reach : null;
+    const ev = c.event?.event || null;
+    const fit = reach && !fitted ? routePlan(effectiveSettings({ ...c.cfg, touches: count }, ev)) : null;
+    const said = [
+      n && m && Number(m[1]) !== n ? `Each person gets ${n} ${reach?.length ? 'messages' : 'emails'} (floorboss takes 3 to 7).` : null,
+      fit?.raised ? roomLine(reach, ev, fit.raised, count) : null
+    ].filter(Boolean);
+    return { ...saved, say_to_user: said.length ? said.join(' ') : undefined };
   },
   followup_gap: (v, c) => {
     const gap = parseGap(v);
@@ -480,11 +535,23 @@ export const TOOLS_SAVERS = {
       ...(o.calendar != null ? { calendar_choice: o.calendar ? 'yes' : 'no' } : {})
     });
   },
-  crm_use: (v, c) =>
-    answers(c, {
-      crm_choice: /export/i.test(String(v)) ? 'export' : /none|not for this/i.test(String(v)) ? 'none' : 'connector',
-      ...(typeof v === 'object' && v.crm_server ? { crm_server: v.crm_server } : {})
-    }),
+  // The options are the first two CRMs found, by the name a person knows (onboarding-tree crm_use), then "an export
+  // instead" and "none for this event": a name or its number is saved as the server it came from.
+  crm_use: (v, c) => {
+    const said = String(typeof v === 'object' && v ? v.answer || v.said || v.crm_server || '' : v).trim();
+    if (/export/i.test(said)) return answers(c, { crm_choice: 'export' });
+    if (/none|not for this/i.test(said)) return answers(c, { crm_choice: 'none' });
+    const listed = (c.ob?.inv?.found?.crm || []).slice(0, 2).map((x) => String(x).replace(/^mcp:/, ''));
+    const n = /^\s*(?:option\s*)?#?(\d)\s*$/i.exec(said);
+    const server =
+      (typeof v === 'object' && v?.crm_server && listed.includes(String(v.crm_server)) ? String(v.crm_server) : null) ||
+      (n ? (Number(n[1]) === listed.length + 1 ? 'export' : Number(n[1]) === listed.length + 2 ? 'none' : listed[Number(n[1]) - 1]) : null) ||
+      listed.find((x) => personName(x).toLowerCase() === said.toLowerCase() || x.toLowerCase() === said.toLowerCase()) ||
+      null;
+    if (server === 'export' || server === 'none') return answers(c, { crm_choice: server });
+    if (!server) throw new Error(`"${said}" isn't one of the CRMs found here (${listed.map(personName).join(', ') || 'none'}). Say one of them, "an export instead" or "none for this event". Nothing was saved.`);
+    return answers(c, { crm_choice: 'connector', crm_server: server });
+  },
   // "HubSpot, not connected. I exported it to ~/Downloads/export.csv": a file named in the answer that exists is
   // the export, so it isn't asked for again.
   crm_where: (v, c) => {
@@ -497,6 +564,11 @@ export const TOOLS_SAVERS = {
     };
     const named = namedFile(t, { bare: true });
     if (named && c.slug) return { ...fileAnswer(c, named, 'crm', { ...choice, ...(saysNoOptOut(t) ? { crm_opt_out_none: true } : {}) }), export_saved: named };
+    // The intake's CRM step (steps/intake.mjs), where a connector can be used: a CRM named on its own ("HubSpot", or one
+    // they type) is to be connected, then checked; an export, a spreadsheet or "not connected" is the export, as before.
+    const own = String(typeof v === 'object' && v ? v.answer || v.said || '' : v).trim();
+    if (connected() && (c.ob?.ans?.account_intake || '').includes('crm') && own && !/export|csv|spreadsheet|built|home|not connected|isn'?t connected|nowhere|none|\bno\b/i.test(own))
+      return answers(c, { crm_connect: (label || own).replace(/^./, (x) => x.toUpperCase()).replace(/^Hubspot$/i, 'HubSpot').slice(0, 40), crm_verify_missed: null, ...(label ? { crm_label: choice.crm_label.replace(' (an export)', '') } : {}) });
     return answers(c, choice);
   },
   // A path inside a sentence ("here: ~/Downloads/export.csv") is the file, as for the attendee list.
@@ -719,9 +791,10 @@ export const TOOLS_SAVERS = {
     const p =
       whole && /[\/\\].*\.(csv|tsv|txt|xlsx?)$/i.test(String(whole).trim())
         ? whole
-        : namedFile(String(typeof v === 'object' && v ? v.said || v.path || v.file || '' : v));
-    if (p && /[\/\\].*\.(csv|tsv|txt|xlsx?)$/i.test(String(p).trim())) {
-      const r = cli('crm-triage', ['inputs', '--event', c.slug, '--kind', 'attendees', '--file', String(p).trim()], c);
+        : namedFile(String(typeof v === 'object' && v ? v.said || v.path || v.file || '' : v), { bare: true });
+    // A bare file name ("guests.csv", in the show folder the command runs from) is read from there.
+    if (p && (/[\/\\].*\.(csv|tsv|txt|xlsx?)$/i.test(String(p).trim()) || (/\.(csv|tsv|txt|xlsx?)$/i.test(String(p).trim()) && existsSync(String(p).trim())))) {
+      const r = cli('crm-triage', ['inputs', '--event', c.slug, '--kind', 'attendees', '--file', resolve(String(p).trim())], c);
       return { ...r, ...answers(c, { list_source: 'export' }) };
     }
     // A link (the event's speaker or attendee page) is read from the public page: the link is kept for that step.
@@ -738,6 +811,8 @@ export const TOOLS_SAVERS = {
       if (c.event && host && said.toLowerCase().includes(host)) ledger(c, { type: 'site_allowed', who: 'user', host, said, ...(page ? { url: page } : {}) });
       return answers(c, { list_source: 'app', list_url: url.replace(/[).,]+$/, '') });
     }
+    // A few people typed here instead of a file ("Ana Berg, Acme, ana@acme.test"): saved as the attendee list.
+    if ((typeof v === 'object' && v && Array.isArray(v.people)) || (typeof v === 'string' && /,/.test(v) && /@/.test(v))) return savePeople(v, c);
     return listSourceOnly(v, c);
   },
   browser: (v, c) => answers(c, { browser_choice: /^now/i.test(String(v)) ? 'now' : /later/i.test(String(v)) ? 'later' : 'never' }),
@@ -784,3 +859,19 @@ export const TOOLS_SAVERS = {
     return ledger(c, { type: 'answered', who: 'user', ask: 'enrich_ok', value: `yes:${chosen.join(',')}` });
   },
 };
+
+// The user changed where floorboss reaches people: in each event, approved steps that haven't gone and whose place is
+// now on another channel are taken back (event-outreach reach-changed). One line, or null when nothing changed.
+function takenBack(c, before) {
+  const root = join(dirname(configPathOf()), 'events');
+  if (!existsSync(root)) return null;
+  const lines = [];
+  for (const slug of readdirSync(root)) {
+    if (!existsSync(join(root, slug, 'ledger.jsonl'))) continue;
+    try {
+      const r = cli('event-outreach', ['reach-changed', '--event', slug, '--before', JSON.stringify(before)], c);
+      if (r?.line) lines.push(r.line);
+    } catch {}
+  }
+  return lines.length ? lines.join(' ') : null;
+}

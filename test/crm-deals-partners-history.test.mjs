@@ -69,7 +69,7 @@ test('a live partner label means a relationship; a churned one holds; deal stage
 });
 
 test('triage: live partners are warm partners, a lost deal is held as a lost status is, a logged meeting is known, a stop in the notes holds', () => {
-  const H = setup({ attendees: LIST, crm: PIPEDRIVE, settings: { colleagues: ['Jordan Lee'] } });
+  const H = setup({ attendees: LIST, crm: PIPEDRIVE, settings: { colleagues: ['Jordan Lee'], customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' } } });
   const load = cli(H, 'crm-triage', ['load', '--event', H.slug]);
   assert.ok(!load.ERROR, load.ERROR);
   fitAll(H, load);

@@ -282,6 +282,24 @@ say(!namesLaunchctl.length, 'launchctl is started by scripts/unattended.mjs only
 const workers = code.filter((f) => /worker_threads/.test(noComments(read(f)))).sort();
 const workersOk = workers.join() === 'lib/watchdog.mjs,scripts/scheduled.mjs';
 say(workersOk, "a worker thread is used only for the scheduled launcher's time limit", workersOk ? '' : workers.join('\n'));
+// Every file call is synchronous: a read (lib/paths.mjs readChecked) stands in other folders while it runs, and an
+// asynchronous call in flight would resolve a relative name in one of them. No fs/promises, no whole-module fs import
+// (fs.readFile(…) through it), and from node:fs only the Sync calls and its constants.
+const FS_FROM = /from\s*['"](?:node:)?fs(?:\/promises)?['"]|import\s*\(\s*['"](?:node:)?fs(?:\/promises)?['"]\s*\)/;
+const asyncFs = code
+  .filter((f) => /^(lib|skills|scripts|hooks)\//.test(f))
+  .flatMap((f) => {
+    const t = noComments(read(f));
+    if (!FS_FROM.test(t)) return [];
+    const why = [];
+    if (/['"](?:node:)?fs\/promises['"]|\bpromises\s+as\b|\.promises\b/.test(t)) why.push('fs/promises');
+    if (/import\s*\(\s*['"](?:node:)?fs['"]\s*\)|import\s+(?:\*\s*as\s+)?\w+\s*(?:,\s*\{[^}]*\})?\s*from\s*['"](?:node:)?fs['"]/.test(t)) why.push('the whole fs module');
+    for (const m of t.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/g))
+      for (const name of m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean))
+        if (!/Sync$/.test(name) && name !== 'constants') why.push(name);
+    return why.length ? [`${f}: ${[...new Set(why)].join(', ')}`] : [];
+  });
+say(!asyncFs.length, 'every file call is synchronous (no fs/promises or callback fs in lib, skills, scripts and hooks)', asyncFs.join('\n'));
 
 // 4. What runs on its own: the hooks.
 const hooks = JSON.parse(read('hooks/hooks.json'));

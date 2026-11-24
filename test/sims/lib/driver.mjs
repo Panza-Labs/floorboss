@@ -63,11 +63,21 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
     trail.push(s.step);
     if (onStep) onStep(s);
     // Done, or waiting for a later day (follow-ups not due, or only people who replied): the run ends here.
-    if (s.done || s.step === 'waiting') return { trail, slug, last: s };
+    if (s.done || s.step === 'waiting' || s.step === 'second_yes') return { trail, slug, last: s };
     if (s.run_first) { const r = cli(H, skillOf(s.run_first), s.run_first.slice(2)); if (r.ERROR) throw new Error(`${s.step} run_first: ${r.ERROR}`); }
     if (s.ask) {
       let v = s.ask.id === 'event' && persona.event ? persona.event : answerFor(s.ask.id);
       if (typeof v === 'function') v = v(s, H, slug);
+      // The guided intake, for a persona written before it: the picks that ask what the persona answers (a CRM, past
+      // emails, the list), so its run goes as it did; anything else unpicked. Only what the step offers.
+      if (v === undefined && (s.ask.id === 'account_intake' || s.ask.id === 'show_intake')) {
+        const has = (...k) => k.some((x) => persona.asks[x] !== undefined);
+        const want = s.ask.id === 'account_intake' ? [has('crm_where', 'crm_use', 'tools', 'crm_export') && 'crm', has('voice_samples') && 'emails'] : [has('list_source') && 'file'];
+        const offered = new Set((s.ask.choices || []).map((x) => x.value));
+        v = want.filter((x) => x && offered.has(x));
+        if (!v.length) v = 'none';
+      }
+      if (v === undefined && s.ask.id === 'intake_summary') v = 'yes';
       if (v === undefined && persona.fallback) v = persona.fallback(s);
       // An event already on this device: the run is for the first one offered, unless the persona says otherwise.
       if (v === undefined && s.ask.id === 'which_event') v = s.ask.options[0];
@@ -75,6 +85,9 @@ export function drive(H, persona, { maxSteps = 120, onStep = null } = {}) {
       // The heads-up before company research (standard and full setup): go.
       if (v === undefined && s.ask.id === 'company_research') v = 'go';
       if (v === undefined && s.ask.id === 'agenda_news') v = 'go';
+      // Besides email, where to reach people (0.1.7): the persona's own answer (asks.reach_channels) when it has one,
+      // else email only, as a persona written before the question ran.
+      if (v === undefined && s.ask.id === 'reach_channels') v = s.ask.options?.[3] || 'email only';
       if (v === undefined && s.ask.id === 'message_route') v = 'email, email (no other channels)';
       if (v === undefined && s.ask.id === 'touches') v = '3';
       if (v === undefined && s.ask.id === 'sending') v = "no, I'll send them myself";

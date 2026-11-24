@@ -6,8 +6,85 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { touchBefore } from '../../../../lib/route.mjs';
-import { cli, step, node, onToolError, toolDown, sendRecipe, errorFile, summaryOf } from './shared.mjs';
-import { crmContactStep, otherChannelStep, appStep, logStep } from './channels.mjs';
+import { cli, step, node, onToolError, toolDown, sendRecipe, errorFile, summaryOf, handSend } from './shared.mjs';
+import { crmContactStep, otherChannelStep, appStep, logStep, linkedinReplyStep, taskSentStep } from './channels.mjs';
+import { standingPick } from '../../../../lib/autosend/approval.mjs';
+import { approvedPlan, openApprovedRuns, latestApprovedRun, RUN_OPEN_MS } from '../../../../lib/autosend/approved-drafts.mjs';
+import { harness } from '../../../../lib/harness.mjs';
+import { home } from '../../../../lib/paths.mjs';
+
+const many = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+// The messages the user took at the final approval (lib/autosend/pick.mjs): pick 2 (Gmail drafts) or pick 3 (they send
+// them). floorboss never sends either (send-list holds them), so the flow never offers a send of them: it says where
+// they are and who sends them, and for pick 2 has the drafts run put in Gmail Drafts what can go there now.
+// { step } when the drafts run has something to do, else { note } (said with waiting or done), or null.
+function pickedByUser(c, e) {
+  const drafts = [];
+  const self = [];
+  for (const [id, p] of Object.entries(e.state.people || {})) {
+    if (p.replied || p.booked || p.stopped) continue;
+    for (const [t, x] of Object.entries(p.touches || {})) {
+      if (Number(t) < 1 || x.sent || !x.approved || !x.hash) continue;
+      const pick = standingPick(e.entries, id, Number(t), x.hash);
+      const it = { id, touch: Number(t), name: p.name || id, ...(x.staged ? { in_gmail_drafts: true } : {}) };
+      if (pick === 'drafts') drafts.push(it);
+      else if (pick === 'self') self.push(it);
+    }
+  }
+  if (!drafts.length && !self.length) return null;
+  const claude = !handSend();
+  const cmd = (...a) => (claude ? `node "\${CLAUDE_PLUGIN_ROOT}/skills/autosend/scripts/cli.mjs" ${a.join(' ')}` : `autosend ${a.join(' ')}`);
+  const help = claude ? 'skills/flow/SKILL.md' : '.agents/skills/floorboss/SKILL.md';
+  const lines = [];
+  let plan = null;
+  if (drafts.length) {
+    const nowMs = c.now.getTime();
+    try {
+      plan = approvedPlan(e.paths.dir, 'drafts', harness(), nowMs);
+    } catch {
+      plan = null;
+    }
+    const open = openApprovedRuns(home(), nowMs).find((r) => r.slug === e.event.slug && r.kind === 'drafts');
+    const inDrafts = drafts.filter((x) => x.in_gmail_drafts).length;
+    const followLine =
+      'Follow-ups: nothing is sent automatically. Once message 1 to a person has gone (you send it from Gmail Drafts), floorboss puts each of their follow-ups in your Gmail Drafts too, in the same thread, for you to send on its day.';
+    // A drafts run that ended within the hour isn't started again on its own (one that stopped, on a draft the user
+    // declined or a check that failed, says why, and the user decides): the flow never loops on the same drafts.
+    const last = open ? null : latestApprovedRun(home(), e.event.slug, 'drafts');
+    const recent = last && nowMs - Date.parse(last.started_at) <= RUN_OPEN_MS ? last : null;
+    const stopped = recent?.state === 'stopped' ? recent : null;
+    if (open || (plan?.queue?.length && !recent)) {
+      const left = open ? null : plan.queue.length;
+      return {
+        step: step(
+          'gmail_drafts',
+          `You chose Gmail drafts at the final approval: ${open ? 'a drafts run is open' : `${many(left, 'message')} can go into Gmail Drafts now`}. Nothing is sent: each one waits in Gmail Drafts for the user to press Send.`,
+          {
+            done: false,
+            tell_user: `${open ? 'Putting your messages in Gmail Drafts, as you chose' : `Putting ${many(left, 'message')} in your Gmail Drafts, as you chose`}: nothing is sent, you send each one from Drafts yourself. ${followLine}`,
+            how: open
+              ? `Finish the open drafts run: run \`${cmd('drafts', 'next', '--run', open.run)}\` and follow each step it gives (${help}, "After the final approval"). Then run flow next again.`
+              : `Run \`${cmd('drafts', 'next', '--event', e.event.slug, '--run', 'new', '--for', 'drafts')}\` and follow each step it gives, exactly (${help}, "After the final approval"): each message goes into Gmail Drafts, nothing is sent. Then run flow next again.`,
+            help
+          }
+        )
+      };
+    }
+    lines.push(
+      `You chose Gmail drafts for ${many(drafts.length, 'message')}${drafts.length === 1 ? '' : ` (to ${new Set(drafts.map((x) => x.id)).size} ${new Set(drafts.map((x) => x.id)).size === 1 ? 'person' : 'people'})`}: floorboss never sends them.${inDrafts ? ` ${many(inDrafts, 'message')} ${inDrafts === 1 ? 'is' : 'are'} in your Gmail Drafts now: send ${inDrafts === 1 ? 'it' : 'each one'} from Drafts yourself, on its day.` : ''}`,
+      followLine
+    );
+    if (stopped && plan?.queue?.length) lines.push(`The last run that put them in Gmail Drafts stopped: ${String(stopped.why || '').replace(/[.\s]+$/, '')}. ${many(plan.queue.length, 'message')} ${plan.queue.length === 1 ? 'is' : 'are'} not in Gmail Drafts yet: say if floorboss should try again.`);
+    // What keeps a step out of Gmail Drafts, said once message 1 went (before that, every follow-up waits for it).
+    const held = (plan?.skipped || []).filter((x) => e.state.people[x.id]?.touches?.[1]?.sent && !/until you send message 1/.test(x.why));
+    if (held.length) lines.push(`Not put in Gmail Drafts: ${held.map((x) => `${e.state.people[x.id]?.name || x.id} (${x.why})`).join('; ')}.`);
+  }
+  if (self.length)
+    lines.push(
+      `You chose to send ${self.length === 1 ? 'this message' : `these ${self.length} messages`} yourself: floorboss never sends ${self.length === 1 ? 'it' : 'them'}. Every one is on the outbox page with its copy buttons, to send from your own mail app on its day; tick Sent there as you send.`
+    );
+  return { note: { tell_user: lines.join(' '), picked: { ...(drafts.length ? { gmail_drafts: drafts } : {}), ...(self.length ? { you_send: self } : {}) }, ...(plan?.skipped?.length ? { gmail_drafts_waiting: plan.skipped } : {}) } };
+}
 
 // After approval: CRM contacts and tasks, sending and follow-ups on each channel, logging to the CRM, done.
 export function sendSteps(x) {
@@ -18,6 +95,18 @@ export function sendSteps(x) {
   if (!mock && !c.agendaWanted) {
     const add = crmContactStep(c, e, cfg);
     if (add) return add;
+  }
+
+  // A finished CRM task floorboss can't tell was sent: asked once, yes or no.
+  if (!mock && !c.agendaWanted) {
+    const ts = taskSentStep(c, e);
+    if (ts) return ts;
+  }
+
+  // A LinkedIn follow-up due now: the user is asked once whether they replied on LinkedIn, before it is listed as due.
+  if (!mock && !c.agendaWanted) {
+    const li = linkedinReplyStep(c, e);
+    if (li) return li;
   }
 
   // CRM tasks: with a create-task tool connected, every LinkedIn or event-app message the user sends by hand
@@ -49,6 +138,12 @@ export function sendSteps(x) {
     const td = toolDown(e, 'crm.create_task', 'CRM task tool', ['retry', 'later']);
     if (td && td.step === 'tool_down') return td;
   }
+
+  // The messages the user took at the final approval: pick 2's drafts run comes before anything else is sent.
+  const picked = pickedByUser(c, e);
+  if (picked?.step) return picked.step;
+  // Said with the held-drafts note, if there is one, never in place of it.
+  const pickNote = picked?.note ? { ...picked.note, tell_user: [heldMustNote?.tell_user, picked.note.tell_user].filter(Boolean).join(' ') } : {};
 
   // Sending (email, through the MCP tool, with the guard and the prompt).
   if ((e.settings.sending?.channels || []).includes('email')) {
@@ -307,6 +402,7 @@ export function sendSteps(x) {
         done: false,
         next_check: 'Run again on the day the first follow-up is due.',
         ...heldMustNote,
+        ...pickNote,
         ...summaryOf(c, e)
       });
   }
@@ -321,10 +417,28 @@ export function sendSteps(x) {
   }
   // Who couldn't be logged in the CRM (not a contact there): said once in the summary, with what to do.
   const notLogged = e.settings.crm_log === 'browser' ? cli('event-outreach', ['log-list', '--event', e.event.slug], c) : null;
+  return endStep({ heldMustNote, pickNote, summary: summaryOf(c, e), notLogged });
+}
+
+// The end of a run: done, or, with people held for something only the user can settle (a damaged record line, a message
+// to fix), a stop that shows them, never "done" and never another run of flow next on its own. Both keep the CRM-log note.
+export function endStep({ heldMustNote, pickNote, summary, notLogged }) {
+  const crmNote = notLogged?.not_in_crm ? { crm_not_logged: notLogged.not_in_crm, crm_not_logged_note: notLogged.not_in_crm_note } : {};
+  if (heldMustNote?.held_problem)
+    return step('waiting', 'Nothing more goes until the held people above are settled: what fixes each is said with them.', {
+      done: false,
+      stop: true,
+      next_check: 'Run again once the held messages or the problem named with them are fixed.',
+      ...heldMustNote,
+      ...pickNote,
+      ...summary,
+      ...crmNote
+    });
   return step('done', 'Nothing to do right now.', {
     done: true,
     ...heldMustNote,
-    ...summaryOf(c, e),
-    ...(notLogged?.not_in_crm ? { crm_not_logged: notLogged.not_in_crm, crm_not_logged_note: notLogged.not_in_crm_note } : {})
+    ...pickNote,
+    ...summary,
+    ...crmNote
   });
 }

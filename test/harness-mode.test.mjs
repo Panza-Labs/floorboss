@@ -116,7 +116,7 @@ test('a session script outside Claude Code reads no connection and no sending ch
   }
   // Claude Code reads what is saved, as before.
   const cc = settingsIn(HOME, { ...bare(), CLAUDECODE: '1' });
-  assert.deepEqual(cc.s.sending.channels, ['email', 'linkedin']);
+  assert.deepEqual(cc.s.sending.channels, ['email']);
   assert.ok(cc.s.connectors['email.send']);
   assert.equal(cc.s.crm_log, 'tasks');
 });

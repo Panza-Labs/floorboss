@@ -22,6 +22,7 @@ import { readJson, writeJson } from '../../../../lib/jsonio.mjs';
 import { todayKeyIn } from '../../../../lib/tz.mjs';
 import { lentDigest } from '../../../../lib/lent.mjs';
 import { sendsDigest, MARKER_LIVE_MS } from '../../../../lib/sendcheck.mjs';
+import { holdIndexFiles, holdIndexOf } from '../../../../lib/ledger.mjs';
 
 const VERSION = (() => {
   try {
@@ -144,6 +145,23 @@ function configDigest(path) {
   return createHash('sha256').update(JSON.stringify(stable(cfg))).digest('hex').slice(0, 24);
 }
 
+// The holds index as a reader takes it (lib/ledger.mjs holdIndexOf): its stamp checked, and every event whose record
+// changed since read again, so a hold written into another event's record by a sync counts at once. Only each event's
+// holds, mock flag and name are recorded, so a line at another event that changes no hold leaves the page as it was.
+function holdIndexInputs(root, idxFile, stampFile) {
+  let carries;
+  try {
+    const idx = holdIndexOf(root);
+    carries = createHash('sha256')
+      .update(JSON.stringify(stable(Object.fromEntries(Object.entries(idx?.events || {}).map(([k, e]) => [k, { mock: e?.mock, name: e?.name, holds: e?.holds }])))))
+      .digest('hex')
+      .slice(0, 24);
+  } catch {
+    carries = 'unreadable';
+  }
+  return { [idxFile]: ['holds', carries], [stampFile]: ['stamp', 'checked by the holds index'] };
+}
+
 // The folders whose every file the page records (a file added there, or taken away, is a change): this event's lists,
 // mappings, drafts and research, and every other event's lists and mappings, and the events folder itself.
 export function watchedFolders(dir) {
@@ -205,6 +223,10 @@ export function pageInputs(dir, now = new Date()) {
     }
     if (cdir) for (const n of ['who-to-meet', 'what-you-bring', 'voice']) file(join(cdir, n, 'SKILL.md'));
   }
+  // The holds index the carry is read from (lib/ledger.mjs holdIndex), and its stamp: recorded by what the index
+  // carries (each event's holds), so a line at another event that changes no hold leaves the page as it was (B-1).
+  const [idxFile, stampFile] = holdIndexFiles(root);
+  Object.assign(files, holdIndexInputs(root, idxFile, stampFile));
   // Every other event: its record, settings, lists and mappings.
   let others = [];
   try {

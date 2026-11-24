@@ -36,10 +36,10 @@ test('keep N: a group answer on check-these is not named as "you said to reach";
 test('import_context: a humanizer or tone skill is "how you write", company material is what you can say about your company', () => {
   const s = { inv: { found: { voice: ['skill:humanizer'], company_context: ['skill:humanizer', 'skill:acme-positioning', 'skill:tone-guide'] } } };
   const q = importAsk(s);
-  assert.match(q, /humanizer, tone-guide for how you write/);
-  assert.match(q, /acme-positioning for what you can say about your company/);
-  assert.doesNotMatch(q.split('for what you can say')[0].split('how you write, and ')[1] || '', /humanizer/);
-  assert.equal(importAsk({ inv: { found: { voice: ['skill:humanizer'], company_context: [] } } }), 'Use humanizer for how you write?');
+  assert.match(q, /Humanizer, Tone Guide for how you write/);
+  assert.match(q, /Acme Positioning for what you can say about your company/);
+  assert.doesNotMatch(q.split('for what you can say')[0].split('how you write, and ')[1] || '', /humanizer/i);
+  assert.equal(importAsk({ inv: { found: { voice: ['skill:humanizer'], company_context: [] } } }), 'Use Humanizer for how you write?');
 });
 
 // ---------- (6) and #13: cards and the rate set say what's real ----------

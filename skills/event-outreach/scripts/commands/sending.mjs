@@ -12,12 +12,14 @@ import { touchBefore } from '../../../../lib/route.mjs';
 import { approvalHash, verifySend, readersOf, withFallbacks, userWordCounts, sentOrGoingToday, addressBusyToday, busyWhy, markerOnly, homeSends, IN_FLIGHT, CHANGED_ELSEWHERE } from '../../../../lib/sendcheck.mjs';
 import { validateReceipts } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig, saveConfig } from '../../../../lib/config.mjs';
-import { earlierWith, writtenInApp, toOf, sendRoute, appLimitReached, whereAt } from './routes.mjs';
+import { earlierWith, writtenInApp, toOf, sendRoute, appLimitReached, whereAt, routeOf, wentBeforeAt } from './routes.mjs';
+import { syncReach } from './reach.mjs';
 import { crmPending, lastSentTouch, ctxOf, led, sendingOn, idList, takenTest } from './context.mjs';
 import { draftFiles, savedDraft, readTodo, staleFor, followupDayOf } from './saved-drafts.mjs';
 import { rebuildOutbox, allOutboxCards } from './cards.mjs';
 import { othersMoved } from './page-inputs.mjs';
 import { lentAbout } from '../../../../lib/lent.mjs';
+import { routineHeld, pickHold } from '../../../../lib/autosend/common.mjs';
 
 // floorboss's own tests only (FLOORBOSS_TEST=1): a record line (FLOORBOSS_LIST_APPEND: {"event": "<another event's
 // slug>", "line": {...}}) written once to that event's record right after a list's first check of the other events'
@@ -58,6 +60,9 @@ function stageable(c, { unattended = false, held = [] } = {}) {
     if (c.blocked(card.id) || (card.kind !== 'confirmation' && (st.replied || st.booked))) continue;
     const tt = st.touches?.[card.touch] || {};
     if (tt.staged || tt.stage_released || st.sent?.[card.touch]) continue;
+    // A draft goes into the mailbox only after the step before it went, a LinkedIn step that hasn't gone passed over:
+    // the guard's staging rule (hooks/guard/sends.mjs stageRefusal).
+    if (card.touch > 1 && wentBeforeAt(c, card.id, card.touch) > 0 && !st.sent?.[wentBeforeAt(c, card.id, card.touch)]) continue;
     if (card.touch === 1 && crmPending(c, card.id)) continue;
     // One message a day to a person across all your events, by address (the guard's rule for a draft too): held, and
     // said, while another event's message to that address went or is going today.
@@ -96,6 +101,7 @@ function stageable(c, { unattended = false, held = [] } = {}) {
 
 export function stageList(opts) {
   need(opts, 'event');
+  syncReach(opts.event, opts);
   const c = ctxOf(opts.event, opts);
   const recipe = loadConfig().connectors?.stage_draft || null;
   // --unattended: only inside a scheduled run (its token names a ticket), never from an attended session.
@@ -121,7 +127,12 @@ export function stageList(opts) {
     const mw = readWitness(session, opts.event, x.id, 'mail');
     return mw?.readable && mw.own_last?.id ? String(mw.own_last.id) : null;
   };
-  const listed = stageable(c, { unattended: !!opts.unattended, held }).map((x) => ({
+  // A step the daily Claude routine sends (common.mjs routineHeld) is never staged here as well.
+  const listed = stageable(c, { unattended: !!opts.unattended, held }).filter((x) => {
+    const r = routineHeld(c.event, c.entries, x.id, x.touch);
+    if (r) held.push({ id: x.id, touch: x.touch, why: r });
+    return !r;
+  }).map((x) => ({
     ...x,
     reply_to_message_id: replyIdOf(x),
     listed_at: c.now.toISOString(),
@@ -191,6 +202,7 @@ function notUnclear(c, id, touch) {
 // replied, booked or said stop, its text is unchanged since approval, and (each_round) its round is approved.
 export function sendList(opts) {
   need(opts, 'event');
+  const changed = syncReach(opts.event, opts);
   const c = ctxOf(opts.event, opts);
   c.config = loadConfig();
   if (!sendingOn(c.settings)) throw new Error('Sending is off for this event: floorboss stages drafts for you to send. Turn it on in onboarding (sending).');
@@ -240,6 +252,25 @@ export function sendList(opts) {
     if (only && !only.has(id) && !only.has(`${id}:${t}`)) continue;
     const appr = st.touches?.[t]?.approved;
     if (!appr) continue;
+    // An event sending through a daily Claude routine: a step with a standing auto-send yes is the routine's (a Gmail
+    // draft it sends on its day), never Claude Code's too; only message 1 its run let go now is listed here.
+    {
+      const r = routineHeld(c.event, c.entries, id, t, appr.hash);
+      if (r) {
+        waiting.push({ id, touch: t, why: r });
+        continue;
+      }
+    }
+    // The user's pick at the final approval (lib/autosend/pick.mjs) was Gmail drafts (2) or "I'll send them myself"
+    // (3): floorboss never sends it, so it is never listed (and the guard has nothing of it to let through).
+    // At an event sending through a daily Claude routine, an email no pick stands for waits for the final approval.
+    {
+      const why = pickHold(c.event, c.entries, id, t, appr.hash, appr.to);
+      if (why) {
+        waiting.push({ id, touch: t, why });
+        continue;
+      }
+    }
     // Only an email waits: the CRM files mail, and contact-list lists only people emailed.
     if (t === 1 && /@/.test(appr.to || '') && crmPending(c, id)) {
       waiting.push({
@@ -286,12 +317,14 @@ export function sendList(opts) {
       }
     }
     if (t > 1) {
-      const beforeT = touchBefore(st, t);
+      // A LinkedIn step before it that hasn't gone is passed over (the guard's rule, lib/sendcheck.mjs).
+      const beforeT = wentBeforeAt(c, id, t);
       const prev = st.sent?.[beforeT];
-      if (!prev) continue;
+      // Every step before it was skipped (beforeT 0): it goes as a first message would.
+      if (!prev && beforeT > 0) continue;
       // Written for a first message that has changed since (and was approved again): written again first.
       if (staleFor(c, id, t, d)) {
-        waiting.push({ id, touch: t, why: 'the message before it changed after it was written: it needs a new draft' });
+        waiting.push({ id, touch: t, why: beforeT === 0 ? 'message 1 could not be delivered: this is now the first message, written again for your approval' : 'the message before it changed after it was written: it needs a new draft' });
         continue;
       }
       // The day it was planned and approved for, never sooner than its gap after the message before it actually went;
@@ -342,7 +375,7 @@ export function sendList(opts) {
       continue;
     }
     if (!route || !route.to) {
-      waiting.push({ id, touch: t, why: route?.why || 'no way for floorboss to send it on this channel: it stays in the outbox for you' });
+      waiting.push({ id, touch: t, why: route?.why || (d.channel === 'paste' && (routeOf(c, id) ? routeOf(c, id)[t - 1] === 'linkedin' : whereAt(c, id, t) === 'LinkedIn') ? 'you send this one yourself on LinkedIn' : 'no way for floorboss to send it on this channel: it stays in the outbox for you') });
       continue;
     }
     // Said about the inbox this message goes to: it answers for that one only (lib/sendcheck.mjs lastReplyCheck).
@@ -407,6 +440,7 @@ export function sendList(opts) {
     items.filter((x) => x.via === 'browser')
   );
   return {
+    ...(changed ? { channels_changed: changed } : {}),
     to_send: items.length,
     by_email: items.filter((x) => x.via === 'email.send').length,
     by_chat: items.filter((x) => x.via === 'chat.send').length,
@@ -548,7 +582,8 @@ export function sendOutcome(opts) {
 
 // app-result --event <slug> --file <{id, touch, result, page_says}> (or --id --touch --result --page-says):
 // what the event app's page said after a note was sent in the browser. sent: recorded as sent. not_found or
-// messages_off: that person is held for the app, with the page's words. too_long: the note goes back to be
+// messages_off: that app step is skipped (only an app step, typed in a send window opened for it), with the page's
+// words kept quoted as data; the person's other steps keep their days. too_long: the note goes back to be
 // shortened. limit: today's sending in the app stops. logged_out: the app needs the user to log in.
 // failed (the page said nothing clear, or the browser call failed): the user looks in the app first.
 const APP_RESULTS = ['sent', 'not_found', 'messages_off', 'too_long', 'limit', 'logged_out', 'failed'];
@@ -590,6 +625,16 @@ export function appResult(opts) {
   const windowed = c.entries.some((e) => e.type === 'browser_send_opened' && (e.items || []).includes(`${id}:${touch}`));
   if (result !== 'sent' && result !== 'failed' && typed.released && typed.released_via === 'browser' && windowed && !typed.sent && !typed.release_cleared)
     led(c, { type: 'release_cleared', who: 'floorboss', id, touch, said: page || `the app said ${result}` });
+  // The app says this person can't be written to there: that step is skipped and the person's other steps (email,
+  // LinkedIn) keep their days; nothing is written in its place. Only an event-app step, typed in a send window opened
+  // for it, and never one that went or was let through some other way. The page's words are kept quoted, as data.
+  const isApp = whereAt(c, id, touch) !== 'LinkedIn' && (routeOf(c, id)?.[touch - 1] === 'app' || (!!typed.approved?.where && typed.approved.where !== 'LinkedIn'));
+  const otherRelease = typed.released && typed.released_via !== 'browser' && !typed.release_cleared;
+  if (['not_found', 'messages_off'].includes(result) && isApp && windowed && !typed.sent && !otherRelease) {
+    const words = page.replace(/["\u201c\u201d]/g, "'").replace(/\s+/g, ' ').trim().slice(0, 200);
+    led(c, { type: 'step_skipped', who: 'floorboss', id, touch, reason: `${c.event.app_name || 'The event app'} said: "${words || (result === 'not_found' ? 'not found' : 'messages are turned off')}"` });
+    withdrawFirstContact(c, id, touch);
+  }
   if (result === 'sent')
     led(c, {
       type: 'sent',
@@ -663,4 +708,20 @@ function browserSend(opts) {
     items: items.length,
     rule: "In the user's browser, open each person in the app (or LinkedIn), paste the body exactly as listed, pick the listed time if the app asks, and send. Only these messages, to these people. Then record each with outreach sent, and run outreach browser-send --close."
   };
+}
+
+// Every step before the person's next one was skipped (their first message couldn't be delivered): that step becomes
+// their first contact (owner answer A1). Its approval as a follow-up no longer counts: it is written again as a first
+// message and approved in the next batch. A step that went or was let through is never touched.
+export function withdrawFirstContact(c, id, skippedTouch) {
+  const p = c.folded.people[id];
+  const st = { touches: Object.fromEntries(Object.entries(p?.touches || {}).map(([k, x]) => [k, { ...x, skipped: x.skipped || Number(k) === skippedTouch }])) };
+  for (let t = skippedTouch + 1; t <= 10; t++) {
+    const x = p?.touches?.[t];
+    if (!x) break;
+    if (st.touches[t]?.skipped) continue;
+    if (touchBefore(st, t) === 0 && x.approved && !x.sent && !x.released && !x.staged && !x.stage_released)
+      led(c, { type: 'approval_withdrawn', who: 'floorboss', id, touch: t, reason: 'message 1 could not be delivered: this is now the first message' });
+    break;
+  }
 }

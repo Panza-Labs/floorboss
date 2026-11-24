@@ -97,7 +97,31 @@ export const answersFor = (r) =>
         'same-person crm:<row> reach|warm because <why> (the match and the decision on one line)'
       ]
     : [...(r.holder || (r.alternatives || []).some((a) => a.holder) ? ['hold (leave them to their owner)'] : []), 'reach', 'warm', 'skip'];
-export const step = (id, why, action) => ({ step: id, why, ...action });
+// Every question with a fixed set of answers carries them as `choices` ({label, value, description}), `multi` and
+// `other_allowed`, so the host shows them as buttons (Claude Code's AskUserQuestion) or a numbered list (Codex). The
+// value is the option's own text: the answer is saved through flow answer exactly as before. An option that is a
+// template for the user's own words ("my team too: <names>", "your own, like …") isn't a choice: other_allowed covers it.
+const TEMPLATE = /<[^>]+>|^your own\b|^somewhere else\b/i;
+const MULTI = new Set(['sending']);
+export function choicesFrom(options) {
+  const fixed = (options || []).filter((o) => typeof o === 'string' && o.trim() && !TEMPLATE.test(o));
+  return fixed.map((o) => {
+    const m = /^([^:]{1,40}):\s+(.+)$/s.exec(o);
+    return m ? { label: m[1].trim(), value: o, description: m[2].trim() } : { label: o, value: o, description: '' };
+  });
+}
+const header = (id) => {
+  const w = String(id || '').replace(/^onboarding:/, '').replace(/_/g, ' ');
+  const t = w.charAt(0).toUpperCase() + w.slice(1);
+  return t.length <= 12 ? t : t.slice(0, 12).replace(/\s+\S*$/, '') || t.slice(0, 12);
+};
+function withChoices(ask) {
+  if (!ask || typeof ask !== 'object' || ask.choices || !Array.isArray(ask.options)) return ask;
+  const choices = choicesFrom(ask.options);
+  if (choices.length < 2) return ask;
+  return { ...ask, header: ask.header || header(ask.id), choices, multi: MULTI.has(ask.id) && choices.length > 2, other_allowed: true };
+}
+export const step = (id, why, action) => ({ step: id, why, ...action, ...(action?.ask ? { ask: withChoices(action.ask) } : {}) });
 // Who the shortlist holds as floorboss reads it now (resolved.json: reach and warm), sorted: what the user said yes to
 // at the shortlist, kept to compare with after a reloaded list.
 export const shortlistIds = (derived) =>

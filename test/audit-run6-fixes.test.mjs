@@ -13,6 +13,7 @@ import { lastReplyCheck } from '../lib/sendcheck.mjs';
 import { namesToIds, namedCompanies } from '../lib/names.mjs';
 import { readLedger, append, fold, legacyState } from '../lib/ledger.mjs';
 import { draftFor, makeHome, drive, simplePersona, cli as simCli } from './sims/lib/driver.mjs';
+import { throughHeadsUp, say } from './fixtures/heads-up.mjs';
 
 const RECIPE = { server: 'gmail', tool: 'send_email', args: { to: '{to}', subject: '{subject}', body: '{body}' }, reading: 'x', tool_hash: 'a'.repeat(64), test_draft: { draft_id: 't1', user_confirmed: true } };
 const NOTES = { app_note_times: 'in_app', app_note_event_name: false, app_note_optout: false };
@@ -447,7 +448,7 @@ test('the app limit counts a note already let through, and later-step app notes 
     }
   }
   // App sending off: the follow-ups become CRM tasks. todo hands out one later-step app note, and task-list writes one.
-  const T = { sending: { channels: ['linkedin'], followups: 'scheduled', linkedin_ack: true }, app_request_limit: 1, route: ['email', 'app'], crm_log: 'tasks', ...NOTES };
+  const T = { sending: { channels: ['chat'], followups: 'scheduled', linkedin_ack: true }, app_request_limit: 1, route: ['email', 'app'], crm_log: 'tasks', ...NOTES };
   const K = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP,Globex,bo@globex.test\n', event: { app_name: 'Grip' }, settings: T });
   triage(K);
   const d = draftApprove(K);
@@ -506,31 +507,22 @@ test('a follow-up saved before the message before it had any text goes back once
 // unclear answer is asked again, a plain one skips them all, and a list of the companies as listed, with ordinary words
 // after each, skips only those.
 const COS = 'Name,Title,Company,Email\nAna Berg,COO,Step,ana@step.test\nBo Li,VP Ops,Later,bo@later.test\nCy Oh,COO,Acme,cy@acme.test\nDi Fox,CFO,Globex,di@globex.test\n';
+// (Said at the research heads-up, company_briefs, since 2026-11-21: the company_research ask is gone.)
 function atCompanyResearch(final, check) {
   const H = makeHome({ context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' }, attendees: COS });
-  const persona = simplePersona({
-    asks: {
-      setup_level: 'standard',
-      research_scale: 'none',
-      attendee_list: join(H.HOME, 'inputs', 'attendees.csv'),
-      company_research: (s) => {
-        check(H, s);
-        return final;
-      }
-    }
+  const persona = simplePersona({ asks: { setup_level: 'standard', attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
+  const run = throughHeadsUp(H, persona, (up) => {
+    check(H, up);
+    const r = say(H, up, final);
+    assert.ok(!r.ERROR, r.ERROR);
   });
-  return { H, ...drive(H, persona, { maxSteps: 200 }) };
+  return { H, ...run };
 }
 test('through the flow: a company named like a word of a refusal never narrows "skip"', { timeout: 600000 }, () => {
-  const tried = (H, s, said) => {
-    const f = join(H.HOME, 'work', 'cr.txt');
-    writeFileSync(f, said);
-    return simCli(H, 'flow', ['answer', '--event', s.event, '--ask', 'company_research', '--value-file', f]);
-  };
   const plain = atCompanyResearch('skip companies', (H, s) => {
-    assert.ok(['Step', 'Later', 'Acme', 'Globex'].every((x) => s.ask.companies.includes(x)), s.ask.companies.join(' '));
+    assert.ok(['Step', 'Later', 'Acme', 'Globex'].every((x) => s.companies.includes(x)), s.companies.join(' '));
     for (const said of ['skip Acme as well as Globex', 'skip Acme (and Globex)', 'skip Acme because they are a customer and Globex', 'skip Acme and the rest', 'skip step', 'skip Globex, the rest is fine', 'skip this step', 'skip the step', 'skip Step research', 'skip step by step', 'skip step, not needed', "skip step, I don't want any web research", 'skip, later', 'skip for now, later', 'skip. Later'])
-      assert.match(tried(H, s, said).ERROR || '', /Name the companies/, said);
+      assert.match(say(H, s, said).ERROR || '', /Name the companies/, said);
   });
   assert.ok(!plain.trail.includes('company_briefs'), `no web research: ${plain.trail.join(' ')}`);
   assert.match(readFileSync(join(plain.H.HOME, 'events', plain.slug, 'ledger.jsonl'), 'utf8'), /"ask":"company_research","value":"skip"/);

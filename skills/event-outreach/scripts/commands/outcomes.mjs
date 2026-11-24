@@ -17,15 +17,19 @@ import { validateSync } from '../../../connectors/scripts/tasks.mjs';
 import { loadConfig } from '../../../../lib/config.mjs';
 import { handSend } from '../../../../lib/harness.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
-import { kindAt, routeOf } from './routes.mjs';
+import { kindAt, routeOf, appGone } from './routes.mjs';
 import { ctxOf, led, sinceOf, idList, crmIdOf, awayNote, isOut, colleagueTold, sendingOn } from './context.mjs';
 import { readTodo, savedDraft, criticFails, followupDayOf } from './saved-drafts.mjs';
 import { laptopWrite, PAUSE_STEPS } from '../../../../lib/autosend/sync.mjs';
 import { holdWords } from '../../../../lib/autosend/drafts.mjs';
+import { routineStopWords } from '../../../../lib/autosend/routine.mjs';
 import { autosendEvents, autosendLive, takenTimes, readEvent, eventDirOf } from '../../../../lib/autosend/common.mjs';
 import { nowMs } from '../../../../lib/clock.mjs';
 
-export function status(opts) {
+// A stop recorded here (an outbox tick, a reply read from the mailbox, CRM, LinkedIn or the app) needs the person's
+// queued drafts held or deleted too (withHolds), as record does.
+export const status = (opts) => withHolds(opts, statusHere(opts));
+function statusHere(opts) {
   need(opts, 'event');
   const c = ctxOf(opts.event, opts);
   const outboxed = c.entries.some((e) => e.type === 'outboxed');
@@ -75,17 +79,20 @@ export function status(opts) {
 // run. A pull or push that fails refuses with nothing recorded, and says how to pause the scheduled task meanwhile.
 // Through Gmail drafts: a reply, an opt-out or a booking recorded here also needs the person's queued drafts held in
 // Gmail (drafts.mjs toHold), or the daily task still sends them. The answer says how.
-function withHolds(opts, out) {
+export function withHolds(opts, out) {
   if (opts.check || !out || typeof out !== 'object') return out;
   const slug = String(opts.event || '');
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) return out;
   const h = holdWords(eventDirOf(home(), slug), slug, nowMs());
-  return h ? { ...out, drafts_hold: h.drafts_hold, drafts_hold_say: `${h.say} The command is the autosend skill's: node <floorboss>/skills/autosend/scripts/cli.mjs ${h.drafts_hold}. Tell the user plainly if any hold can't be confirmed, with the drafts to delete by hand.` } : out;
+  const held = h ? { ...out, drafts_hold: h.drafts_hold, drafts_hold_say: `${h.say} The command is the autosend skill's: node <floorboss>/skills/autosend/scripts/cli.mjs ${h.drafts_hold}. Tell the user plainly if any hold can't be confirmed, with the drafts to delete by hand.` } : out;
+  // Through a daily Claude routine: the person's queued drafts are deleted from Gmail (routine.mjs routineStopWords).
+  const d = routineStopWords(eventDirOf(home(), slug), slug, nowMs());
+  return d ? { ...held, drafts_delete: d.drafts_delete, drafts_delete_say: `${d.say} routine-body and routine-saved are the autosend skill's: node <floorboss>/skills/autosend/scripts/cli.mjs routine-body --event ${slug}. Tell the user this plainly.` } : held;
 }
 export function record(opts) {
   if (opts.check || !autosendEvents(home()).length) return withHolds(opts, recordHere(opts));
   try {
-    return withHolds(opts, laptopWrite({ home: home(), nowMs: nowMs(), what: `record ${String(opts.event || '').slice(0, 64)}` }, () => recordHere(opts)).result);
+    return withHolds(opts, laptopWrite({ home: home(), nowMs: nowMs(), keepUnbound: true, what: `record ${String(opts.event || '').slice(0, 64)}` }, () => recordHere(opts)).result);
   } catch (e) {
     if (/Nothing was changed\.$/.test(e.message)) throw new Error(`${e.message} If the user told you to stop someone, the cloud task doesn't know yet: ${PAUSE_STEPS}.`);
     throw e;
@@ -112,6 +119,20 @@ function recordHere(opts) {
     minutes: Number(c.settings.meeting_minutes) || 30,
     eventDays,
     coordinate,
+    // Held by the triage (a do-not-contact list, an opt-out, a hold the CRM gave): "added" never puts them on the list.
+    heldWhy: (id) => {
+      const r0 = c.triage.pre?.[id];
+      // The user's own skip or cut is no hold ("added" after "cut" adds them back); a hold under it still is. The holds
+      // under it are in this command's own view (the compat triage has no alternatives), the one it just wrote to
+      // derived/resolved.json: read from memory, not from the file another command may be replacing at that moment.
+      // Not there, they hold.
+      let r = r0;
+      if (r0?.rung === 'user' && ['skip', 'suppressed'].includes(r0.group)) {
+        const alts = c.view?.resolved?.[id]?.alternatives;
+        r = Array.isArray(alts) ? alts.find((a) => ['skip', 'suppressed'].includes(a?.would_be)) : { group: 'skip', says: 'held by your records' };
+      }
+      return r && ['skip', 'suppressed'].includes(r.group ?? r.would_be) ? String(r.says || r.reason || 'held by your records').replace(/ \(new since you said [^)]*\)+/g, '') : null;
+    },
     crmConnected: !!(loadConfig().connectors?.['crm.lookup'] || loadConfig().connectors?.['crm.activity'])
   });
   if (plan.errors.length) throw new Error(`Nothing was recorded. ${plan.errors.join(' ')}`);
@@ -217,7 +238,8 @@ function filedIds(c, ids) {
 
 // sync --event <slug> --source mailbox|crm --file <answers>: sends, replies and calls floorboss didn't make
 // itself, read from the user's mailbox (email.messages) or CRM (crm.activity), into the log.
-export function sync(opts) {
+export const sync = (opts) => withHolds(opts, syncHere(opts));
+function syncHere(opts) {
   need(opts, 'event', 'source', 'file');
   if (!['mailbox', 'crm', 'linkedin', 'app'].includes(opts.source)) throw new Error('--source is mailbox, crm, linkedin or app.');
   const c = ctxOf(opts.event, opts);
@@ -321,7 +343,7 @@ export function summary(opts) {
     const fits = d && !already;
     if ((fits || already) && awayOf(id)) listAway(id);
     if (fits) due.push({ id, name: c.byId[id]?.name, next_touch: upcoming, due: d });
-    else if (already) waiting.push({ id, name: c.byId[id]?.name, touch: upcoming });
+    else if (already && !appGone(c, id, upcoming, savedDraft(c, id, upcoming)?.channel)) waiting.push({ id, name: c.byId[id]?.name, touch: upcoming });
   }
   // Anything approved or in the outbox and not yet sent is waiting to be sent, first messages included; once the
   // event is over (today in its time past its last day) nothing is (follow-ups have no day then either).
@@ -341,6 +363,7 @@ export function summary(opts) {
         continue;
       }
       if ((st.replied || st.booked) && Number(t) !== 0) continue; // after a yes, only the confirmation is left
+      if (kind !== 'coordinate' && appGone(c, id, Number(t), savedDraft(c, id, Number(t))?.channel)) continue; // the app said they left it or have messages off: it can't go there
       if (Number(t) !== 0 && awayOf(id)) listAway(id);
       if (!waiting.some((w) => w.id === id && w.touch === Number(t)))
         waiting.push({

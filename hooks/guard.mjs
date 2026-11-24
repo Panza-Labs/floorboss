@@ -31,6 +31,15 @@ import { home, recordFile } from '../lib/paths.mjs';
 import { readRun, readRunAnySession, stampRun, lockPath, endSession, touchSession, ranBefore } from '../lib/runlock.mjs';
 import { bareBrowserTool, readUrl, looksLikeUrl } from '../lib/security.mjs';
 import { eventRecord, oldestReplyCheck, eventDay, addressBusyToday, busyWhy } from '../lib/sendcheck.mjs';
+import { touchBefore } from '../lib/route.mjs';
+// Wording only: a step whose earlier steps were all skipped is the person's first message (owner answer A1).
+const firstContact = (evDir, id, touch) => {
+  try {
+    return touch > 1 && touchBefore({ touches: eventRecord(evDir).folded?.people?.[id]?.touches || {} }, touch) === 0;
+  } catch {
+    return false;
+  }
+};
 import { readLedger } from '../lib/ledger.mjs';
 import { withLock, withLocks } from '../lib/lock.mjs';
 import { loadEvent } from '../lib/event.mjs';
@@ -49,7 +58,7 @@ const SEND_LOCK_STALE_MS = 60 * 1000;
 // died holds it until it is a minute old).
 const SEND_BUSY = 'another call to this person, at this address or another of theirs, is being checked at this moment, or one stopped while it was: try again in a minute.';
 import { isSubagent, inheritedRun, transcriptRanFloorboss, CHECKED_TOOLS, QUIET_TOOLS } from './guard/run.mjs';
-import { ask, allow, allowUnattended, blockedSaid, promptId, promptPerson, promptAddr, promptLine, personName, holdHistory, letThroughBefore } from './guard/prompts.mjs';
+import { ask, allow, allowUnattended, pendingAsks, blockedSaid, promptId, promptPerson, promptAddr, promptLine, personName, holdHistory, letThroughBefore } from './guard/prompts.mjs';
 import { isBrowser, givenServer } from './guard/connectors.mjs';
 import { testOnItsServer, testContactItem, testPasses, markOnce, nameOfStaged } from './guard/test-calls.mjs';
 import { callNote, enrichNotes, windowUsed, windowAllowed, lookupsGone, enrichPendingDir } from './guard/lookups.mjs';
@@ -57,8 +66,14 @@ import { listed, listedSends, refusedSends, fullText, stageBatch, recipientShown
 import { openWindow, openLogWindow, callId, windowKey, browserItems, logItems, KEY_OK, logTyping, noteWhy } from './guard/browser.mjs';
 import { READ_TOOLS, WRITE_TOOLS, fileRefusal, runWriteRefusal, schedulePathRefusal } from './guard/files.mjs';
 import { recordSearchHosts, WEB_TOOLS, webRefusal, knownEventSites, isResearcher, seenHosts, companyHosts } from './guard/web.mjs';
-import { bashRefusal, floorbossScriptCall, connectorChange, scheduleRefusal, mcpScheduleRefusal, unattendedCall, shellWords } from './guard/shell.mjs';
+import { bashRefusal, pluginNodeRefusal, floorbossScriptCall, connectorChange, liftHoldCall, scheduleRefusal, mcpScheduleRefusal, unattendedCall, shellWords, recordsRefusal, AUTOSEND_CLAUDE, AUTOSEND_UNSTAMPED } from './guard/shell.mjs';
 import { check } from './guard/check.mjs';
+import { recordPick } from '../lib/autosend/pick.mjs';
+import { remoteTriggerCall, afterRemoteTrigger } from './guard/routine-trigger.mjs';
+import { remoteConfirmCall } from './guard/autosend-remote.mjs';
+import { subagentWhy, draftGoneAsk } from './guard/autosend-gone.mjs';
+import { clearRecords, writeRecord, needsRecord, dropRecordOf, RecordsFolderError, shellCallRecords } from '../lib/autosend/guard-record.mjs';
+import { draftCall, getDraftCall, deleteDraftCall, afterDraft, afterDraftGone, SERVER as DRAFTS_SERVER } from './guard/autosend-drafts.mjs';
 import { afterCall, afterCallFailure, noteStageCall, hasCallId, NO_CALL_ID } from './guard/after-call.mjs';
 import { sessionStart as unattendedStart, unattendedSession, unattendedMcp, bashCall as unattendedBash, afterBash, afterMcp as unattendedAfterMcp, afterMcpFailure as unattendedAfterMcpFailure, runToken, stopHere } from './guard/unattended.mjs';
 export { leaves, recent } from './guard/shared.mjs';
@@ -165,7 +180,15 @@ if (isMain(import.meta.url)) {
       try {
         if (!subagent && /^mcp__/.test(toolName)) {
           if (runToken()) unattendedAfterMcpFailure(input, clockNow());
-          else afterCallFailure(input, clockNow());
+          else {
+            // A queued routine draft that get_draft or delete_draft says isn't there (an error naming it not found).
+            try {
+              afterDraftGone(input, home(), clockNow());
+            } catch {
+              /* not recorded: the step stays held */
+            }
+            afterCallFailure(input, clockNow());
+          }
         }
       } catch {
         /* unattended: the run's next step finds the draft's result missing, and stops there */
@@ -176,6 +199,15 @@ if (isMain(import.meta.url)) {
     if (process.argv[2] === 'post' || input?.hook_event_name === 'PostToolUse') {
       // A web search while floorboss runs (the researcher's, usually): the hosts it turned up are the ones the
       // researcher may then open.
+      // RemoteTrigger's own answer to the routine body floorboss printed: the routine id routine-saved may take.
+      if (toolName === 'RemoteTrigger') {
+        try {
+          if (!subagent) afterRemoteTrigger(input, home(), clockNow());
+        } catch {
+          /* not recorded: routine-saved refuses, and the update stays due */
+        }
+        process.exit(0);
+      }
       if (toolName === 'WebSearch') {
         try {
           if (readRunAnySession(Date.now()).active)
@@ -185,10 +217,26 @@ if (isMain(import.meta.url)) {
         }
         process.exit(0);
       }
+      // The user's pick at the final approval (lib/autosend/pick.mjs): recorded from what the AskUserQuestion tool
+      // answered, in the main conversation only, so the approve command reads the user's own pick, never the agent's.
+      if (toolName === 'AskUserQuestion') {
+        try {
+          if (!subagent && !runToken()) recordPick(home(), input, clockNow());
+        } catch {
+          /* not recorded: nothing is approved */
+        }
+        process.exit(0);
+      }
       // A floorboss script call that asked to turn unattended drafts on, to authorise follow-ups, or to let an unattended
       // draft that isn't in the drafts folder go in again: recorded only now, once it ran after the user allowed it
       // (hooks/guard/unattended.mjs).
       if (toolName === 'Bash') {
+        // The call ran (or failed): its one-use record, if the command didn't take it, goes (lib/autosend/guard-record.mjs).
+        try {
+          dropRecordOf(home(), input.tool_use_id);
+        } catch {
+          /* the next guard call clears it */
+        }
         try {
           if (!subagent) afterBash(input, clockNow());
         } catch {
@@ -200,7 +248,21 @@ if (isMain(import.meta.url)) {
         // In an unattended run, what the guard reads for itself in the answer (and the draft's result); else the usual.
         if (!subagent) {
           if (runToken()) unattendedAfterMcp(input, clockNow());
-          else afterCall(input);
+          else {
+            // A draft the guard let through after the final approval: its ids, as the tool answered them.
+            try {
+              afterDraft(input, home(), clockNow());
+            } catch {
+              /* not recorded: the run stops at that draft */
+            }
+            // A stopped routine draft deleted (or found gone): the step is the user's again.
+            try {
+              afterDraftGone(input, home(), clockNow());
+            } catch {
+              /* not recorded: the step stays held */
+            }
+            afterCall(input);
+          }
         }
       } catch {
         /* not recorded: the next call asks again */
@@ -213,6 +275,12 @@ if (isMain(import.meta.url)) {
     // SessionStart: a session resumed (or compacted) that ran floorboss before still holds that run's text in its
     // transcript, so the run's limits come back with it.
     if (input?.hook_event_name === 'SessionStart') {
+      // The one-use records of this session (a resumed one) and the stale ones go.
+      try {
+        clearRecords(home(), { session, nowMs: Date.now() });
+      } catch {
+        /* the next auto-send call blocks with what to do */
+      }
       // A scheduled run's session: its ticket is bound only at a fresh startup of the session the launcher named.
       try {
         unattendedStart(input, clockNow());
@@ -246,6 +314,22 @@ if (isMain(import.meta.url)) {
       const otherRun = subagent ? readRunAnySession(Date.now()) : readRun(Date.now(), session);
       if (!(otherRun.active && (otherRun.session || subagent))) process.exit(0);
       if (QUIET_TOOLS.has(toolName)) process.exit(0);
+      // RemoteTrigger, for floorboss's daily Claude routine only (hooks/guard/routine-trigger.mjs): the body floorboss
+      // printed, or a read of the routine it saved, each with the user's own prompt. Anything else waits, as below.
+      if (toolName === 'RemoteTrigger' && !subagent) {
+        let rt;
+        try {
+          rt = remoteTriggerCall(input.tool_input, home(), clockNow());
+        } catch (e) {
+          rt = { refuse: `its guard couldn't check this call (${String(e?.message).slice(0, 120)}).` };
+        }
+        if (rt.ask) {
+          ask(rt.ask);
+          allow();
+        }
+        process.stderr.write(`floorboss blocked this call: ${rt.refuse} This session ran floorboss, so RemoteTrigger is let through only for floorboss's own daily routine.\n`);
+        process.exit(2);
+      }
       // How a subagent hands its result to the session that started it: nothing leaves this session, and without it a
       // researcher, writer or critic does its work and can't say what it found.
       if (subagent && toolName === 'SubagentHandback') process.exit(0);
@@ -320,6 +404,18 @@ if (isMain(import.meta.url)) {
     // script, so in the session that ran floorboss (or a subagent while a run is live) they're refused like any
     // other shell command; elsewhere they're left to Claude Code's own prompt.
     if (toolName === 'PowerShell' || toolName === 'Monitor') {
+      // The one-use records (lib/autosend/guard-record.mjs shellCallRecords), before anything is decided: a main-thread
+      // shell call clears its session's own records; a subagent's waits while the user's prompt is open.
+      try {
+        const rr = shellCallRecords({ home: home(), session, subagent, floorboss: false, nowMs: Date.now() });
+        if (rr?.refuse) {
+          process.stderr.write(`floorboss blocked this call: ${rr.refuse}.\n`);
+          process.exit(2);
+        }
+      } catch (e) {
+        process.stderr.write(`floorboss blocked this call: ${String(e?.message).slice(0, 400)}.\n`);
+        process.exit(2);
+      }
       if (runToken()) {
         process.stderr.write(`floorboss blocked this call: an unattended run runs only floorboss's own scripts.\n`);
         process.exit(2);
@@ -328,7 +424,7 @@ if (isMain(import.meta.url)) {
       {
         let sched = null;
         try {
-          sched = scheduleRefusal(input.tool_input?.command);
+          sched = recordsRefusal(input.tool_input?.command) || scheduleRefusal(input.tool_input?.command);
         } catch (e) {
           sched = `its guard couldn't check this command (${String(e.message).slice(0, 80)}).`;
         }
@@ -351,10 +447,22 @@ if (isMain(import.meta.url)) {
     // (floorbossScriptCall: a skill's cli.mjs, or the mock event's load.mjs). A script call other than run-end or
     // record, from a hook input with a session id, ties the run lock to this session.
     if (toolName === 'Bash') {
+      // The one-use records (lib/autosend/guard-record.mjs shellCallRecords), before anything is decided: a main-thread
+      // shell call clears its session's own records; a subagent's waits while the user's prompt is open.
+      try {
+        const rr = shellCallRecords({ home: home(), session, subagent, floorboss: (() => { try { return !!floorbossScriptCall(input.tool_input?.command); } catch { return true; } })(), nowMs: Date.now() });
+        if (rr?.refuse) {
+          process.stderr.write(`floorboss blocked this call: ${rr.refuse}.\n`);
+          process.exit(2);
+        }
+      } catch (e) {
+        process.stderr.write(`floorboss blocked this call: ${String(e?.message).slice(0, 400)}.\n`);
+        process.exit(2);
+      }
       let why = null;
       try {
         // Then, in any session: nothing that installs, loads, changes or switches on what floorboss runs on its own.
-        why = bashRefusal(input.tool_input?.command) || scheduleRefusal(input.tool_input?.command);
+        why = recordsRefusal(input.tool_input?.command) || bashRefusal(input.tool_input?.command) || scheduleRefusal(input.tool_input?.command) || pluginNodeRefusal(input.tool_input?.command);
       } catch (e) {
         why = `its guard couldn't check this command (${String(e.message).slice(0, 80)}).`;
       }
@@ -363,10 +471,39 @@ if (isMain(import.meta.url)) {
         process.exit(2);
       }
       let call = null;
+      let goneSaid = null;
       try {
         call = floorbossScriptCall(input.tool_input?.command);
       } catch {
         call = null;
+      }
+      // The auto-send script in Claude Code: the daily Claude routine's commands and a routine event's laptop steps only
+      // (its other commands are for Codex and its cloud task, and one of them pushes to a git remote).
+      if (call?.skill === 'autosend' && !AUTOSEND_CLAUDE.includes(call.sub)) {
+        process.stderr.write(`floorboss blocked this call: in Claude Code the auto-send script runs only ${AUTOSEND_CLAUDE.join(', ')}, not ${String(call.sub || 'that').slice(0, 40)}.\n`);
+        process.exit(2);
+      }
+      // A subagent never changes auto-send; draft-gone asks the user, with their words and the person (audit run 11).
+      if (call?.skill === 'autosend') {
+        const sw = subagent ? subagentWhy(call.sub) : null;
+        if (sw) {
+          process.stderr.write(`floorboss blocked this call: ${sw}\n`);
+          process.exit(2);
+        }
+        if (call.sub === 'draft-gone') {
+          let g;
+          try {
+            g = draftGoneAsk(input.tool_input?.command, clockNow());
+          } catch (e) {
+            g = { refuse: `its guard couldn't check this call (${String(e?.message).slice(0, 120)}).` };
+          }
+          if (g.refuse) {
+            process.stderr.write(`floorboss blocked this call: ${g.refuse}\n`);
+            process.exit(2);
+          }
+          ask(g.ask);
+          goneSaid = g.said;
+        }
       }
       // In an unattended run: a ticketed session runs floorboss's own scripts only, and the scripts that turn unattended
       // drafts on or authorise follow-ups ask the user (hooks/guard/unattended.mjs).
@@ -417,6 +554,19 @@ if (isMain(import.meta.url)) {
           process.exit(2);
         }
       }
+      if (call?.skill === 'crm-triage' && call.sub === 'lift-hold') {
+        let lh;
+        try {
+          lh = liftHoldCall(input.tool_input?.command, { subagent });
+        } catch (e) {
+          lh = { refuse: `its guard couldn't check this lift (${String(e?.message).slice(0, 80)}).` };
+        }
+        if (lh.refuse) {
+          process.stderr.write(`floorboss blocked this call: ${lh.refuse}\n`);
+          process.exit(2);
+        }
+        if (lh.ask) ask(lh.ask);
+      }
       if (call?.skill === 'connectors' && ['save-recipe', 'forget'].includes(call.sub)) {
         // A throw here is a refusal: only exit 2 stops the call.
         let change;
@@ -433,8 +583,34 @@ if (isMain(import.meta.url)) {
         }
         if (change.ask) ask(change.ask);
       }
+      // autosend remote --confirm: the user's yes to their data repository is asked of them, never taken (a subagent's,
+      // or another argument, is refused).
+      if (call?.skill === 'autosend' && call.sub === 'remote') {
+        let r;
+        try {
+          r = remoteConfirmCall(input.tool_input?.command, { subagent, home: home() });
+        } catch (e) {
+          r = { refuse: `its guard couldn't check this call (${String(e?.message).slice(0, 80)}).` };
+        }
+        if (r.refuse) {
+          process.stderr.write(`floorboss blocked this call: ${r.refuse}\n`);
+          process.exit(2);
+        }
+        ask(r.ask);
+      }
+      // The one-use record for an auto-send command that changes state: written only now, when every rule above let
+      // the call go on (allow, or ask), for exactly its words. Not in an unattended run that would ask (it is refused).
+      // A record the guard can't write: the call is blocked (the command would refuse it anyway).
+      if (call?.skill === 'autosend' && needsRecord(call.sub) && !(pendingAsks() && process.env.FLOORBOSS_UNATTENDED)) {
+        try {
+          writeRecord(home(), shellWords(input.tool_input?.command).slice(2), { said: goneSaid, session, toolUseId: input.tool_use_id });
+        } catch (e) {
+          process.stderr.write(`floorboss blocked this call: ${e instanceof RecordsFolderError ? String(e.message).slice(0, 400) : `its safety check couldn't note this command (${String(e?.message).slice(0, 120)})`}. Nothing was changed.\n`);
+          process.exit(2);
+        }
+      }
       try {
-        if (call && session && !['run-end', 'record', 'unattended-status'].includes(call.sub)) stampRun({ session, transcript: input.transcript_path });
+        if (call && session && !['run-end', 'record', 'unattended-status'].includes(call.sub) && !(call.skill === 'autosend' && AUTOSEND_UNSTAMPED.includes(call.sub))) stampRun({ session, transcript: input.transcript_path });
       } catch {
         /* best effort */
       }
@@ -496,6 +672,25 @@ if (isMain(import.meta.url)) {
       const server = /^mcp__(.+?)__/.exec(input.tool_name)[1];
       const toolPart = String(input.tool_name).replace(/^mcp__.+?__/, '');
       const browserCall = isBrowser(server, toolPart);
+      // A Gmail draft for a message the user approved at the final approval, and its read-back (hooks/guard/
+      // autosend-drafts.mjs), in the session that ran floorboss: let through with the user's own prompt when it matches
+      // the approved message exactly. Anything else falls to the run lock's rules below, which refuse a draft tool.
+      if (!subagent && !runToken() && server === DRAFTS_SERVER && ['create_draft', 'get_draft', 'delete_draft'].includes(toolPart) && run.active && run.session) {
+        let d = null;
+        try {
+          d = toolPart === 'create_draft' ? draftCall(input, home(), nowMs) : toolPart === 'get_draft' ? getDraftCall(input, home(), nowMs) : deleteDraftCall(input, home(), nowMs);
+        } catch (e) {
+          d = { refuse: `its guard couldn't check this call (${String(e?.message).slice(0, 120)}).` };
+        }
+        if (d?.refuse) {
+          process.stderr.write(`floorboss blocked this call: ${d.refuse}\n`);
+          process.exit(2);
+        }
+        if (d?.ask) {
+          ask(d.ask);
+          allow();
+        }
+      }
       // An unattended run (a token in this Claude Code process's environment): its own rules, and the one "allow" floorboss
       // gives. A call that fails them is refused and the run stops; nothing here ever asks.
       if (runToken()) {
@@ -880,7 +1075,7 @@ if (isMain(import.meta.url)) {
           for (const [it] of hits) typedNotes.push({ ...it, _event: browserSend.event });
           const before = eventRecord(join(home(), 'events', browserSend.event)).entries.filter((e) => e.id === hit.id && e.touch === hit.touch && e.type === 'send_released');
           ask(
-            `floorboss: the browser is about to send the ${hit.touch > 1 ? `follow-up ${hit.touch - 1}` : 'note'} to ${promptPerson(hit.name, hit.id, hit.to)} in ${promptLine(hit.where || 'the event app')}.${letThroughBefore({ ...hit, _event: browserSend.event }, before)}\n\nThe text you approved, as it is typed:\n${fullText(null, texts.join('\n\n'))}\n\nAllow only if this page is that person's and this is the approved note.`
+            `floorboss: the browser is about to send the ${hit.touch > 1 && !firstContact(join(home(), 'events', browserSend.event), hit.id, hit.touch) ? `follow-up ${hit.touch - 1}` : hit.touch > 1 ? 'first message' : 'note'} to ${promptPerson(hit.name, hit.id, hit.to)} in ${promptLine(hit.where || 'the event app')}.${letThroughBefore({ ...hit, _event: browserSend.event }, before)}\n\nThe text you approved, as it is typed:\n${fullText(null, texts.join('\n\n'))}\n\nAllow only if this page is that person's and this is the approved note.`
           );
         }
       }
@@ -914,7 +1109,7 @@ if (isMain(import.meta.url)) {
         const releases = eventRecord(join(home(), 'events', it._event)).entries.filter((e) => e.id === it.id && e.touch === it.touch && e.type === 'send_released');
         const again = letThroughBefore(it, releases);
         ask(
-          `floorboss: send ${it.touch > 1 ? `follow-up ${it.touch - 1}` : it.touch === 0 ? 'the meeting confirmation' : 'the first message'} to ${promptPerson(name, it.id, callTo)} via ${it.via}.${again}${checked}${held}\n\nThe text you approved, as it goes:\n${fullText(it.subject, it.body)}\n\nAllow only if this is the approved message to the right person.`
+          `floorboss: send ${it.touch > 1 && !firstContact(join(home(), 'events', it._event), it.id, it.touch) ? `follow-up ${it.touch - 1}` : it.touch === 0 ? 'the meeting confirmation' : 'the first message'} to ${promptPerson(name, it.id, callTo)} via ${it.via}.${again}${checked}${held}\n\nThe text you approved, as it goes:\n${fullText(it.subject, it.body)}\n\nAllow only if this is the approved message to the right person.`
         );
       }
       // An allowed call to a connector floorboss was given keeps its run open, so a long research step can't

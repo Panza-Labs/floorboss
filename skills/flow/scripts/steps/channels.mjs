@@ -7,12 +7,37 @@ import { join } from 'node:path';
 import { readJson } from '../../../../lib/jsonio.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { cli, step, node, onToolError, toolDown, errorFile } from './shared.mjs';
+import { CRM_ADD_FIELDS, CRM_BROWSER_FIELDS } from '../../../event-context/scripts/onboarding-tree.mjs';
 
 // LinkedIn and event-app messages that went out are logged in the CRM (crm_log: browser): one yes opens a
 // 20-minute window, then Claude logs every listed message in the CRM's web app in one go. Tasks or the CSV in
 // the outbox cover the rest (crm_log: tasks | csv).
 // People to add to the CRM before their first email (outreach contact-list): through the create tool one at a
 // time (the guard asks before each), or by an import the user makes, after which each is looked up by email.
+// The question for adding people to the CRM: exactly what an add writes, and that each one is asked first. Where the
+// CRM's connection has no tool floorboss may add people with (claude.ai HubSpot's only write tool is refused), the
+// import is the way.
+export function crmContactsQuestion({ names, count, crmName, csv, again, canCreate = true }) {
+  const lead = again ? `I couldn't find ${names} in ${crmName} after the import.` : `${names} ${count === 1 ? "isn't" : "aren't"} in ${crmName} yet.`;
+  const how = again
+    ? 'Import again and say "imported", or say "go on without them".'
+    : !canCreate
+      ? `floorboss can't add people through your ${crmName} connection, so import ${csv} into ${crmName} yourself and say "imported", or say "go on without them" (then you're asked about their replies).`
+      : `To add them now, floorboss adds each person's ${CRM_ADD_FIELDS} to ${crmName}, nothing else, and Claude Code asks you before each one. Or import ${csv} yourself and say "imported", or say "go on without them" (then you're asked about their replies).`;
+  return {
+    question: `${lead} They go in before the first email, so their replies land on a record floorboss can read. ${how}`,
+    options: [...(canCreate && !again ? [`add them now: floorboss adds each one's ${CRM_ADD_FIELDS}, asking you before each`] : []), 'imported', 'go on without them']
+  };
+}
+// Whether the CRM's connection has a tool floorboss may add people with: known from the scan (found.crm_create), or
+// already saved. An inventory from before 0.1.7 doesn't say: discovery decides then.
+function canCreateIn(c, cfg) {
+  if (cfg.connectors?.['crm.create_contact']) return true;
+  const f = c.ob?.inv?.found;
+  if (!Array.isArray(f?.crm_create)) return true;
+  const server = cfg.connectors?.['crm.lookup']?.server;
+  return server ? f.crm_create.includes(`mcp:${server}`) : f.crm_create.length > 0;
+}
 export function crmContactStep(c, e, cfg) {
   if (!cfg.connectors?.['crm.lookup'] && !cfg.connectors?.['crm.create_contact']) return null;
   const cl = cli('event-outreach', ['contact-list', '--event', e.event.slug], c);
@@ -87,8 +112,7 @@ export function crmContactStep(c, e, cfg) {
     {
       ask: {
         id: 'crm_contacts',
-        question: `${again ? `I couldn't find ${names} in ${crmName} after the import.` : `${names} ${items.length === 1 ? "isn't" : "aren't"} in ${crmName} yet.`} They go in before the first email, so their replies land on a record floorboss can read. ${again ? 'Import again and say "imported", or say "go on without them".' : `Add them now through the CRM connection, or import ${cl.csv} yourself and say "imported", or say "go on without them" (then you're asked about their replies).`}`,
-        options: ['add them now', 'imported', 'go on without them'],
+        ...crmContactsQuestion({ names, count: items.length, crmName, csv: cl.csv, again, canCreate: canCreateIn(c, cfg) }),
         answer_format: '"add them now" | "imported" | "go on without them" (their words)'
       },
       help: 'skills/connectors/SKILL.md#adding-people-to-the-crm'
@@ -96,6 +120,13 @@ export function crmContactStep(c, e, cfg) {
   );
 }
 
+// The one yes that opens the browser log window: what floorboss does there, as the settings make it (crm-log.mjs:
+// a new contact for "yes, create them", an empty LinkedIn URL or job title filled when crm_fill_blanks is yes).
+export function crmLogWindowQuestion({ n, crmName, fill, create }) {
+  const what = [`logs each one on the contact's record (text and date)`, create ? `adds anyone not in ${crmName} yet (${CRM_BROWSER_FIELDS})` : null, fill ? 'fills an empty LinkedIn URL or job title' : null].filter(Boolean);
+  const never = fill ? 'never changes a field that has a value, merges or deletes anything' : 'never edits, merges or deletes anything';
+  return `Log ${n} sent ${n === 1 ? 'message' : 'messages'} in ${crmName} now? Open it in your browser and log in first. floorboss ${what.join(', ')}, and ${never}.`;
+}
 export function logStep(c, e) {
   if (e.settings.crm_log !== 'browser') return null;
   const ll = cli('event-outreach', ['log-list', '--event', e.event.slug], c);
@@ -109,7 +140,7 @@ export function logStep(c, e) {
         ask: {
           id: 'crm_create_ok',
           ids: ll.need_ok.map((x) => x.id),
-          question: `Create ${ll.need_ok.length === 1 ? 'this contact' : `these ${ll.need_ok.length} contacts`} in ${crmName} so the messages can be logged? ${ll.need_ok.map((x) => `${x.name} (${x.company})`).join(', ')}. Only new contacts are created (name, company, title, email, LinkedIn URL); nothing existing is changed.`,
+          question: `Create ${ll.need_ok.length === 1 ? 'this contact' : `these ${ll.need_ok.length} contacts`} in ${crmName} so the messages can be logged? ${ll.need_ok.map((x) => `${x.name} (${x.company})`).join(', ')}. Only new contacts are created (${CRM_BROWSER_FIELDS}); nothing existing is changed.`,
           options: ['yes', 'no'],
           answer_format: '{"answer":"yes"|"no","ids":[<the ids listed>]}'
         }
@@ -130,7 +161,7 @@ export function logStep(c, e) {
     return step('crm_log_window', `${ll.to_log} LinkedIn or app ${ll.to_log === 1 ? 'message goes' : 'messages go'} into ${crmName} as logged activities.`, {
       ask: {
         id: 'crm_log_window',
-        question: `Log ${ll.to_log} sent ${ll.to_log === 1 ? 'message' : 'messages'} in ${crmName} now? Open it in your browser and log in first. floorboss logs each one on the contact's record (text and date), and never edits, merges or deletes anything.`,
+        question: crmLogWindowQuestion({ n: ll.to_log, crmName, fill: e.settings.crm_fill_blanks === 'yes', create: e.settings.crm_create_contacts === 'yes' }),
         options: ['yes, log them now', 'not now'],
         answer_format: '"yes, log them now" | "not now"'
       }
@@ -230,6 +261,53 @@ export function otherChannelStep(c, e, cfg, w, others = []) {
       question: `Has ${name} replied, booked or said stop on ${where} since your message there?`,
       options: ['no reply', 'they replied', 'they asked to stop'],
       answer_format: '{"id":"<id>","answer":"no reply|they replied|they asked to stop","said":"<the user\'s words>"}'
+    }
+  });
+}
+
+// A finished CRM message task floorboss can't tell was sent (its text or day changed, and no close request was made
+// before): one yes-or-no question, in the chat, about one task at a time.
+export function taskSentStep(c, e) {
+  for (const [id, p] of Object.entries(e.state.people || {}))
+    for (const [key, t] of Object.entries(p.tasks || {}))
+      if (t.ask_sent) {
+        const name = p.name || readJson(join(e.paths.derived, 'contacts.json'), []).find?.((x) => x.id === id)?.name || id;
+        return step('task_sent', `A CRM task for ${name} was marked done after its message changed, so floorboss asks whether it was sent.`, {
+          ask: {
+            id: 'task_sent',
+            key,
+            person: { id, name },
+            question: `Did you send the message in the task for ${name}?`,
+            options: ['yes', 'no'],
+            answer_format: `{"key":"${key}","answer":"yes"|"no"}: the key of this task, as given here`
+          }
+        });
+      }
+  return null;
+}
+
+// The one question about LinkedIn replies: about one person by name, or everyone due at once.
+export function replyQuestion(people) {
+  if (people.length === 1) return `A LinkedIn follow-up is due today for ${people[0].name}. Did ${people[0].name} reply on LinkedIn? Say "no", or "yes".`;
+  return `${people.length} LinkedIn follow-ups are due today. Did any of them reply on LinkedIn? Name them, say "none", or say "show me the list".`;
+}
+
+// A LinkedIn follow-up the user sends by hand is listed as due only once they said whether that person replied on
+// LinkedIn, which floorboss can't read: one question for everyone due (or a read of that inbox, where allowed).
+export function linkedinReplyStep(c, e) {
+  const r = cli('event-outreach', ['linkedin-due', '--event', e.event.slug], c);
+  const people = (r.ask || []).filter((x, i, a) => a.findIndex((y) => y.id === x.id) === i).map((x) => ({ id: x.id, name: x.name || x.id }));
+  if (!people.length) return null;
+  if (e.settings.inbox_read?.linkedin === true && !e.state.tool_failed?.['inbox.linkedin'])
+    return inboxStep(c, e, 'LinkedIn', people.map((x) => x.id));
+  return step('no_reply_check', `${plural(people.length, 'LinkedIn follow-up')} ${people.length === 1 ? 'is' : 'are'} due, and floorboss can't read LinkedIn, so the user is asked once whether anyone replied there.`, {
+    ask: {
+      id: 'no_reply',
+      channels: ['linkedin'],
+      people,
+      question: replyQuestion(people),
+      options: people.length === 1 ? ['no', 'yes'] : ['none', 'some replied: <names>', 'show me the list'],
+      answer_format: '{"people":[<every id asked about>],"replied":["<id>"],"stopped":["<id>"],"said":"<the user\'s words>"} (replied and stopped may be empty); everyone in people not named counts as no reply'
     }
   });
 }

@@ -103,7 +103,7 @@ export function buildBrief(job, { event, settings, files }) {
   );
   L.push('', `To: ${one(job.contact.name, 120)}, ${one(job.contact.title, 120) || 'no title given'} at ${one(job.contact.company, 120)}.`);
   L.push(
-    `Channel: ${job.channel === 'email' ? 'email (subject and body)' : `a note in ${app ? 'the event app or LinkedIn' : 'an app'}, at most ${settings.paste_limit} characters, no subject`}.`
+    `Channel: ${job.channel === 'email' ? 'email (subject and body)' : `a note in ${app ? 'the event app or LinkedIn' : 'an app'}, at most ${job.char_limit || settings.paste_limit} characters, no subject`}.`
   );
   if (job.languages?.length > 1)
     L.push(

@@ -35,7 +35,14 @@ test('event-app messages become CRM tasks; done tasks and their outcomes come ba
   // The guard lets through exactly these tasks, nothing else.
   const config = { connectors: { 'crm.create_task': { server: 'crm-a', tool: 'create_task', reading: 'the id it returns', tool_hash: 'f'.repeat(64), test_draft: { draft_id: 't-test', user_confirmed: true }, args: { properties: { hs_task_subject: '{title}', hs_task_body: '{body}', hs_timestamp: '{due}', hs_task_status: 'NOT_STARTED' }, associations: [{ to: { id: '{contact_ref}' } }] } } } };
   const asCall = (it, o = {}) => ({ tool_name: 'mcp__crm-a__create_task', tool_input: { properties: { hs_task_subject: it.title, hs_task_body: it.body, hs_timestamp: it.due, hs_task_status: 'NOT_STARTED', ...o }, associations: [{ to: { id: it.contact_ref || '' } }] } });
-  assert.equal(check(asCall(items[0]), { config, stageItems: [], taskItems: items }), null);
+  // As the guard lists them (hooks/guard/sends.mjs listed): each item with its event, whose record is read from the home.
+  const home0 = process.env.FLOORBOSS_HOME;
+  process.env.FLOORBOSS_HOME = H.HOME;
+  try {
+    assert.equal(check(asCall(items[0]), { config, stageItems: [], taskItems: items.map((x) => ({ ...x, _event: H.slug })) }), null);
+  } finally {
+    process.env.FLOORBOSS_HOME = home0;
+  }
   assert.match(check(asCall({ ...items[0], body: 'Wire the money' }), { config, stageItems: [], taskItems: items }), /isn't one floorboss listed/);
   assert.match(check(asCall(items[0], { hubspot_owner_id: '9001' }), { config, stageItems: [], taskItems: items }), /isn't in floorboss's crm.create_task recipe/);
   // Create them in the stand-in CRM, as the recipe would.
@@ -100,14 +107,21 @@ test('stops in any phrasing, negations ask, long notes read whole, no double boo
 
 test('the guard wants one contact, the listed one, on the recipe\'s own server; tasks-created refuses blocked and repeated tasks', () => {
   const config = { connectors: { 'crm.create_task': { server: 'crm-a', tool: 'create_task', reading: 'the id it returns', tool_hash: 'f'.repeat(64), test_draft: { draft_id: 't-test', user_confirmed: true }, args: { properties: { hs_task_subject: '{title}', hs_task_body: '{body}', hs_timestamp: '{due}' }, associations: [{ to: { id: '{contact_ref}' } }] } } } };
-  const item = { key: 'c1:1', title: 'Message Ana', body: 'Hi', due: '2026-10-12', contact_ref: null, listed_at: NOW };
+  const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,\nBo Li,VP Ops,Globex,\n' });
+  triage(H);
+  // As the guard lists it (hooks/guard/sends.mjs listed): with its event and person, whose record is read from the home.
+  const item = { key: 'c1:1', id: idOf(H, 'Ana Berg'), _event: H.slug, title: 'Message Ana', body: 'Hi', due: '2026-10-12', contact_ref: null, listed_at: NOW };
   const mk = (server, assoc) => ({ tool_name: `mcp__${server}__create_task`, tool_input: { properties: { hs_task_subject: 'Message Ana', hs_task_body: 'Hi', hs_timestamp: '2026-10-12' }, associations: assoc } });
-  assert.equal(check(mk('crm-a', [{ to: { id: '' } }]), { config, stageItems: [], taskItems: [item] }), null);
+  const home0 = process.env.FLOORBOSS_HOME;
+  process.env.FLOORBOSS_HOME = H.HOME;
+  try {
+    assert.equal(check(mk('crm-a', [{ to: { id: '' } }]), { config, stageItems: [], taskItems: [item] }), null);
+  } finally {
+    process.env.FLOORBOSS_HOME = home0;
+  }
   assert.ok(check(mk('crm-a', [{ to: { id: '999-CEO' } }]), { config, stageItems: [], taskItems: [item] }));
   assert.ok(check(mk('crm-a', [{ to: { id: '' } }, { to: { id: '2' } }]), { config, stageItems: [], taskItems: [item] }));
   assert.equal(check(mk('evil-crm-a', [{ to: { id: '' } }]), { config, stageItems: [], taskItems: [item] }), null, 'another server isn\'t the recipe: none of floorboss\'s business outside a run');
-  const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,\nBo Li,VP Ops,Globex,\n' });
-  triage(H);
   draftApprove(H);
   const items = JSON.parse(readFileSync(cli(H, 'event-outreach', ['task-list', '--event', H.slug]).file, 'utf8'));
   // Bo is removed after the list was made.

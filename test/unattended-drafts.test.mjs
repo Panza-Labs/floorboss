@@ -264,8 +264,11 @@ test('a changed text after the authorisation is not authorised: re-approved, it 
   // Follow-up 1 saved again with another word, read by the critic and approved again (the entries the gate writes).
   const old = ledgerOf(H).filter((e) => e.type === 'approved' && e.touch === 2).pop();
   const d = JSON.parse(readFileSync(join(H.dir, 'drafts', `${old.hash}.json`), 'utf8'));
-  const nd = { ...d, body: d.body.replace('Would 20 minutes', 'Could 20 minutes') };
+  // One more line, so the text changes whatever the draft's own words are (a replace of words the draft no longer had
+  // changed nothing, and the "changed" text was the authorised one).
+  const nd = { ...d, body: `${d.body}\nOne more line.` };
   const hash = approvalHash(nd, old.to);
+  assert.notEqual(hash, old.hash, 'the text changed');
   writeFileSync(join(H.dir, 'drafts', `${hash}.json`), JSON.stringify(nd));
   const wc = join(H.dir, 'work', 'drafts', `${H.ana}-t2.json`);
   writeFileSync(wc, JSON.stringify({ ...JSON.parse(readFileSync(wc, 'utf8')), body: nd.body }));

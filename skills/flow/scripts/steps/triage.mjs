@@ -14,7 +14,7 @@ import { onboardingAsk } from './setup.mjs';
 
 // Triage: who is who (resolve), who fits, the people to check, the shortlist the user approves, free time,
 // and looking up missing contact details.
-// The check_these question: as it always was in Claude Code and with a CRM. In hand-send with no CRM, plain words; and
+// The check_these question: as it always was with a CRM. With no CRM (any host), plain words; and
 // when nobody in it has a match to name (people), only "write or skip": with no CRM, someone is here because floorboss
 // isn't sure they fit (their title), and a "same person as the one beside them" half asks about a match nobody shows
 // (the live Codex test, 2026-11-20: the round-3 wording kept that half).
@@ -22,7 +22,7 @@ export const noMatchShown = (people) =>
   Array.isArray(people) && people.length > 0 && people.every((r) => r && r.rung !== 'fuzzy' && !r.holder && !(r.alternatives || []).some((a) => a.holder || a.ref));
 export function checkTheseQuestion(c, env = process.env, people = null) {
   const OLD = 'For each person in check-these: same-person (name the CRM row), different-person, not-in-crm (the CRM lookup gave no answer and the CRM has nobody for them), reach, warm or skip, with a word on why.';
-  if (!handSend(env) || (c.ob?.ans?.crm_choice && c.ob.ans.crm_choice !== 'none')) return OLD;
+  if (c.ob?.ans?.crm_choice && c.ob.ans.crm_choice !== 'none') return OLD;
   if (noMatchShown(people))
     return /job|networking|hiring|research/.test(c.ob?.ans?.goal_type || '')
       ? "floorboss isn't sure these people fit what you're there for: write to them or skip? A word on why helps."
@@ -106,8 +106,8 @@ export function triageSteps(x) {
       }
     );
   const checks = Object.entries(resolved).filter(([, r]) => r.group === 'check');
-  // Hand-send, no CRM, nobody with a match to name: write or skip, nothing else.
-  const plainCheck = checks.length && handSend() && !(c.ob?.ans?.crm_choice && c.ob.ans.crm_choice !== 'none') && noMatchShown(checks.map(([, r]) => r));
+  // No CRM, nobody with a match to name: write or skip, nothing else.
+  const plainCheck = checks.length && !(c.ob?.ans?.crm_choice && c.ob.ans.crm_choice !== 'none') && noMatchShown(checks.map(([, r]) => r));
   if (checks.length)
     return step(
       'check_these',

@@ -9,21 +9,40 @@
 // Each node: id, round, when(s) → applies?, done(s) → answered?, ask(s) → text, options(s) → [...], saves.
 
 import { connected, harness, HARNESSES } from '../../../lib/harness.mjs';
+import { personNames, personName } from './scan.mjs';
 import { systemZone } from '../../../lib/tz.mjs';
 import { leadDays, suggestedTouches } from '../../../lib/config.mjs';
 import { EVENT_ANSWERS } from '../../../lib/scope.mjs';
+import { chosenRoute, stepLabel } from '../../../lib/route.mjs';
 import { plainText, noteOwnerQuestion, effectsHash } from '../../../lib/reading.mjs';
 import { ownerQuoted, plainOwnerValue } from '../../../lib/names.mjs';
 const any = (a) => Array.isArray(a) && a.length > 0;
-// A server as a person would name it: "claude_ai_Gmail" is Gmail.
-const pretty = (x) =>
-  x
-    .replace(/^[a-z]+:/, '')
-    .replace(/^claude_ai_/i, '')
-    .replace(/_+/g, ' ')
-    .trim();
-const names = (s, k) => (s.inv?.found?.[k] || []).map(pretty);
+const names = (s, k) => personNames(s.inv?.found?.[k] || []);
+// Mailboxes that can only read (or draft): no send tool was found, so floorboss can't send from them.
+// An inventory saved before email_send existed (0.1.6) doesn't know: nothing is called read-only then (the flow scans
+// again first, steps/setup.mjs).
+export const readOnlyMail = (s) => {
+  if (!Array.isArray(s.inv?.found?.email_send)) return [];
+  const send = new Set(s.inv.found.email_send);
+  return personNames((s.inv?.found?.email || []).filter((x) => !send.has(x)));
+};
+export const readOnlyLine = (s) => `floorboss can read replies in ${readOnlyMail(s).join(' and ')}, and you send`;
+// What floorboss does in a connected CRM, said the same way wherever it is promised.
+// The fields floorboss writes on a new contact: through the CRM's own tool (crm.create_contact, skills/connectors), and
+// in the user's browser (crm_create_contacts, crm_create_ok), which also has the LinkedIn URL.
+export const CRM_ADD_FIELDS = 'name, email, company and job title';
+export const CRM_BROWSER_FIELDS = 'name, email, company, job title and LinkedIn URL';
+export const crmPromise = (name) =>
+  `floorboss reads ${name}. It writes there only what you say yes to: a new contact (${CRM_ADD_FIELDS}; in your browser also the LinkedIn URL), a task, a log of a message you sent, or an empty LinkedIn URL or job title filled in. Each kind is your choice in setup; contacts, logs and filled fields then go after one yes per batch.`;
+// Auto-send can be offered at setup: Claude Code, email chosen, and the claude.ai Gmail with a tool that makes drafts
+// (the daily routine sends the drafts it finds there).
+export const autosendOffer = (s) =>
+  connected() && /email/.test(String(s.ans.sending_channels || '')) && (s.inv?.found?.email_draft || []).includes('mcp:claude_ai_Gmail');
+const sendMail = (s) => personNames(s.inv?.found?.email_send || []);
 const team = (s) => s.ans.works_alone === false;
+// The guided intake (flow steps/intake.mjs) answered: its picks stand for the old open questions. Saved as text.
+const accountPick = (s, k) => s.ans.account_intake != null && s.ans.account_intake !== '' && String(s.ans.account_intake).split(',').map((x) => x.trim()).includes(k);
+const intakeOn = (s) => s.ans.account_intake != null && s.ans.account_intake !== '';
 const crmChosen = (s) => ['connector', 'export', 'spreadsheet', 'home-made', 'other'].includes(s.ans.crm_choice);
 
 // Phases: "first" is what's needed to show the user who on their list fits (event, goal, the list, the tools,
@@ -68,16 +87,12 @@ const LEVEL_OF = {
   insights: 'standard',
   posture: 'full',
   seller_framing: 'full',
-  sending: 'full',
-  linkedin_send: 'full',
-  send_setup: 'full',
   inbox_read: 'full',
   crm_log: 'full',
   crm_create_contacts: 'full',
   message_route: 'full',
   followup_gap: 'full',
   crm_fill_blanks: 'full',
-  followups_mode: 'full',
   app_request_limit: 'full'
 };
 const levelOf = (s) => s.ans.setup_level || null;
@@ -88,10 +103,10 @@ export function levelOptions(s) {
   const tools = [...found(s, 'crm'), ...found(s, 'email'), ...found(s, 'calendar')];
   const crm = found(s, 'crm');
   return [
-    `quick${tools.length ? '' : ' (recommended)'}: your list, who you want to meet and what you offer, then drafts for you to send yourself. It assumes you work alone, with no CRM and no writing samples, and asks before any web research.${tools.length ? ` Nothing connected is used${crm.length ? `, so ${crm.join(' or ')} isn't checked: someone you already work with, a coworker's contact or an opt-out could get a first-time note` : ''}.` : ''}`,
-    `standard${tools.length ? ' (recommended)' : ''}: also checks the list against ${tools.length ? tools.join(', ') : 'your CRM export or contacts file'} (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, and sets your tone from samples. You send the messages.`,
+    `quick${tools.length ? '' : ' (recommended)'}: your list, who you want to meet and what you offer, then drafts; you choose whether floorboss sends them. It assumes you work alone, with no customer list (CRM) and no writing samples. Web research on the shortlisted companies and people starts on its own, with a heads-up; say "skip" and it stops.${tools.length ? ` Nothing connected is used${crm.length ? `, so ${crm.join(' or ')} isn't checked: someone you already work with, a coworker's contact or an opt-out could get a first-time note` : ''}.` : ''}`,
+    `standard${tools.length ? ' (recommended)' : ''}: also checks the list against ${tools.length ? tools.join(', ') : 'your customer list (CRM) export or contacts file'} (who you know, who a coworker owns, who opted out), asks about your team and customers with real names and counts, and sets your tone from samples.`,
     connected()
-      ? `full: everything in standard, plus floorboss sends what you approve${found(s, 'email').length ? ` from ${found(s, 'email')[0]}` : ''}, reads replies to stop follow-ups (LinkedIn and the event app only with your yes for each), and logs messages in your CRM.`
+      ? `full: everything in standard, plus floorboss sends what you approve${sendMail(s).length ? ` from ${sendMail(s)[0]}` : ''}${readOnlyMail(s).length && !sendMail(s).length ? ` where it can (${readOnlyLine(s)})` : ''}, reads replies to stop follow-ups (LinkedIn and the event app only with your yes for each), and logs messages in your CRM.`
       : `full: everything in standard, plus the order of channels and the days between follow-ups. You still send every message yourself, from your own mail app: floorboss uses no connected tools in ${HARNESSES[harness()].label}.`
   ];
 }
@@ -131,7 +146,7 @@ export const NODES = [
     when: (s) => !!s.ev && !!s.ans.setup_level && !s.cfg.goal && Object.keys(s.onboarding?.events || {}).some((k) => k !== s.ev.slug),
     done: (s) => s.ans.setup_reused === true,
     ask: (s) =>
-      `Same setup as last time? ${[`${s.ans.setup_level} setup`, s.ans.crm_choice && s.ans.crm_choice !== 'none' ? `your CRM (${s.ans.crm_server || s.ans.crm_label || (['other', 'export', 'spreadsheet', 'home-made'].includes(s.ans.crm_choice) ? 'a CSV export' : s.ans.crm_choice)})` : 'no CRM', s.ans.mailbox_choice === 'yes' ? 'your mailbox' : null, s.ans.works_alone === false ? `your team (${(s.cfg.colleagues || []).join(', ') || 'named before'})` : 'just you', s.cfg.own_company ? `${s.cfg.own_company}` : null, (s.ans.sending_channels || []).length ? `sending by ${[].concat(s.ans.sending_channels).join(', ')}` : 'you send the messages'].filter(Boolean).join(', ')}. Your do-not-contact list and voice carry over too. Say yes, or what changed.`,
+      `Same setup as last time? ${[`${s.ans.setup_level} setup`, s.ans.crm_choice && s.ans.crm_choice !== 'none' ? `your CRM (${(s.ans.crm_server && personName(s.ans.crm_server)) || s.ans.crm_label || (['other', 'export', 'spreadsheet', 'home-made'].includes(s.ans.crm_choice) ? 'a CSV export' : s.ans.crm_choice)})` : 'no CRM', s.ans.mailbox_choice === 'yes' ? 'your mailbox' : null, s.ans.works_alone === false ? `your team (${(s.cfg.colleagues || []).join(', ') || 'named before'})` : 'just you', s.cfg.own_company ? `${s.cfg.own_company}` : null, (s.ans.sending_channels || []).length ? `sending by ${[].concat(s.ans.sending_channels).join(', ')}` : 'you send the messages'].filter(Boolean).join(', ')}. Your do-not-contact list and voice carry over too. Say yes, or what changed.`,
     options: () => ['yes, same setup', 'something changed: <what>'],
     saves: 'answers: setup_reused'
   },
@@ -195,10 +210,10 @@ export const NODES = [
     id: 'list_source',
     round: 'event',
     phase: 'first',
-    when: (s) => !!s.ev,
+    when: (s) => !!s.ev && !s.ans.show_intake,
     done: (s) => (s.list?.rows || 0) > 0 || !!s.ans.list_source,
     ask: (s) =>
-      `Where's the attendee list? Give the file's path, or say if it's only in ${s.ev?.app_name || 'the event app'} or on a website, or you don't have one yet.`,
+      `Where's the attendee list? Give the file's path, or say if it's only in ${s.ev?.app_name || 'the event app'} or on a website, or type a few people here (name, company and email for each), or say you don't have one yet.`,
     saves: 'answers: list_source (export | own | app | none), list_url (a link to the public page); a file path is loaded as the attendee list straight away'
   },
   {
@@ -224,7 +239,7 @@ export const NODES = [
         (!!s.ans.mailbox_choice || !any(s.inv?.found?.email)) &&
         (!!s.ans.calendar_choice || !any(s.inv?.found?.calendar))),
     ask: (s) =>
-      `Say in one line each what you'll use, and ask once: ${[any(s.inv?.found?.crm) && `"I'll check everyone against ${names(s, 'crm').join(' or ')} (who you know, who a coworker owns, who opted out)"`, any(s.inv?.found?.email) && `"see who you've already emailed in ${names(s, 'email').join(', ')}"`, any(s.inv?.found?.calendar) && `"read your free time from ${names(s, 'calendar').join(', ')}"`].filter(Boolean).join(', ')}. OK, or change any? Reading only; whether floorboss may send is a separate choice later.`,
+      `Say in one line each what you'll use, and ask once: ${[any(s.inv?.found?.crm) && !s.ans.crm_choice && `"I'll check everyone against ${names(s, 'crm').join(' or ')} (who you know, who a coworker owns, who opted out)"`, any(s.inv?.found?.email) && `"see who you've already emailed in ${names(s, 'email').join(', ')}"${readOnlyMail(s).length ? ` (${readOnlyLine(s)})` : ''}`, any(s.inv?.found?.calendar) && `"read your free time from ${names(s, 'calendar').join(', ')}"`].filter(Boolean).join(', ')}.${any(s.inv?.found?.crm) && !s.ans.crm_choice ? ` ${crmPromise(names(s, 'crm').join(' or '))}` : ''} OK, or change any? Whether floorboss may send is a separate choice later.`,
     options: () => ['yes, use them', 'change some'],
     saves:
       'answers: crm_choice (connector | export | none) and crm_server, mailbox_choice (yes | no), calendar_choice (yes | no), tools_confirmed; each yes is connected right away'
@@ -264,7 +279,7 @@ export const NODES = [
     round: 'tools',
     phase: 'first',
     when: (s) => !any(s.inv?.found?.crm) && hasCompany(s),
-    done: (s) => !!s.ans.crm_choice,
+    done: (s) => !!s.ans.crm_choice || !!s.ans.crm_connect,
     ask: () => "Where do you keep your contacts and who you've talked to?",
     options: () => ["a CRM that isn't connected here", 'a spreadsheet', 'something I built (an app, a database)', 'nowhere yet'],
     saves: 'answers: crm_choice (other | spreadsheet | home-made | none)'
@@ -571,7 +586,7 @@ export const NODES = [
     when: (s) => seller(s) && s.cfg.drafting_mode !== 'delegate' && !any(s.inv?.found?.company_context),
     done: (s) => s.ans.offer_asked === true,
     ask: (s) =>
-      `What does ${s.cfg.own_company || 'your company'} sell, to whom, and one result you can name (and may a message name that customer)? Anything a message must never say? A link to the site or a deck works: read it and propose the lines.`,
+      `What does ${s.cfg.own_company || 'your company'} sell, to whom, and one result you can name (and may a message name that customer)? Anything a message must never say? ${s.ans.material_source ? `They gave their material (${String(s.ans.material_source).slice(0, 120)}): read it and propose the lines, and ask only to confirm.` : 'A link to the site or a deck works: read it and propose the lines.'}`,
     saves: 'what-you-bring (the one-sentence offer, problems it solves, proof); answers: offer_asked'
   },
   {
@@ -593,7 +608,7 @@ export const NODES = [
     when: (s) => s.cfg.drafting_mode === 'floorboss' || (s.cfg.drafting_mode === 'blend' && (s.cfg.drafter?.gaps || []).includes('voice')),
     done: (s) => s.ans.samples_ok === true || s.ans.samples_skipped === true,
     ask: (s) =>
-      `Three sample openings (casual and plain, warm, formal), written in ${(Array.isArray(s.cfg.languages) && s.cfg.languages[0]) || 'English'}: which is closest, and what would you change? Every change becomes a rule in your voice file. And if you have them, paste two to five emails you sent that got replies (or give their files); their length and how you open become your voice too. Or say "none".`,
+      `Three sample openings (casual and plain, warm, formal), written in ${(Array.isArray(s.cfg.languages) && s.cfg.languages[0]) || 'English'}: which is closest, and what would you change? Every change becomes a rule in your voice file.${intakeOn(s) && !accountPick(s, 'emails') ? '' : ' And if you have them, paste two to five emails you sent that got replies (or give their files); their length and how you open become your voice too. Or say "none".'}`,
     saves:
       'voice file (with the emails that got replies, their length and greeting); answers: samples_ok (or samples_skipped when an email they liked already shows their voice)'
   },
@@ -647,7 +662,7 @@ export const NODES = [
     when: (s) => !s.ev?.mock && seller(s) && s.cfg.drafting_mode !== 'delegate' && !!s.cfg.context_profile && s.bring && !s.bring.insights,
     done: (s) => s.ans.insights_asked === true || !!s.bring?.insights,
     ask: () =>
-      'what-you-bring has no "what you know that they don\'t" table: drafts will lean on questions, since there\'s nothing new to tell readers. Optional: one to three things you know from your work that a buyer may not (a pattern across your customers, where the time or money really goes), each with what it rests on. Or "none".',
+      'You haven\'t told me anything you know that buyers don\'t, so drafts will lean on questions. Optional: one to three things you know from your work that a buyer may not (a pattern across your customers, where the time or money really goes), each with what it rests on. Or "none".',
     saves: 'what-you-bring: "what you know" rows; answers: insights_asked'
   },
   { id: 'company_caps', round: 'event', phase: 'later', when: () => false, done: () => true, ask: () => '', saves: 'config: company_caps' },
@@ -715,6 +730,30 @@ export const NODES = [
   }
 ];
 
+// Besides email, where to reach people: asked at every level, in every host, before anything is drafted. Only the
+// channels chosen are in anyone's sequence (lib/route.mjs chosenRoute); each step is written for its own channel.
+export const reachOptions = (s) => {
+  const app = s.ev?.app_name ? `the event app (${s.ev.app_name})` : 'the event app';
+  return [
+    `${app}: one follow-up is a short note in the app`,
+    'LinkedIn: one follow-up is a short LinkedIn message (under 300 characters) that you send yourself',
+    'both: one note in the app and one LinkedIn message between the emails',
+    "email only: every message is an email, and someone with no email address isn't written to"
+  ];
+};
+NODES.push(
+  {
+    id: 'reach_channels',
+    round: 'sending',
+    phase: 'later',
+    when: () => true,
+    done: (s) => s.ans.reach_asked === true,
+    ask: () => 'Besides email, where do you want to reach people?',
+    options: (s) => reachOptions(s),
+    saves: 'config: reach (a list of app and linkedin; [] for email only); answers: reach_asked'
+  }
+);
+
 // Sending: floorboss sends approved messages itself only where the user turns it on.
 NODES.push(
   {
@@ -727,7 +766,7 @@ NODES.push(
       !connected()
         ? 'Should floorboss send your approved emails from your Gmail and send the follow-ups on their days, or prepare them for you to send? It never sends anything you have not approved, word for word, and a follow-up never goes to someone who replied.'
         : ![s.inv?.found?.email, s.inv?.found?.chat, s.inv?.found?.browser].some(any)
-        ? 'Nothing in your setup can send messages (no mailbox, chat app or browser is connected), so floorboss will prepare each message for you to send yourself. If you want it to send later, connect your mailbox to Claude and run /floorboss:start again.'
+        ? 'Should floorboss send your approved messages, or prepare them for you to send? Nothing in your setup can send yet (no mailbox, chat app or browser is connected): to have floorboss send, connect your mailbox to Claude and run /floorboss:start again.'
         : `Should floorboss send the messages itself once you approve them, or prepare them for you to send? It never sends anything you haven't approved, word for word: you'll see each person's whole sequence (first message and follow-ups) before anything goes. Where may it send?`,
     // Only what this setup can do: a channel with nothing connected to send on isn't offered.
     options: (s) =>
@@ -737,17 +776,19 @@ NODES.push(
         ...(any(s.inv?.found?.email) ? ['email (your connected mailbox)'] : []),
         ...(s.ev?.app_name && any(s.inv?.found?.browser) ? [`${s.ev.app_name} (in your browser)`] : []),
         ...(any(s.inv?.found?.chat) ? [`${names(s, 'chat').slice(0, 2).join(' / ')} (not yet tested)`] : []),
-        ...(any(s.inv?.found?.browser) ? ['LinkedIn (in your browser; not yet tested; read the warning first)'] : []),
+        ...(![s.inv?.found?.email, s.inv?.found?.chat, s.inv?.found?.browser].some(any) ? ["I'll connect my mailbox first"] : []),
+        // Always offered, last, however many tools are connected.
         "nowhere: I'll send them myself"
-      ].slice(0, 4),
+      ],
     saves:
-      'answers: sending_channels (a list of email, app, chat, linkedin; empty for none), autosend_said (Codex only: a yes to sending from Gmail) and sending_asked; email and chat need their send connection set up (discovery, with one test message to the user themselves)'
+      'answers: sending_channels (a list of email, app, chat; empty for none; LinkedIn is never sent by floorboss), autosend_said (Codex only: a yes to sending from Gmail) and sending_asked; email and chat need their send connection set up (discovery, with one test message to the user themselves)'
   },
   {
     id: 'linkedin_send',
     round: 'sending',
     phase: 'later',
-    when: (s) => connected() && (s.ans.sending_channels || '').includes?.('linkedin'),
+    // LinkedIn is never sent by floorboss (0.1.7): a LinkedIn step is always sent by hand, so this is never asked.
+    when: () => false,
     done: (s) => s.ans.linkedin_send_ack === true || s.ans.linkedin_send_declined === true,
     ask: () =>
       'LinkedIn forbids automated messaging in its terms and restricts or suspends accounts it catches, sometimes permanently. Floorboss would type and send each approved message in your own browser, slowly, as you. The risk to your account is yours. Turn it on?',
@@ -761,7 +802,9 @@ NODES.push(
     when: (s) => connected() && /email|chat/.test(String(s.ans.sending_channels || '')),
     done: (s) => s.ans.send_setup_done === true || s.ans.send_setup_skipped === true || !!s.cfg.connectors?.['email.send'] || !!s.cfg.connectors?.['chat.send'],
     ask: (s) =>
-      `To send ${/email/.test(String(s.ans.sending_channels)) ? 'email' : 'chat messages'} itself, floorboss needs the send tool set up: your own ${/email/.test(String(s.ans.sending_channels)) ? 'address' : 'number'} (the only place a test can go), then one test message to yourself that you check arrived. ${/email/.test(String(s.ans.sending_channels)) ? "Propose the connected mailbox's own address and ask only to confirm it" : 'Which number is yours'}?`,
+      /email/.test(String(s.ans.sending_channels)) && !sendMail(s).length && readOnlyMail(s).length
+        ? `Your ${readOnlyMail(s).join(' and ')} connection here can read but not send: floorboss can still read replies, and you send each email yourself. To have floorboss send, it needs a mailbox connection that can send email. Say "skip" to go on this way (every email waits in the outbox for you), or, once a connection that can send is set up, say "check again".`
+        : `To send ${/email/.test(String(s.ans.sending_channels)) ? 'email' : 'chat messages'} itself, floorboss needs the send tool set up: your own ${/email/.test(String(s.ans.sending_channels)) ? 'address' : 'number'} (the only place a test can go), then one test message to yourself that you check arrived. ${/email/.test(String(s.ans.sending_channels)) ? "Propose the connected mailbox's own address and ask only to confirm it" : 'Which number is yours'}?`,
     saves:
       'config: own_email / own_phone; then discovery with screen --sending, test-allow to that address or number, and save-recipe for email.send / chat.send (skills/connectors/SKILL.md); answers: send_setup_done, or send_setup_skipped (that channel then stays "you send it")'
   },
@@ -806,9 +849,15 @@ NODES.push(
     phase: 'later',
     when: (s) => !!s.ans.sending_asked,
     done: (s) => !!s.ans.message_route_asked,
+    // Once the user chose where to reach people (reach_channels), only those channels are named.
     ask: (s) =>
-      `Which channel should each message go on, in order? The usual route is email, then ${s.ev?.app_name || 'the event app'}, then LinkedIn, then email. Anyone you can't reach on a step skips it. You can make it longer, shorter or a different order.`,
-    options: () => ['email, app, linkedin, email (recommended)', 'email, email (no other channels)', 'your own order, like "email, linkedin, email"'],
+      Array.isArray(s.cfg?.reach)
+        ? `Which channel should each message go on, in order? The usual order is ${chosenRoute({ reach: s.cfg.reach }).map((x) => stepLabel(x, s.ev)).join(', then ')}. Anyone you can't reach on a step skips it. You can make it longer, shorter or a different order.`
+        : `Which channel should each message go on, in order? The usual route is email, then ${s.ev?.app_name || 'the event app'}, then LinkedIn, then email. Anyone you can't reach on a step skips it. You can make it longer, shorter or a different order.`,
+    options: (s) =>
+      Array.isArray(s.cfg?.reach)
+        ? [`${chosenRoute({ reach: s.cfg.reach }).join(', ')} (recommended)`, ...(s.cfg.reach.length ? ['email, email (no other channels)'] : []), 'your own order, like "email, email, email"']
+        : ['email, app, linkedin, email (recommended)', 'email, email (no other channels)', 'your own order, like "email, linkedin, email"'],
     saves: 'config: route (a list of email, app, linkedin); answers: message_route_asked'
   },
   // How many emails each person gets, the first included: asked at every level, right after the sending question.
@@ -819,10 +868,24 @@ NODES.push(
     when: (s) => !!s.ans.sending_asked && !!s.ev,
     done: (s) => s.ans.touches_asked === true,
     ask: (s) => {
-      const n = leadDays(s.ev);
-      return `How many emails per person, first one included? 3 to 7. ${Number.isFinite(n) ? `For a show ${n} days away, floorboss suggests ${suggestedTouches(n)}.` : `floorboss suggests ${suggestedTouches(NaN)}.`}`;
+      const n = s.now ? leadDays(s.ev, s.now) : leadDays(s.ev);
+      const when = !Number.isFinite(n)
+        ? ''
+        : n > 1
+          ? `The show starts in ${n} days, so floorboss suggests ${suggestedTouches(n)}.`
+          : n === 1
+            ? `The show starts tomorrow, so floorboss suggests ${suggestedTouches(n)}.`
+            : n === 0
+              ? `The show starts today, so floorboss suggests ${suggestedTouches(n)}.`
+              : `The show has already started (or is over), so floorboss suggests ${suggestedTouches(n)}: there is little time for follow-ups.`;
+      return `How many ${s.cfg?.reach?.length ? 'messages' : 'emails'} per person, first one included? 3 to 7.${when ? ` ${when}` : ` floorboss suggests ${suggestedTouches(NaN)}.`}`;
     },
-    options: (s) => [`${suggestedTouches(leadDays(s.ev))} (suggested)`, '3', '5', '7'],
+    // The suggested count first, then the three nearest others from 3 to 7 (the rest typed).
+    options: (s) => {
+      const n = suggestedTouches(leadDays(s.ev));
+      const others = [3, 4, 5, 6, 7].filter((x) => x !== n).sort((a, b) => Math.abs(a - n) - Math.abs(b - n) || a - b).slice(0, 3).sort((a, b) => a - b);
+      return [`${n} (suggested)`, ...others.map(String)];
+    },
     saves: 'config: touches (3 to 7; the lead-time suggestion unless the user says another); answers: touches_asked'
   },
   // The days between follow-ups: the lead-time table unless the user says otherwise (any step takes the answer too).
@@ -844,7 +907,7 @@ NODES.push(
     when: (s) => connected() && s.cfg.crm_log === 'browser',
     done: (s) => !!s.cfg.crm_create_contacts,
     ask: () =>
-      "When someone you message (often LinkedIn-only) isn't a contact in your CRM yet, should floorboss create them, so the message can be logged? It creates a new contact only (name, company, title, email, LinkedIn URL) and never edits or merges existing records.",
+      `When someone you message (often LinkedIn-only) isn't a contact in your CRM yet, should floorboss create them, so the message can be logged? It creates a new contact only (${CRM_BROWSER_FIELDS}) and never edits or merges existing records.`,
     options: () => ['ask me each time (one list per batch) (recommended)', 'yes, create them', 'no, just list them for me'],
     saves: 'config: crm_create_contacts (yes | ask | no)'
   },
@@ -870,16 +933,51 @@ NODES.push(
       String(s.ans.sending_channels) !== '' &&
       !(s.ans.send_setup_skipped === true && !/linkedin|app|chat/.test(String(s.ans.sending_channels))),
     done: (s) => !!s.cfg.sending?.followups,
-    ask: () => "Once you approve someone's sequence, how should the follow-ups go?",
-    options: (s) => [
-      any(s.inv?.found?.email) || any(s.inv?.found?.crm)
-        ? 'scheduled: each goes on its day unless they reply, book or say stop (your mailbox or CRM is checked first)'
-        : "scheduled: each goes on its day unless they reply, book or say stop (you'll be asked whether anyone replied, since nothing connected can see replies)",
-      'I approve each round of follow-ups in bulk'
-    ],
-    saves: 'config: sending {"channels": [...], "followups": "scheduled" | "each_round", "linkedin_ack": true|false}, all at once'
+    // What happens after approval in Claude Code, as the final choice offers it (lib/autosend/pick.mjs). Auto-send (a
+    // daily routine in the user's Claude account, lib/autosend/routine.mjs) needs the claude.ai Gmail with a draft tool and
+    // email chosen; without it, a follow-up goes only from an open floorboss.
+    ask: (s) =>
+      autosendOffer(s)
+        ? 'How should your follow-ups go? You make the final pick after you read every message.'
+        : "Once you approve someone's sequence, how should the follow-ups go? A follow-up goes only when you open floorboss on or after its day, and Claude Code asks you before each one. If your laptop stays closed, nothing goes.",
+    options: (s) =>
+      autosendOffer(s)
+        ? [
+            'Automatically, even with your laptop closed (recommended): floorboss sends each first email from here, and Claude Code asks you before each one. Each follow-up waits in your Gmail drafts, and a daily routine in your Claude account sends it on its day, unless they reply or it bounces. If someone books or says stop, floorboss has you delete their drafts the next time you open it.',
+            "In my Gmail drafts: floorboss sends nothing. Each first email goes into your Gmail drafts, each follow-up goes in after you've sent the first email, the next time you open floorboss, and you press Send.",
+            "I'll send them myself: floorboss sends nothing and shows each one on its day when you open it."
+          ]
+        : [
+            any(s.inv?.found?.email) || any(s.inv?.found?.crm)
+              ? 'scheduled: each follow-up goes the first time you open floorboss on or after its day (Claude Code asks you first), unless they reply, book or say stop (your mailbox or CRM is checked first)'
+              : "scheduled: each follow-up goes the first time you open floorboss on or after its day (Claude Code asks you first), unless they reply, book or say stop (you'll be asked whether anyone replied, since nothing connected can see replies)",
+            'I approve each round of follow-ups in bulk'
+          ],
+    saves: 'config: sending {"channels": [...], "followups": "scheduled" | "each_round", "linkedin_ack": true|false}, all at once; answers: autosend_said, setup_pick (auto | drafts | self, with auto-send offered)'
   }
 );
+
+// "I'll connect my mailbox first" (the sending question): how to connect in this host, the answers kept, and a way on.
+// Placed right after the sending question. "check again" looks at what is connected again, then asks sending again.
+// Claude Code only: "I'll connect my mailbox first" is offered only where floorboss may use connected tools (the
+// sending node), so there is no Codex wording to keep.
+export function connectSteps() {
+  return 'To connect Gmail: 1. Open claude.ai/customize/connectors in your browser (Customize, then Connectors), find Gmail, click Connect and sign in with the Google account you send from. 2. Claude Code sees it only when you are signed in to Claude Code with your Claude account: if you are not, type /login. 3. Quit Claude Code and start it again, then type /floorboss:start.';
+}
+NODES.splice(NODES.findIndex((n) => n.id === 'sending') + 1, 0, {
+  id: 'mailbox_connect',
+  round: 'sending',
+  phase: 'later',
+  when: (s) => s.ans.connect_first === true,
+  done: () => false,
+  ask: () =>
+    `floorboss can only send from a mailbox you have connected. ${connectSteps()} Your answers so far are saved: when you start floorboss again, it carries on from this question. Then pick one:`,
+  options: () => [
+    'check again: floorboss looks again at what is connected, then asks how to send',
+    'go on without a mailbox: floorboss prepares every email and you send each one yourself from your own mail app'
+  ],
+  saves: 'answers: connect_first (false), rescan_at (check again: the scan runs again, then the sending question)'
+});
 
 export const ROUNDS = ['scan', 'event', 'tools', 'list', 'tone', 'sending'];
 
@@ -974,7 +1072,7 @@ export function defaultsFor(s0) {
   if (s.ans.accounts_asked !== true && s.ans.dnc_asked === true) ans.accounts_asked = true;
   // Hand-send (Codex and the rest): the home zone is the computer's own, never asked (no city question); a computer that
   // says only UTC leaves the event's zone. Meeting times are the event's either way.
-  if (!connected() && s.ev && !s.cfg.home_tz) {
+  if (s.ev && !s.cfg.home_tz) {
     const z = systemZone() || s.ev.time_zone;
     if (z) cfg.home_tz = z;
   }
@@ -1004,11 +1102,7 @@ export function defaultsFor(s0) {
     if (s.ans.list_source === 'app' && !s.ans.browser_choice) ans.browser_choice = 'never';
   }
   if (lvl && lvl !== 'full') {
-    // Codex (hand-send) is asked at every level: its yes can turn auto-send on, so it is never defaulted away.
-    if (s.ans.sending_asked !== true && connected()) {
-      ans.sending_asked = true;
-      ans.sending_channels = [];
-    }
+    // Sending is asked at every level, in every host: whether floorboss sends is the user's choice, never a level's.
     if (s.ans.inbox_read_asked !== true) ans.inbox_read_asked = true;
     if (s.ans.app_limit_asked !== true && s.ev?.app_name) ans.app_limit_asked = true;
   }

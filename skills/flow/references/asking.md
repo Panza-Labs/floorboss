@@ -33,6 +33,21 @@ every time, until it says `done`. Don't run `onboarding-plan` or save answers wi
 `onboarding --answer-file` yourself during a run: the flow does that. The sections below say how to handle each
 question well; the flow decides which ones come up and when.
 
+## Reference: the intake (account_intake, show_intake, intake_summary)
+
+Right after the event is known, two multi-selects replace the open "where is your list, what tools" questions.
+Ask each with its `choices` (AskUserQuestion with multiSelect in Claude Code; a numbered list in Codex).
+1. **account_intake**, once per user and carried to every later show: "What can floorboss learn from?" A CRM
+   (who's a customer, who you've talked to, who to leave alone), past emails that got replies (your voice), your
+   company website or sales material (what you sell, your proof), or none for now. A CRM isn't offered in quick
+   setup. Each pick gets one step: the CRM's (which one; where to connect it, then a check that its tools are
+   visible here; or an export), the material's link or file, and the emails are asked for before the first drafts.
+2. **show_intake**, each show: "Who do you want to reach at this show?" An attendee file ("put it in your show
+   folder and tell me its name"), the event's site or app ("paste the link"), or a few names typed in. Each pick
+   gets its one step.
+Anything not picked asks nothing (a CRM not picked is off). **intake_summary** says it all back in one line: a yes
+goes on; "change something" asks both again.
+
 ## Reference: the disclaimer (disclaimer)
 
 The very first step, before the scan. Show the text the step gives exactly as written, as one plain paragraph,
@@ -45,7 +60,7 @@ the scan found), with "(recommended)" where it says so, and say the user can cha
 list, who they want to meet and what they offer, then drafts they send themselves; nothing connected is
 read, and if a CRM is connected the option says so in plain words (the shortlist card says it again).
 Standard: also reads the CRM, mailbox and calendar, asks about the team and customers with real counts, and
-sets the tone. Full: adds sending, reading replies and CRM logging. When they pick quick, say back what it assumes (the answer's `assumes`: working alone, no CRM or mailbox check, no writing samples, follow-ups spaced by how far off the event is); it asks before any web research. "More setup" or "standard setup" later,
+sets the tone. Full: adds sending, reading replies and CRM logging. When they pick quick, say back what it assumes (the answer's `assumes`: working alone, no CRM or mailbox check, no writing samples, follow-ups spaced by how far off the event is); web research starts on its own, with a heads-up, and "skip" stops it. "More setup" or "standard setup" later,
 at any step, is saved with `flow answer --ask setup_level`; the questions that level adds come up next.
 
 ## Reference: sign-off and home city (about_you)
@@ -69,7 +84,7 @@ instead, and the answer file says so if you try):
 `crm_choice`, `crm_path` (the export file), `crm_export_skipped`, `mailbox_choice`, `known_asked`,
 `calendar_choice`, `list_source`, `browser_choice`, `contact_details`, `import_context`, `posture`,
 `seller_framing`, `segments_confirmed`, `material_asked`, `insights_asked`, `claims_confirmed`, `samples_ok`,
-`samples_skipped`, `drafter_sample_ok`, `app_notes_asked`, `basics_asked`, `sending_asked`, `sending_channels` (a list of email, app, chat, linkedin), `linkedin_send_ack`, `linkedin_send_declined`, `send_setup_done`, `send_setup_skipped`. Settings asked as questions: `customer_rule` (the customers question), `rejected_months` (the lost_deals question, with `lost_deals_asked`). File paths are checked and saved on
+`samples_skipped`, `drafter_sample_ok`, `app_notes_asked`, `basics_asked`, `reach_asked` (with the `reach` setting: the channels besides email, a list of app and linkedin, [] for email only; asked at every level before anything is drafted, and only those channels are in anyone's sequence), `sending_asked`, `sending_channels` (a list of email, app, chat; floorboss never sends on LinkedIn, so a LinkedIn step is always sent by hand), `linkedin_send_ack`, `linkedin_send_declined` (from before 0.1.7; no longer asked), `send_setup_done`, `send_setup_skipped`. Settings asked as questions: `customer_rule` (the customers question), `rejected_months` (the lost_deals question, with `lost_deals_asked`). File paths are checked and saved on
 the event, so triage uses them without asking again.
 
 After any answer that names people (the shortlist gate, the drafts' approval), the answer carries `say_to_user`. When

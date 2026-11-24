@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync, readFileSync, lstatSync, rmSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { files, nowFrom } from '../../../../lib/event.mjs';
+import { loadConfig } from '../../../../lib/config.mjs';
 import { withLock } from '../../../../lib/lock.mjs';
 import { append } from '../../../../lib/ledger.mjs';
 import { plainText } from '../../../../lib/reading.mjs';
@@ -17,15 +18,16 @@ import { profileMeta } from '../../../attendee-research/scripts/profiles.mjs';
 import { MODES } from '../leadtime.mjs';
 import { gapFor, noDayWhy, stateOf } from '../../../../lib/spacing.mjs';
 import { INSTRUCTION_LIKE } from '../../../crm-triage/scripts/view.mjs';
-import { touchBefore } from '../../../../lib/route.mjs';
+import { touchBefore, PASSED_WHY, linkedInAt } from '../../../../lib/route.mjs';
 import { renderOutbox, renderOutOfDate, mailOf } from '../outbox.mjs';
-import { hashOf, pickAt, whereAt } from './routes.mjs';
+import { hashOf, pickAt, whereAt, appGone, routeOf, wentBeforeAt, passedAt } from './routes.mjs';
 import { isOut, labelOf, ctxOf, colleagueTold, takenTest } from './context.mjs';
 import { savedDraft, readTodo, draftFiles, ledgerTouch, followupDayOf, laterSent } from './saved-drafts.mjs';
-import { addressBusyToday, busyWhy, homeSends } from '../../../../lib/sendcheck.mjs';
-import { autosendLive, stepMark, autosendDueDay } from '../../../../lib/autosend/common.mjs';
+import { addressBusyToday, busyWhy, homeSends, lastReplyCheck } from '../../../../lib/sendcheck.mjs';
+import { autosendLive, stepMark, autosendDueDay, routineHeld } from '../../../../lib/autosend/common.mjs';
 import { sessionWhy } from '../../../../lib/autosend/sync.mjs';
-import { addDays } from '../../../../lib/tz.mjs';
+import { standingPick } from '../../../../lib/autosend/approval.mjs';
+import { addDays, dayWords } from '../../../../lib/tz.mjs';
 
 function cardsFrom(c, jobs, { pendingOnly }) {
   const cards = [];
@@ -76,6 +78,9 @@ function cardsFrom(c, jobs, { pendingOnly }) {
     // and the day after are gone (missed: it comes back to the user, with its buttons, and readback can plan it
     // again), or a time it offers was booked by someone else since (held, until it is written again).
     const { live, day: autoDue, missed: autoMissed } = autosendCard(c, j, due);
+    // The user's pick at the final approval (lib/autosend/pick.mjs): Gmail drafts (2: floorboss puts it there, so it
+    // has no buttons), or "I'll send them myself" (3: it is theirs to send, with the buttons, as with sending off).
+    const finalPick = j.kind === 'message' && tc?.approved?.hash && !c.state[j.id]?.sent?.[j.touch] ? standingPick(c.entries, j.id, j.touch, tc.approved.hash) : null;
     cards.push({
       kind: j.kind,
       id: j.id,
@@ -90,8 +95,9 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       send_to: j.kind !== 'coordinate' && j.channel === 'email' ? c.state[j.id]?.touches?.[j.touch]?.approved?.to || ct.email : undefined,
       // The user sends this email themselves (email isn't one of the channels floorboss sends on for this event, as in
       // Codex, or with sending off): only then does the page offer to open it in their mail app. With email sending
-      // on, floorboss sends it after a prompt, and a button to send it by hand too could send it twice.
-      you_send: j.kind !== 'coordinate' && j.channel === 'email' && !(c.settings.sending?.channels || []).includes('email') ? true : undefined,
+      // on, floorboss sends it after a prompt, and a button to send it by hand too could send it twice; except a step the
+      // user took at the final approval (pick 3), which floorboss never sends (send-list holds it).
+      you_send: j.kind !== 'coordinate' && j.channel === 'email' && (finalPick === 'self' || !(c.settings.sending?.channels || []).includes('email')) ? true : undefined,
       profile_url: ct.profile_url,
       routed: pickAt(c, j.id, j.touch) || undefined,
       // Where a paste message goes: where it was approved to go, else where the route sends it now.
@@ -105,6 +111,8 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       due_on: due?.day,
       due_waits: due?.waits || undefined,
       not_going: notGoing,
+      // The app said they left it, or have messages off: this note can't go there (no paste, nothing to send).
+      app_gone: j.kind !== 'coordinate' ? appGone(c, j.id, j.touch, d.channel || j.channel)?.result : undefined,
       // Not today, and why: another event wrote to that address today.
       not_today: notToday,
       may_have_gone: mayHaveGone ? (typeof mayHaveGone === 'string' ? mayHaveGone : 'yes') : undefined,
@@ -112,6 +120,9 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       autosend: live && !autoMissed && !j.time_taken ? true : undefined,
       autosend_missed: live && autoMissed && !j.time_taken ? autoDue : undefined,
       time_taken: j.time_taken ? true : undefined,
+      // Auto-send was stopped, but its Gmail draft may still be in a daily Claude routine's queue (common.mjs routineHeld):
+      // no buttons until that draft is confirmed deleted, or it could go twice.
+      routine_draft: !live && j.kind === 'message' && !c.state[j.id]?.sent?.[j.touch] && routineHeld(c.event, c.entries, j.id, j.touch) ? true : undefined,
       // An event-app note whose times live in the app's request: the card says which time to pick.
       pick_in_app:
         (j.kind === 'message' || j.kind === 'confirmation') &&
@@ -130,13 +141,70 @@ function cardsFrom(c, jobs, { pendingOnly }) {
       slots: (j.slot_ids || d.slot_ids || []).map((id) => ({ id, label: labelOf(c, id) })),
       pending: !ready,
       staged: c.state[j.id]?.touches?.[j.touch]?.staged || c.state[j.id]?.touches?.[j.touch]?.stage_released ? true : undefined,
+      // Pick 2, not in Gmail Drafts yet: floorboss puts it there (the drafts run), never a copy.
+      gmail_drafts_pick: finalPick === 'drafts' && !(tc?.staged || tc?.stage_released) ? true : undefined,
       // Put in the drafts by an unattended run (the guard's own record): the card says so.
       staged_unattended: c.state[j.id]?.touches?.[j.touch]?.stage_released?.unattended || c.state[j.id]?.touches?.[j.touch]?.staged?.unattended ? true : undefined,
+      // A LinkedIn follow-up the user sends by hand, its day come: floorboss can't read LinkedIn, so it is listed as due
+      // only once the user said whether they replied there since the message before it (or that inbox was read).
+      li_reply_unchecked: liReplyUnchecked(c, j, due) || undefined,
+      // The approved text's fingerprint: a CRM task made from older text, or for another day, is replaced.
+      approved_hash: tc?.approved?.hash || undefined,
+      // The day the message before this one went (YYYY-MM-DD), for the reply check in its task.
+      // A message the user sends by hand with a follow-up approved after it: that follow-up waits for its Sent tick.
+      next_waits:
+        j.kind === 'message' && j.channel === 'paste' && ready && !c.state[j.id]?.sent?.[j.touch] && Object.keys(c.state[j.id]?.touches || {}).some((t) => Number(t) > j.touch && c.state[j.id].touches[t]?.approved)
+          ? true
+          : undefined,
+      // An open CRM task for this message: marking it done there records the send too.
+      has_task: (() => {
+        const t = latestTask(c.state[j.id], j.touch);
+        return t && !t.done ? true : undefined;
+      })(),
+      prev_sent_on: j.touch > 1 ? prevSentOn(c, j.id, j.touch) : undefined,
+      // A LinkedIn message not sent yet on the day the next message (on another channel) is due: one message a day, so
+      // the page says to skip this one (it is dropped once that one goes).
+      next_goes_today: j.kind === 'message' && byHandLinkedIn(c, j) && nextDueToday(c, j) ? true : undefined,
+      task_changed: taskChanged(c.state[j.id], j.touch, tc?.approved?.hash, due?.day === undefined ? d.planned_due : due?.day) || undefined,
       // Still failing floorboss's own checks after three rewrites: said on the card, never passed on in silence.
       checks_stuck: j.kind === 'message' && d.checks?.length && (d.attempts || 0) >= 3 ? d.checks : undefined
     });
   }
   return cards;
+}
+
+function prevSentOn(c, id, touch) {
+  const prev = touchBefore(c.state[id], touch);
+  const d = c.state[id]?.sent?.[prev];
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+  const at = c.folded?.people?.[id]?.touches?.[prev]?.sent_at;
+  return at ? String(at).slice(0, 10) : undefined;
+}
+
+// Its open CRM task was made from other text, or for another day.
+function taskChanged(st, touch, hash, day) {
+  const t = latestTask(st, touch);
+  if (!t || t.done || !t.hash || st?.sent?.[touch]) return false;
+  return (hash && t.hash !== hash) || (t.day || null) !== (day || null);
+}
+
+// Whether a LinkedIn follow-up whose day has come still waits for the user's word about a LinkedIn reply.
+function liReplyUnchecked(c, j, due) {
+  // With a CRM task tool: no question. The follow-up's task carries the check, made as the user sends it.
+  if (loadConfig().connectors?.['crm.create_task'] && !c.folded?.tool_failed?.['crm.create_task']) return false;
+  if (j.kind !== 'message' || !(j.touch > 1) || j.channel !== 'paste' || whereAt(c, j.id, j.touch) !== 'LinkedIn') return false;
+  if (!due?.day || due.day > c.today) return false;
+  const prev = touchBefore(c.state[j.id], j.touch);
+  const sentAt = Date.parse(c.folded?.people?.[j.id]?.touches?.[prev]?.sent_at || '') || 0;
+  const checked = lastReplyCheck(c.entries || [], j.id, 'browser', {}, sentAt, 'linkedin');
+  return !(checked && checked >= sentAt);
+}
+
+// The LinkedIn follow-ups due now that wait for the user's word about a reply there: [{id, name, touch}].
+export function linkedinDue(opts) {
+  need(opts, 'event');
+  const c = ctxOf(opts.event, opts);
+  return { ask: allOutboxCards(c).filter((x) => x.li_reply_unchecked).map((x) => ({ id: x.id, name: x.name, touch: x.touch })) };
 }
 
 // A follow-up's day (the one rule, lib/spacing.mjs followupDay), for a message after the first; undefined for anything else.
@@ -154,7 +222,9 @@ function dueOf(c, j, d) {
 }
 // The note's "planned for <day>" says the day worked out now: the gap may have changed since it was planned.
 function dueNote(note, due, c, j) {
-  if (!note || !due || !/planned for \d{4}-\d{2}-\d{2}/.test(note)) return note;
+  // A day is written as a person types it ("Mon 19 Oct"), never as 2026-10-19.
+  const words = (t) => String(t).replace(/planned for (\d{4}-\d{2}-\d{2})/, (m, d) => `planned for ${dayWords(d)}`);
+  if (!note || !due || !/planned for \d{4}-\d{2}-\d{2}/.test(note)) return note ? words(note) : note;
   const prev = touchBefore(c.state[j.id], j.touch);
   // The user's own gap for this step (any lead time but the last day gives it), else the table's for that day.
   const g = c.settings.followup_gap?.length ? gapFor(c.settings, 'early', j.touch) : null;
@@ -163,7 +233,45 @@ function dueNote(note, due, c, j) {
     : due.waits
       ? `planned for ${g ? `${g} ${g === 1 ? 'day' : 'days'}` : 'its usual gap'} after message ${prev} goes`
       : `not going: ${noDayWhy(due)}`;
-  return note.replace(/planned for \d{4}-\d{2}-\d{2}/, when);
+  return words(note.replace(/planned for \d{4}-\d{2}-\d{2}/, when));
+}
+
+// They answered since a message task was made (a reply or a booking): that message isn't needed. null: they haven't.
+// The latest message task made for this step ({key, ...} or null), and whether an older one was replaced by a newer.
+export function latestTask(st, touch) {
+  const all = Object.entries(st?.tasks || {})
+    .filter(([, t]) => t.kind === 'send' && Number(t.touch) === Number(touch))
+    .map(([key, t]) => ({ key, ...t }));
+  return all.sort((a, b) => String(a.at || '').localeCompare(String(b.at || ''))).pop() || null;
+}
+export const superseded = (st, key) => {
+  const t = st?.tasks?.[key];
+  return !!(t && t.kind === 'send' && latestTask(st, t.touch)?.key !== key);
+};
+
+export const answeredWhy = (s) => (s?.booked ? 'booked a meeting' : s?.replied ? 'replied' : null);
+
+// Open message tasks in the CRM that aren't needed any more (the message wasn't sent, and since the task was made
+// they replied, booked, said stop or can't be contacted): [{id, touch, key, why}], for the outbox to say.
+// The message of this open task was recorded as sent some other way: from another of its tasks, or by a tick on the
+// page, a status paste, the mailbox (any send that isn't a CRM task's own).
+function sentElsewhere(c, id, s, t) {
+  if (Object.values(s.tasks || {}).some((o) => o !== t && o.kind === 'send' && Number(o.touch) === Number(t.touch) && o.done && !o.unneeded)) return true;
+  return (c.folded?.people?.[id]?.touches?.[t.touch]?.sent?.via || null) !== 'crm task';
+}
+
+export function tasksToClose(c) {
+  return Object.entries(c.state).flatMap(([id, s]) =>
+    Object.entries(s.tasks || {})
+      // (Nor one whose close request the user already marked done.)
+      .filter(([key, t]) => t.kind === 'send' && !t.done && !superseded(s, key) && !s.tasks?.[`${id}:review:cancel-${key}`]?.done)
+      // Its message already went (another task for it, or a tick): this one must not be sent again. Else a reply or a
+      // booking makes only a message task (message 1 or later) unneeded, never a meeting confirmation's; a stop or a
+      // block closes any.
+      // A LinkedIn step the next message went before is dropped: its task isn't needed (asked once, as the others).
+      .map(([key, t]) => ({ id, touch: t.touch, key, why: s.sent?.[t.touch] && sentElsewhere(c, id, s, t) ? 'already went' : s.sent?.[t.touch] ? null : c.blocked(id) || (Number(t.touch) >= 1 ? answeredWhy(s) : null) || (passedAt(c, id, Number(t.touch)) ? PASSED_WHY : null) }))
+      .filter((x) => x.why)
+  );
 }
 
 // cards: what the page offers. A final page (no pending card on it) says how many drafts wait for the user's yes.
@@ -182,6 +290,10 @@ export function renderFile(c, cards) {
   const recordedSent = Object.values(c.state).reduce((n, p) => n + Object.keys(p.sent || {}).length, 0);
   const html = renderOutbox({
     hand_send: c.settings.hand_send === true,
+    today: c.today,
+    close_tasks: tasksToClose(c).map((x) => ({ name: c.byId[x.id]?.name || x.id, why: x.why, key: x.key, went: x.why === 'already went' || undefined, skipped: x.why === PASSED_WHY || undefined })),
+    // LinkedIn messages dropped because the next message went first: said, never offered again.
+    passed: passedSteps(c).map((x) => ({ name: c.byId[x.id]?.name || x.id, touch: x.touch })),
     recorded_sent: recordedSent,
     event: c.event,
     generatedAt: `${c.now.toISOString().slice(0, 16).replace('T', ' ')} UTC`,
@@ -277,12 +389,19 @@ export function allOutboxCards(c) {
     // approved up front, the later follow-ups wait their turn instead of standing in for the first.)
     if (c.state[j.id]?.sent?.[j.touch]) continue;
     // A follow-up is next only once the message before it (a skipped step passed over) went: a step sent back or
-    // dropped holds the ones after it, here as at the send.
-    if (j.touch > 1 && !c.state[j.id]?.sent?.[touchBefore(c.state[j.id], j.touch)]) continue;
+    // dropped holds the ones after it, here as at the send. A LinkedIn step that hasn't gone holds nothing: the step
+    // after it is offered on its own day too, and whichever goes first, the other's day follows (lib/route.mjs wentBefore).
+    const b = j.touch > 1 ? wentBeforeAt(c, j.id, j.touch) : 0;
+    if (b > 0 && !c.state[j.id]?.sent?.[b]) continue;
     // A later step already went (recorded by hand, or found in the mailbox): this earlier one is passed over.
     if (laterSent(c.state[j.id], j.touch)) continue;
-    if (!latest.has(j.id) || latest.get(j.id).touch > j.touch) latest.set(j.id, j);
+    // One card per person (their next message), and the unsent LinkedIn steps before it, each with its own card.
+    const key = byHandLinkedIn(c, j) ? `${j.id}:${j.touch}` : j.id;
+    if (!latest.has(key) || latest.get(key).touch > j.touch) latest.set(key, j);
   }
+  // A LinkedIn card stays only before the person's next message, never after it.
+  for (const [key, j] of latest)
+    if (key !== j.id && latest.has(j.id) && latest.get(j.id).touch < j.touch) latest.delete(key);
   const sentOrDone = (id) => {
     const s = c.state[id];
     return s && (s.replied || s.booked || s.stopped || ((c.short.coordinate || []).includes(id) && colleagueTold(s)));
@@ -309,6 +428,28 @@ export function allOutboxCards(c) {
     { pendingOnly: false }
   );
 }
+
+// Whether the step after this LinkedIn one (skipped steps passed over) is on another channel, approved, not sent, and due
+// today or earlier by the one rule (followupDayOf, which passes over this unsent LinkedIn step).
+function nextDueToday(c, j) {
+  const st = c.state[j.id];
+  let n = j.touch + 1;
+  while (st?.touches?.[n]?.skipped) n++;
+  const x = st?.touches?.[n];
+  if (!x?.approved || st?.sent?.[n] || byHandLinkedIn(c, { id: j.id, touch: n })) return false;
+  const day = followupDayOf(c, j.id, n, savedDraft(c, j.id, n)).day;
+  return !!day && day <= c.today;
+}
+// The approved LinkedIn steps that were dropped because a later step went first (lib/route.mjs linkedInPassed).
+function passedSteps(c) {
+  return Object.entries(c.state).flatMap(([id, s]) =>
+    Object.entries(s.touches || {})
+      .filter(([t, x]) => x?.approved && passedAt(c, id, Number(t)))
+      .map(([t]) => ({ id, touch: Number(t) }))
+  );
+}
+// A LinkedIn step the user sends by hand (where its approval or the route sends it).
+const byHandLinkedIn = (c, j) => j.touch >= 1 && linkedInAt(c.state[j.id], j.touch, (t) => routeOf(c, j.id)?.[t - 1] || null);
 
 // Out of date: anything the page was built from has changed since (page-inputs.mjs), a send, an approval or a stop
 // at another event included. Nothing is loaded. now: the command's clock (the page reads the day). retryFailed: a page

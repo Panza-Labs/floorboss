@@ -11,6 +11,7 @@
 //   the run's session and the CRM read it witnessed); this prints what is recorded.
 import { join } from 'node:path';
 import { home, assertSlug, allowedPath, readChecked } from '../../../../lib/paths.mjs';
+import { parseJson } from '../../../../lib/jsonio.mjs';
 import { need } from '../../../../lib/args.mjs';
 import { loadEvent } from '../../../../lib/event.mjs';
 import { loadConfig } from '../../../../lib/config.mjs';
@@ -79,7 +80,7 @@ export function crmJudge(opts) {
   const ticket = ticketByToken(process.env.FLOORBOSS_UNATTENDED);
   if (!ticket) throw new Error("Only an unattended run records CRM judgements: in an attended run you decide, at Claude Code's prompt.");
   // The file is read here only to say what it held; the guard read it before this ran and recorded it.
-  JSON.parse(readChecked(allowedPath(String(opts.file)), 256 * 1024));
+  parseJson(readChecked(allowedPath(String(opts.file)), 256 * 1024), String(opts.file));
   const j = readWitness(ticket.session, slug, opts.id, 'judged');
   const crm = readWitness(ticket.session, slug, opts.id, 'crm');
   const others = (crm?.activities || []).filter((a) => a.kind === 'other').map((a) => a.aid);

@@ -98,7 +98,7 @@ export const SPECS = [
     own: { company: 'Brightside Ops', domain: 'brightside.test', user: 'Greta Holm', email: 'greta@brightside.test', colleagues: [] },
     gen: { industry: 'logistics', n: 8, companies: 3, nonbuyers: 0, crmStyle: 'salesforce', crmShare: 0.5, optouts: 1, stopNotes: 0, dnc: 0, dupes: 0 },
     connected: [],
-    asks: { free_time: FREE('Europe/London'), home_tz: 'Europe/London' },
+    asks: { free_time: FREE('Europe/London'), home_tz: 'Europe/London', reach_channels: 'both' },
   },
   {
     id: 'crm-independent-confirm',
@@ -117,7 +117,7 @@ export const SPECS = [
     own: { company: 'Kade Systems', domain: 'kade.test', user: 'Lotte de Vries', email: 'lotte@kade.test', colleagues: ['Joost Bakker'] },
     gen: { industry: 'logistics', n: 70, listStyle: 'eventapp', missingEmail: 0.75, crmStyle: 'salesforce', crmShare: 0.25 },
     connected: ['send', 'browser'], app: { slug: 'iw26', char_limit: 600, daily_limit: 12, messages_off: 12, missing: 6 },
-    asks: { free_time: FREE('Europe/Amsterdam'), home_tz: 'Europe/Amsterdam' },
+    asks: { free_time: FREE('Europe/Amsterdam'), home_tz: 'Europe/Amsterdam', reach_channels: 'the event app' },
     later: [{ now: '2026-10-11T09:00:00Z' }, { now: '2026-10-16T09:00:00Z' }],
   },
 ];

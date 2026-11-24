@@ -12,6 +12,7 @@ import { companyKey, companyRelated } from '../../../../lib/normalize.mjs';
 import { plural } from '../../../../lib/plural.mjs';
 import { listEvents } from '../../../../lib/scope.mjs';
 import { contextFor } from '../../../../lib/event.mjs';
+import { criticFailCount } from '../../../event-outreach/scripts/commands/saved-drafts.mjs';
 
 // Per coworker (every CRM owner but the user): their records in the CRM export, and how many of them are on the
 // attendee list (matched by email). Null when there's no CRM file or no confirmed mapping to read it with.
@@ -33,17 +34,29 @@ export function earlierLine(todo) {
 // What the tries at one message ran into, counted from the ledger since the user's last word on it ("1 check fail
 // and 1 critic fail"), never a bare count of tries. Empty when nothing failed.
 export function failCounts(entries, id, touch) {
-  let checks = 0,
-    critic = 0;
+  let checks = 0;
+  for (const x of entries) {
+    if (x.id !== id || (x.touch ?? 1) !== touch) continue;
+    if (x.type === 'revise' || x.type === 'fresh_attempt') checks = 0;
+    if (x.type === 'drafted' && (x.checks || []).length) checks++;
+  }
+  // Critic fails, never fewer than the hold counts (event-outreach criticFails: a rewrite saved back as the very text
+  // that failed is another fail). Each FAIL verdict counts too, except the same text read again with no save between
+  // (its hash the last FAIL's): an older verdict line without a hash can't be told apart, so it counts.
+  let verdicts = 0,
+    lastFail = null;
   for (const x of entries) {
     if (x.id !== id || (x.touch ?? 1) !== touch) continue;
     if (x.type === 'revise' || x.type === 'fresh_attempt') {
-      checks = 0;
-      critic = 0;
+      verdicts = 0;
+      lastFail = null;
+    } else if (x.type === 'drafted') lastFail = null;
+    else if (x.type === 'critic' && x.verdict === 'FAIL') {
+      if (!(x.hash && lastFail && x.hash === lastFail)) verdicts++;
+      lastFail = x.hash || null;
     }
-    if (x.type === 'drafted' && (x.checks || []).length) checks++;
-    if (x.type === 'critic' && x.verdict === 'FAIL') critic++;
   }
+  const critic = Math.max(verdicts, criticFailCount(entries, id, touch));
   return [checks ? plural(checks, 'check fail') : null, critic ? plural(critic, 'critic fail') : null].filter(Boolean).join(' and ');
 }
 
@@ -216,6 +229,8 @@ export function rewrittenSince(x, d, j) {
   return !!(j.touch > 1 && writtenFor && j.previous_hash_now && writtenFor !== j.previous_hash_now);
 }
 
+// Critic fails on a message as the hold counts them (event-outreach criticFails): once per save, so a draft the flow
+// stops writing again is one the hold holds, and said.
 export function countFails(e, j) {
-  return e.entries.filter((x) => x.type === 'critic' && x.id === j.id && (x.touch ?? 1) === j.touch && x.verdict === 'FAIL').length;
+  return criticFailCount(e.entries, j.id, j.touch);
 }

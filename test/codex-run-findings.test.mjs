@@ -153,8 +153,11 @@ test('3. hand-send step texts: no Claude Code wording (research, critic, approve
 test('3. Claude Code step texts are exactly as they were', { timeout: 300000 }, () => {
   const steps = threePeople(false);
   assert.equal(steps.critic[0].why, '3 drafts for the separate critic: 1 critic at once (in parallel, one message). Paste each critic its whole batch file, exactly as written; never summarise it.');
-  assert.equal(steps.approve[0].why, "3 messages are ready for the user's yes. With sending on, each person's whole sequence and its planned days are shown.");
-  assert.match(steps.rate[0].ask.question, /^Show \/.+rate-set\.md\. For each, how likely is that reader to reply, 1 to 10\? A few words if something stands out\. Or skip\.$/);
+  // (Worded the same in both hosts since the approval review lists every person's days: updated 2026-11-21.)
+  assert.equal(steps.approve[0].why, "3 messages are ready for the user's yes. The review lists each person's planned day for every message it covers.");
+  // One product: no 1-to-10 rating step in Claude Code either; the chat review at approval judges the copy.
+  assert.equal(steps.rate, undefined);
+  assert.match(steps.approve[0].ask.question, /candid feedback/);
   assert.equal(steps.research_batch[0].why, 'Research 3 people on the web, all at once (in parallel, one message): public sources only, a URL on every claim. Then save each.');
   assert.match(steps.company_briefs[0].why, /Run every researcher at once \(in parallel, one message\), then save each\./);
   assert.equal(steps.scan[0].why, "floorboss hasn't looked at what this Claude setup already has (skills, agents, connected tools). The scan decides which questions are worth asking.");

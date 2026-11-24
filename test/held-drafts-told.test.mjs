@@ -10,7 +10,7 @@ import { MOCK, envOf, loadMock, home } from './fixtures/r2.mjs';
 
 function run({ ratedBefore }) {
   const HOME = home();
-  writeFileSync(join(HOME, 'config.json'), JSON.stringify({ disclaimer_ack: true }));
+  writeFileSync(join(HOME, 'config.json'), JSON.stringify({ disclaimer_ack: true, blind_ratings: true }));
   loadMock(HOME);
   // No blind set this time: the ratings were answered before (so the approval is the first step after).
   if (ratedBefore) appendFileSync(join(HOME, 'events', MOCK, 'ledger.jsonl'), `${JSON.stringify({ at: '2026-10-12T07:00:00.000Z', type: 'answered', who: 'user', ask: 'rate', value: 'skipped', said: 'skip' })}\n`);

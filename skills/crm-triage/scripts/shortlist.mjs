@@ -16,9 +16,22 @@ export function reachable(c, settings, channel = null) {
   if (c.email && channel !== 'app' && chans.includes('email')) return true;
   if (c.phone && (settings.sending?.channels || []).includes('chat') && channel !== 'app') return true;
   if (!chans.includes('paste')) return false;
+  // The channels the user chose besides email (reach_channels): no one is reached on another one.
+  const reach = Array.isArray(settings.reach) ? settings.reach : null;
   const li = channel !== 'app' && isLinkedInUrl(c.profile_url);
-  if (li) return settings.linkedin_messages !== false;
+  if (li && (!reach || reach.includes('linkedin'))) return settings.linkedin_messages !== false;
+  if (reach && !reach.includes('app')) return false;
   return !settings.no_app;
+}
+
+// Who fits but can't be reached on the channels the user chose, in one line (null when no one, or nothing chosen).
+export function notWrittenTo(n, reach, event) {
+  if (!n || !Array.isArray(reach)) return null;
+  const app = reach.includes('app') && event?.app_name && !event?.no_app;
+  if (app) return null;
+  const what = reach.includes('linkedin') ? 'no email or LinkedIn link' : 'no email';
+  const chose = reach.includes('linkedin') ? 'email and LinkedIn' : 'email only';
+  return `${n} ${n === 1 ? 'person has' : 'people have'} ${what}, and you chose ${chose}: they aren't written to.`;
 }
 
 // band: the company's size (sizes.mjs). A cap the user named for this company wins; then their "cap N" for every

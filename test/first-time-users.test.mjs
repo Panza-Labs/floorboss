@@ -74,7 +74,7 @@ test('fit first: a CRM record never shortlists someone the fit calls off-target;
   const H = setup({
     attendees: 'Name,Title,Company,Email\nTed Bank,Branch Manager,Acme,ted@acme.test\nMia Ads,Marketing Analyst,Globex,mia@globex.test\nOla Buyer,COO,Initech,ola@initech.test\n',
     crm: 'Name,Email,Company,Owner,Status\nTed Bank,ted@acme.test,Acme,Sam Rivera,Opportunity\nMia Ads,mia@globex.test,Globex,Sam Rivera,Customer\nOla Buyer,ola@initech.test,Initech,Sam Rivera,Opportunity\n',
-    settings: { status_map: { Opportunity: 'warm', Customer: 'customer' } },
+    settings: { status_map: { Opportunity: 'warm', Customer: 'customer' }, customer_rule: { recent_months: 6, recent: 'warm', on_deal: 'warm', other: 'warm' } },
   });
   const load = cli(H, 'crm-triage', ['load', '--event', H.slug]);
   assert.ok(!load.ERROR, load.ERROR);

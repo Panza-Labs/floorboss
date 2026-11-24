@@ -18,7 +18,7 @@ test('asRule: one word is a note; praise, even with a few words, is not', () => 
 
 test('rated notes: praise left out of the rules; "only the ones I rated" sends back the drafts with a note', { timeout: 300000 }, () => {
   const HOME = home();
-  writeFileSync(join(HOME, 'config.json'), JSON.stringify({ disclaimer_ack: true }));
+  writeFileSync(join(HOME, 'config.json'), JSON.stringify({ disclaimer_ack: true, blind_ratings: true }));
   loadMock(HOME);
   const H = { HOME, now: NOW, env: envOf(HOME) };
   const per = simplePersona({ slug: MOCK, asks: { check_these: (s) => s.ask.people.map((p) => `${p.id} different-person`).join('\n'), voice_samples: 'skip' } });

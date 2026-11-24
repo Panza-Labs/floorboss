@@ -245,22 +245,39 @@ export const PROFILE_SAVERS = {
           : v?.channels ||
             [
               /email/i.test(String(v)) ? 'email' : null,
-              /linkedin/i.test(String(v)) ? 'linkedin' : null,
               /app|brella|grip|swapcard/i.test(String(v)) ? 'app' : null
             ].filter(Boolean);
     // Codex: a yes is the user's word for auto-send through Gmail drafts; the flow turns it on before approval.
     const says = String(typeof v === 'string' ? v : v?.said || v?.answer || JSON.stringify(v ?? ''));
     const wantsAuto = !connected() && !isNo(v) && !/^\s*no\b|myself|nowhere|prepare/i.test(says) && /^\s*(?:yes|y|yeah|yep|sure|ok|okay)\b|\bgmail\b|auto/i.test(says);
-    return answers(c, { sending_channels: chans, sending_asked: true, ...(wantsAuto ? { autosend_said: String(says || 'yes').slice(0, 200) } : {}) });
+    // "I'll connect my mailbox first": the next question says how, and offers check again or go on without.
+    const connectFirst = connected() && !chans.length && /\bconnect\b/i.test(says);
+    // LinkedIn is never a channel floorboss sends on: a LinkedIn step is always sent by hand.
+    return answers(c, { sending_channels: chans.filter((x) => x !== 'linkedin'), sending_asked: true, connect_first: connectFirst, ...(wantsAuto ? { autosend_said: String(says || 'yes').slice(0, 200) } : {}) });
   },
+  mailbox_connect: (v, c) =>
+    /check|again|^\s*1\b/i.test(String(v?.answer ?? v))
+      ? answers(c, { connect_first: false, sending_asked: false, rescan_at: new Date(Date.now()).toISOString() })
+      : answers(c, { connect_first: false }),
   linkedin_send: (v, c) => answers(c, /accept/i.test(String(v)) ? { linkedin_send_ack: true } : { linkedin_send_declined: true }),
   send_setup: (v, c) => {
-    if (isNo(v)) return answers(c, { send_setup_skipped: true });
+    if (isNo(v) || /^\s*skip\b/i.test(String(v))) return answers(c, { send_setup_skipped: true });
+    // A mailbox that can't send (onboarding-tree send_setup): look again at what is connected, then ask sending again.
+    if (/^\s*check again\b/i.test(String(v))) return answers(c, { sending_asked: false, rescan_at: new Date(Date.now()).toISOString() });
     const o = typeof v === 'object' ? v : { own_email: String(v) };
     config(c, { ...(o.own_email ? { own_email: o.own_email } : {}), ...(o.own_phone ? { own_phone: o.own_phone } : {}) });
     return answers(c, o.done ? { send_setup_done: true } : {});
   },
   followups_mode: (v, c) => {
+    // The three picks offered with auto-send (onboarding-tree followups_mode): each turns auto-send on (a daily Claude
+    // routine) before the approval, so the final four-option choice comes and decides; the setup answer is that
+    // choice's default (setup_pick). Picks 2 and 3 there send nothing.
+    const said = String(typeof v === 'object' && v ? v.answer || v.said || '' : v);
+    const pick = /^\s*automatically\b/i.test(said) ? 'auto' : /^\s*in my gmail drafts\b/i.test(said) ? 'drafts' : /^\s*i'?ll send them myself\b/i.test(said) ? 'self' : null;
+    if (pick) {
+      if (connected()) answers(c, { autosend_said: said.slice(0, 200), setup_pick: pick });
+      v = 'scheduled';
+    }
     if (!followupsModeOf(v)) throw new Error('Ask again: should follow-ups go on their day by themselves, or wait for the user to approve each round?');
     const raw = c.ob.ans.sending_channels || [];
     let chans = raw;
@@ -271,6 +288,7 @@ export const PROFILE_SAVERS = {
         chans = raw.split(/[\s,]+/).filter(Boolean);
       }
     }
-    return config(c, { sending: { channels: connected() ? chans : [], followups: followupsModeOf(v), linkedin_ack: connected() && c.ob.ans.linkedin_send_ack === true } });
+    // An answer saved before 0.1.7 may name LinkedIn: it is left out, and the LinkedIn warning no longer turns anything on.
+    return config(c, { sending: { channels: connected() ? [].concat(chans).filter((x) => x !== 'linkedin') : [], followups: followupsModeOf(v), linkedin_ack: false } });
   },
 };

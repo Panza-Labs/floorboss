@@ -165,7 +165,7 @@ test('the due day agrees across todo, the outbox, send-list and the guard', () =
   cli(H, 'event-outreach', ['open', '--event', H.slug, '--no-open']);
   const card = (html, id) => html.slice(html.indexOf(`data-id="${id}"`), html.indexOf('</article>', html.indexOf(`data-id="${id}"`)));
   const html = readFileSync(join(H.dir, 'outbox.html'), 'utf8');
-  assert.match(card(html, ana), /planned for 2026-10-15/);
+  assert.match(card(html, ana), /planned for Thu 15 Oct/);
   // The day before: not listed, and a list written by hand for it doesn't get past the guard.
   const d14 = at('2026-10-14');
   cli(H, 'event-outreach', ['status', '--event', H.slug, '--none', '--said', 'nobody replied'], d14);
@@ -205,7 +205,7 @@ test('changed after approval: approved follow-ups keep their text and go on the 
   cli(H, 'event-outreach', ['open', '--event', H.slug, '--no-open'], d14);
   const html = readFileSync(join(H.dir, 'outbox.html'), 'utf8');
   const card = html.slice(html.indexOf(`data-id="${ana}"`), html.indexOf('</article>', html.indexOf(`data-id="${ana}"`)));
-  assert.match(card, /planned for 2026-10-16/, 'the outbox shows the new day of the next one');
+  assert.match(card, /planned for Fri 16 Oct/, 'the outbox shows the new day of the next one');
   // Changed again: nothing already sent goes again; the next one counts from its own last send.
   assert.ok(!say(H, 'a week', d14).ERROR);
   const d20 = at('2026-10-20'), d21 = at('2026-10-21');

@@ -17,7 +17,7 @@ import { TIME_TAKEN } from '../lib/autosend/common.mjs';
 import { CODEX_MARKERS } from '../lib/harness.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 const waitOf = (r, id) => r.waits.find((w) => w.id === id)?.why || '';
 const PAST = { id: 's20261012-0800', start: '2026-10-12T08:00:00Z', end: '2026-10-12T08:30:00Z' };
 const LATER = { id: 's20261103-1000', start: '2026-11-03T10:00:00Z', end: '2026-11-03T10:30:00Z' };
@@ -33,7 +33,7 @@ function offering(slot_ids, { slots = [PAST, LATER], drafted = (x) => x } = {}) 
   if (slots) slotsFile(w.evDir, slots);
   const rb = readback(w.evDir, at(NOW));
   assert.ok(rb.items.some((x) => x.id === 'c001' && x.hash === m.hash), JSON.stringify(rb.refused));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   return { ...w, hash: m.hash };
 }
 
@@ -90,7 +90,7 @@ test('finding 2: "settle --went yes" for a step auto-send never let go is a hand
   const w = world({ touches: 2, people: [PEOPLE[0]] });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   // Message 1 missed its day (the cloud never ran); the user sent it from Gmail, then said "sent".
   const r = autosend(w.HOME, ['settle', '--event', w.slug, '--id', 'c001', '--touch', '1', '--went', 'yes', '--said-file', said(w.HOME, 'I sent it myself from Gmail')], { now: '2026-10-15T10:00:00Z' });
   assert.ok(!r.ERROR, r.ERROR);
@@ -108,7 +108,7 @@ test('finding 2: the readback and approve name the exact command for a hand send
   const w = world({ touches: 2, people: [PEOPLE[0]] });
   process.env.FLOORBOSS_HOME = w.HOME;
   let rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   // Message 1's day and the day after went by: it was the user's on the outbox since.
   const t = at('2026-10-15T08:30:00Z');
   const cli = autosend(w.HOME, ['readback', '--event', w.slug], { now: '2026-10-15T08:30:00Z' });
@@ -117,7 +117,7 @@ test('finding 2: the readback and approve name the exact command for a hand send
   assert.match((cli.hand_sent || []).map((x) => x.record).join('\n'), cmd);
   assert.match(cli.show, /never settle/);
   rb = readback(w.evDir, t);
-  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: SENTENCE }, t), (e) => /--not-sent-said/.test(e.message) && cmd.test(e.message));
+  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, t), (e) => /--not-sent-said/.test(e.message) && cmd.test(e.message));
   const skill = readFileSync(join(ROOT, '.agents/skills/floorboss/SKILL.md'), 'utf8');
   const part = skill.slice(skill.indexOf('## Auto-send from the cloud'));
   assert.match(part, /sent themselves[^.]*`record`[^.]*never `settle`/);
@@ -127,7 +127,7 @@ test('finding 3: after a hand send, a later step whose day went by on the outbox
   const w = world({ touches: 3, people: [PEOPLE[0]] });
   process.env.FLOORBOSS_HOME = w.HOME;
   let rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   // Message 1 sent by hand on the 12th (as event-outreach record writes it: no source): auto-send ended for Ana.
   addLines(w.evDir, [{ at: '2026-10-12T10:00:00Z', type: 'sent', who: 'user', id: 'c001', touch: 1, date: '2026-10-12', message_id: 'h1', thread_id: 'ht1' }]);
   // Message 2 sat on the outbox past its day. The readback on the 26th offers it again.
@@ -137,9 +137,9 @@ test('finding 3: after a hand send, a later step whose day went by on the outbox
   assert.ok(m2, JSON.stringify(rb.refused));
   assert.equal(m2.missed, true, 'its day went by on the outbox: it may have been sent by hand');
   assert.match(rb.text, /If you sent it/);
-  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: SENTENCE }, t), /--not-sent-said/);
+  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, t), /--not-sent-said/);
   assert.equal(ledgerLines(w.evDir).filter((e) => e.type === 'autosend_approved').length, 3, 'nothing written');
-  const r = approve(w.evDir, { digest: rb.digest, said: SENTENCE, notSentSaid: "no, I didn't send the second one" }, t);
+  const r = approve(w.evDir, { digest: rb.digest, said: AUTO_PICK, notSentSaid: "no, I didn't send the second one" }, t);
   assert.equal(r.approved, 2);
   assert.ok(ledgerLines(w.evDir).some((e) => e.type === 'autosend_approved' && e.touch === 2 && e.not_sent_said));
   assert.ok(dueNow(w.HOME, at('2026-10-26T10:00:00Z')).due.some((x) => x.id === 'c001' && x.touch === 2));
@@ -149,12 +149,12 @@ test('finding 3: a follow-up whose day has not come yet needs no such word', () 
   const w = world({ touches: 2, people: [PEOPLE[0]] });
   process.env.FLOORBOSS_HOME = w.HOME;
   let rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   addLines(w.evDir, [{ at: '2026-10-15T10:00:00Z', type: 'sent', who: 'user', id: 'c001', touch: 1, date: '2026-10-15' }]);
   const t = at('2026-10-16T08:30:00Z');
   rb = readback(w.evDir, t);
   assert.ok(rb.items.some((x) => x.touch === 2 && !x.missed));
-  assert.equal(approve(w.evDir, { digest: rb.digest, said: SENTENCE }, t).approved, 1);
+  assert.equal(approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, t).approved, 1);
 });
 
 test('finding 4: the rate_notes question reads in Claude Code exactly as at 8e9f440', async () => {

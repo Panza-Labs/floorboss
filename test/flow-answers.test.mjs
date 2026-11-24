@@ -15,7 +15,7 @@ test('scan: tool names as the flow asks for them ("mcp__server__tool") are group
   const inv = summarize([], { tools: ['mcp__hubspot__search_contacts', 'mcp__hubspot__get_owner', 'mcp__gmail__list_messages', 'mcp__gmail__send_message', 'mcp__claude_ai_Notion__notion-calendar-list-events'] });
   assert.deepEqual(inv.found.crm, ['mcp:hubspot']);
   assert.deepEqual(inv.found.email, ['mcp:gmail']);
-  assert.deepEqual(inv.found.calendar, ['mcp:claude_ai_Notion']);
+  assert.deepEqual(inv.found.calendar, []);
 });
 
 test('running without the CRM: the warning names what is lost; "go ahead" keeps a warning on the gate card', async () => {

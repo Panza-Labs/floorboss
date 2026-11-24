@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { world, ledgerLines, addLines, draftText, PEOPLE, NOW, OWN, EVENT, SLUG } from './fixtures/autosend-world.mjs';
 import { readback, approve } from '../lib/autosend/approval.mjs';
-import { SENTENCE } from '../lib/autosend/common.mjs';
+import { AUTO_PICK } from '../lib/autosend/pick.mjs';
 import { draftsNext, draftsAnswer, draftPlan, overdueDays, RUN_OPEN_MS } from '../lib/autosend/drafts.mjs';
 
 const ANA = PEOPLE[0];
@@ -20,7 +20,7 @@ function setup({ now = NOW, people = [ANA] } = {}) {
   process.env.FLOORBOSS_HOME = w.HOME;
   const nowMs = Date.parse(now);
   const r = readback(w.evDir, nowMs);
-  approve(w.evDir, { digest: r.digest, said: SENTENCE }, nowMs);
+  approve(w.evDir, { digest: r.digest, said: AUTO_PICK }, nowMs);
   return { ...w, nowMs, rb: r };
 }
 const step = (w, s, answer, nowMs = w.nowMs) => {
@@ -326,7 +326,7 @@ test('4. the CLI: revoke on a drafts event gives the hold run', async () => {
   const w = world({ touches: 2, people: [ANA] });
   autosend(w.HOME, ['on', '--event', SLUG, '--said-file', said(w.HOME, 'yes'), '--own', OWN, '--mode', 'drafts']);
   const rb = autosend(w.HOME, ['readback', '--event', SLUG]);
-  autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, SENTENCE)]);
+  autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, AUTO_PICK)]);
   addLines(w.evDir, [draftedLine()]);
   const r = autosend(w.HOME, ['revoke', '--event', SLUG, '--ids', 'c001', '--said-file', said(w.HOME, 'stop')]);
   assert.match(r.drafts_hold, /drafts next --event harbor-expo --run hold/, JSON.stringify(r));
@@ -349,7 +349,7 @@ test('4. status names the hold run while a stopped person still has queued draft
   const w = world({ touches: 2, people: [ANA] });
   autosend(w.HOME, ['on', '--event', SLUG, '--said-file', said(w.HOME, 'yes'), '--own', OWN, '--mode', 'drafts']);
   const rb = autosend(w.HOME, ['readback', '--event', SLUG]);
-  autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, SENTENCE)]);
+  autosend(w.HOME, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', said(w.HOME, AUTO_PICK)]);
   addLines(w.evDir, [draftedLine(), { at: NOW, type: 'stop', who: 'user', id: 'c001', said: 'no thanks' }]);
   const st = autosend(w.HOME, ['status']);
   assert.match(String(st.drafts_hold), /drafts next --event harbor-expo --run hold/, JSON.stringify(st).slice(0, 500));

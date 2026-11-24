@@ -10,6 +10,7 @@ import { SECRET_NAME, SECRET_SEARCH } from '../../lib/security.mjs';
 import { PLUGIN_ROOT } from '../plugin-root.mjs';
 import { lockNote } from './run.mjs';
 import { LABEL_PREFIX } from '../../lib/unattended.mjs';
+import { inRecords } from '../../lib/autosend/guard-record.mjs';
 
 // Claude's own file tools (Read, Grep, Glob, Write, Edit, NotebookEdit).
 export const READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
@@ -244,6 +245,7 @@ export function schedulePathRefusal(value, text = '') {
   const homes = [resolve(home()), realPath(home())].map((h) => h.toLowerCase());
   const mine = spots.some((x) => homes.some((h) => x === `${h}${sep}unattended` || x.startsWith(`${h}${sep}unattended${sep}`) || x === `${h}${sep}today.html`));
   if (mine) return `${v.slice(0, 200)} is one of floorboss's own records for what it runs on its own (its off switch, log and page), which only its scripts write.`;
+  if (inRecords(p, home())) return `${v.slice(0, 200)} is in the folder where floorboss's safety check keeps its notes of the commands it checked. Only the safety check writes there.`;
   // Any other record of floorboss's (a ledger, a saved agenda's page or marker): not a connected tool's to write.
   let record = false;
   try {
@@ -348,6 +350,9 @@ export function fileRefusal(tool, input, run = { active: false }) {
       const why = linkRefusal(p);
       if (why) return why;
     }
+    // The one-use records of floorboss's safety check, by what the folder is on disk (lib/autosend/guard-record.mjs).
+    if (inRecords(p, home()) || inRecords(realPath(p), home()))
+      return `${p} is in the folder where floorboss's safety check keeps its notes of the commands it checked. Only the safety check writes there.`;
     if (recordFile(p))
       return `${p} is one of floorboss's own records, which only its scripts write (an edited record could make a send look approved). Use the floorboss command that changes it.`;
     // Where the write really lands: through every link on the way, one whose target isn't there yet included.

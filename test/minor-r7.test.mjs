@@ -53,16 +53,17 @@ test('13: Berlin and Amsterdam share the clock: the time is said once; London is
   assert.equal(slotLabel(slot, 'Europe/Berlin', 'Europe/London', 'Berlin'), 'Tue 10 Nov, 09:30 Berlin time (08:30 London time)');
 });
 
-test('14: the research heads-up has four options at most, the people asked in its second clause', { timeout: 300000 }, () => {
+test('14: the research heads-up is one message with no question: the companies and the people named, "skip" stops it', { timeout: 300000 }, () => {
+  // (Updated 2026-11-21: research starts with a heads-up in both hosts, so there are no options to count and no
+  // second clause to ask the people in: the one message names both halves.)
   const { H, persona } = ftu6Flow();
-  const r = untilStep(H, persona, 'company_research');
-  assert.equal(r.step, 'company_research', JSON.stringify(r.last).slice(0, 300));
-  const q = r.last.ask;
-  assert.ok(q.options.length <= 4, JSON.stringify(q.options));
-  assert.deepEqual([q.options[0], q.options[2], q.options[3]], ['go', 'skip companies', 'skip all']);
-  assert.match(q.options[1], /^skip some: /);
-  assert.match(q.question, /Go, or skip some\? And the \d+ shortlisted people: research all \d+, the top \d+, or none\?$/);
-  assert.match(q.answer_format, /for the people, add "people: /);
+  const r = untilStep(H, persona, (s) => s.step === 'company_briefs' && Array.isArray(s.accepts));
+  assert.equal(r.step, 'company_briefs', JSON.stringify(r.last).slice(0, 300));
+  const up = r.last;
+  assert.ok(!up.ask, 'a heads-up, not a question');
+  assert.deepEqual(up.accepts, ['company_research']);
+  assert.match(up.tell_user, /^Looking up the \d+ shortlisted companies on the web now \(.+\): .*, then the \d+ shortlisted people\. About \d+ minutes\. Say "skip" to draft without it\.$/);
+  assert.match(up.if_user_says.skip, /flow answer --ask company_research/);
 });
 
 test('15: the coworker count says who is held through their accounts too', () => {

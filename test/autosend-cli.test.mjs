@@ -29,7 +29,7 @@ test('the cloud steps refuse on the laptop, and the laptop steps refuse in the c
   const { HOME } = world({ touches: 1 });
   for (const args of [['next', '--run', 'new'], ['checked', '--run', 'r', '--file', 'f'], ['sent', '--run', 'r', '--file', 'f']]) assert.match(autosend(HOME, args).ERROR, /cloud task only/, args[0]);
   const cloud = { extra: { FLOORBOSS_AUTOSEND: 'cloud' } };
-  for (const args of [['on', '--event', 'harbor-expo', '--said', 'yes'], ['readback', '--event', 'harbor-expo'], ['approve', '--event', 'harbor-expo', '--digest', 'x', '--said', 'auto-send these sequences'], ['revoke', '--event', 'harbor-expo', '--ids', 'all', '--said', 'x'], ['settle', '--event', 'harbor-expo', '--id', 'c001', '--touch', '1', '--went', 'yes', '--said', 'x'], ['setup'], ['status'], ['sync', 'start', '--who', 'laptop', '--run', 'r']])
+  for (const args of [['on', '--event', 'harbor-expo', '--said', 'yes'], ['readback', '--event', 'harbor-expo'], ['approve', '--event', 'harbor-expo', '--digest', 'x', '--said', '1'], ['revoke', '--event', 'harbor-expo', '--ids', 'all', '--said', 'x'], ['settle', '--event', 'harbor-expo', '--id', 'c001', '--touch', '1', '--went', 'yes', '--said', 'x'], ['setup'], ['status'], ['sync', 'start', '--who', 'laptop', '--run', 'r']])
     assert.match(autosend(HOME, args, cloud).ERROR, /never in the cloud run/, args[0]);
   assert.match(autosend(HOME, ['sync', 'unlock', '--said', 'x'], cloud).ERROR, /laptop, never in a cloud run/);
   assert.match(autosend(HOME, ['settle', '--event', 'harbor-expo', '--id', 'c001', '--touch', '1', '--went', 'yes', '--said', 'it went']).ERROR, /isn't waiting to be settled/);
@@ -42,8 +42,10 @@ test('the words: the Codex skill, the task prompt (either Gmail tool naming), RE
   const read = (f) => readFileSync(join(ROOT, f), 'utf8');
   const skill = read('.agents/skills/floorboss/SKILL.md');
   assert.match(skill, /^## Auto-send from the cloud \(Gmail only\)$/m);
-  assert.match(skill, /\*\*auto-send these sequences\*\*/);
-  assert.match(skill, /Never type it for\s+them, never reword the readback/);
+  assert.match(skill, /\*\*1\. Approve and send automatically \(recommended\)\*\*/);
+  assert.match(skill, /\*\*4\. Not yet, I have changes\*\*/);
+  assert.match(skill, /Never choose for\s+them, never reword the readback/);
+  assert.match(skill, /approve nothing by themselves/);
   assert.match(skill, /Never settle on\s+a guess/);
   assert.match(skill, /in this chat you never call a Gmail\s+tool or run its `next`, `checked` or `sent` steps/);
   assert.match(skill, /Never send\./);

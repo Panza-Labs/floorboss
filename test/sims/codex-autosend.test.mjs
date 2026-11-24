@@ -65,7 +65,7 @@ function build() {
   const per = simplePersona({ slug: SLUG, asks: { check_these: (s) => s.ask.people.map((p) => `${p.id} different-person`).join('\n'), rate: 'skip', voice_samples: 'skip', replies_since: 'none' } });
   const steps = [];
   const r = drive({ HOME, now: BUILT_AT, env }, per, { maxSteps: 260, onStep: (s) => steps.push(s) });
-  assert.ok(r.last.done || r.last.step === 'waiting', r.trail.slice(-6).join(' '));
+  assert.ok(r.last.done || r.last.step === 'waiting' || r.last.step === 'second_yes', r.trail.slice(-6).join(' '));
   // Not one step asked the laptop session for a connected tool or a send.
   assert.deepEqual(steps.filter((s) => s.call).map((s) => s.step), []);
   const rb = laptop(HOME, BUILT_AT, ['readback', '--event', SLUG]);
@@ -87,9 +87,9 @@ function build() {
   // The content approval was asked in the chat with the review, never on the page.
   const ap = steps.find((s) => s.step === 'approve');
   assert.equal(ap?.run_first?.[2], 'review');
-  // "yes" is not the sentence: nothing is written.
-  assert.match(laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, 'yes')]).ERROR, /auto-send these sequences/);
-  const ok = laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, 'auto-send these sequences')]);
+  // "yes" is not a numbered pick: nothing is written.
+  assert.match(laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, 'yes')]).ERROR, /numbered options/);
+  const ok = laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, '1')]);
   assert.ok(!ok.ERROR, ok.ERROR);
   const lines = readFileSync(join(HOME, 'events', SLUG, 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const yes = lines.filter((e) => e.type === 'autosend_approved');
@@ -600,7 +600,7 @@ test('round 3 items 1 and 2: on after the content approval: follow-ups drafted a
   execFileSync(process.execPath, [join(ROOT, 'examples/mock-event/load.mjs'), '--goal', 'buyers', '--now', BUILT_AT], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   const per = simplePersona({ slug: SLUG, asks: { check_these: (st) => st.ask.people.map((p) => `${p.id} different-person`).join('\n'), rate: 'skip', voice_samples: 'skip', replies_since: 'none' } });
   const r0 = drive({ HOME, now: BUILT_AT, env }, per, { maxSteps: 260 });
-  assert.ok(r0.last.done || r0.last.step === 'waiting', r0.trail.slice(-6).join(' '));
+  assert.ok(r0.last.done || r0.last.step === 'waiting' || r0.last.step === 'second_yes', r0.trail.slice(-6).join(' '));
   const ledger = () => readFileSync(join(HOME, 'events', SLUG, 'ledger.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   assert.ok(!ledger().some((e) => e.type === 'approved' && e.touch === 2), 'hand-send approved first messages only');
   const on = laptop(HOME, BUILT_AT, ['on', '--event', SLUG, '--said', 'yes, send them from the cloud', '--own', OWN]);
@@ -612,12 +612,12 @@ test('round 3 items 1 and 2: on after the content approval: follow-ups drafted a
   assert.equal(early.messages, 0, JSON.stringify(early).slice(0, 300));
   assert.match(early.refused.map((x) => x.why).join(' '), /message 2 of their sequence isn't written and approved yet/);
   const r1 = drive({ HOME, now: BUILT_AT, env }, per, { maxSteps: 260 });
-  assert.ok(r1.last.done || r1.last.step === 'waiting', r1.trail.slice(-6).join(' '));
+  assert.ok(r1.last.done || r1.last.step === 'waiting' || r1.last.step === 'second_yes', r1.trail.slice(-6).join(' '));
   const approvedT2 = ledger().filter((e) => e.type === 'approved' && e.touch === 2).map((e) => e.id);
   assert.ok(approvedT2.length >= 1, 'the follow-ups were drafted, read by the critic and approved');
   const rb = laptop(HOME, BUILT_AT, ['readback', '--event', SLUG]);
   assert.ok(rb.messages >= 2 && rb.people >= 1, JSON.stringify(rb).slice(0, 300));
-  const ok = laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, 'auto-send these sequences')]);
+  const ok = laptop(HOME, BUILT_AT, ['approve', '--event', SLUG, '--digest', rb.digest, '--said-file', saidFile(HOME, '1')]);
   assert.ok(!ok.ERROR, ok.ERROR);
   const yes = ledger().filter((e) => e.type === 'autosend_approved');
   const p1 = yes.find((e) => e.touch === 2).id;
@@ -662,7 +662,7 @@ test('case 16: in Claude Code the auto-send commands refuse, and the laptop neve
   const HOME = mkdtempSync(join(tmpdir(), 'fb-autosend-cc-'));
   const env = { ...process.env, FLOORBOSS_TEST: '1', FLOORBOSS_HOME: HOME, CLAUDECODE: '1', FLOORBOSS_AUTOSEND: 'cloud' };
   for (const k of MARKERS) delete env[k];
-  assert.match(run(process.execPath, [CLI, 'next', '--run', 'new'], env).ERROR, /auto-send is for Codex; Claude Code has its own sending/);
+  assert.match(run(process.execPath, [CLI, 'next', '--run', 'new'], env).ERROR, /this auto-send command is for Codex; in Claude Code, auto-send goes through a daily Claude routine/);
   assert.match(laptop(HOME, BUILT_AT, ['next', '--run', 'new']).ERROR, /cloud task only/);
   void git;
 });

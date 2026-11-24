@@ -1,6 +1,6 @@
 // The mock event as a first-time user sees it: loaded, then driven through `flow next` with a persona that
 // accepts the defaults. Onboarding is skipped for the mock (it comes with its settings); the run ends with
-// approved messages in three or more structures and the blind ratings recorded.
+// approved messages in three or more structures and no blind ratings (they are asked only when blind_ratings is on).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
@@ -32,7 +32,8 @@ test('mock event: loaded, then hands-free to approved messages with few question
   const approved = Object.values(st.people).flatMap((p) => Object.values(p.touches).filter((t) => t.approved && t.kind === 'message'));
   assert.ok(approved.length >= 20, `approved: ${approved.length}`);
   assert.ok(new Set(approved.map((t) => t.structure)).size >= 3, 'three or more structures');
-  assert.ok(Object.values(st.people).reduce((n, p) => n + p.ratings.length, 0) >= 10, 'the blind ratings were recorded');
+  assert.equal(Object.values(st.people).reduce((n, p) => n + p.ratings.length, 0), 0, 'no blind ratings by default');
+  assert.ok(!asked.includes('rate'), 'the rating step is not asked');
   // After the mock, /floorboss:start is for a real event: it never reopens the finished mock.
   const after = JSON.parse(execFileSync('node', [join(ROOT, 'skills/flow/scripts/cli.mjs'), 'next', '--new-run'], { env: H.env, encoding: 'utf8' }));
   assert.notEqual(after.step, 'done', JSON.stringify(after).slice(0, 300));

@@ -9,7 +9,8 @@
 // (a stranger who fits) | check (the user decides) | unfit (no segment) | unreachable (no email)
 import { daysBetween } from '../../../lib/tz.mjs';
 import { stripAccents, companyKey, emailDomain, sameName, normPersonName, companyRelated } from '../../../lib/normalize.mjs';
-import { STOP_WORDS, noteHistory, CAUTION_WORDS, INSTRUCTION_LIKE } from './sources.mjs';
+import { isHoldOne } from '../../../lib/ledger.mjs';
+import { STOP_WORDS, noteHistory, CAUTION_WORDS, INSTRUCTION_LIKE, noteStop } from './sources.mjs';
 import { INACTIVE_OWNER } from './evidence.mjs';
 import { ownerSaid, ownerQuoted } from '../../../lib/names.mjs';
 
@@ -135,6 +136,22 @@ function recordWouldBe(r) {
 export const HARD_HOLDS = ['do_not_contact', 'off_limits_account', 'opted_out'];
 // A coworker holds the record or the account (whatever coworker_contacts says to do about it); "the account is
 // a coworker's, but this record is yours" is not a hold.
+// Hold 1 of the CRM holds (spec 0.1.7 §7): on the do-not-contact list, said no to contact on the event's list, or
+// opted out or asked to stop in the CRM or at an earlier event. No reach, warm or group answer lifts it, on any
+// channel, and neither does a file or a column going away (the hold is kept from the ledger, sticky). Only the user's
+// own words through the one read-back step (crm-triage lift-hold, a hold_lifted line) take a person off it. A
+// bounce isn't one.
+export const isNeverHold = (r) => !!r && ['skip', undefined].includes(r.group ?? r.would_be) && isHoldOne(r);
+// A hold's words without what floorboss adds when it is kept or carried: "(seen …)", "(at your event …)", "(new since …)".
+// A day as a person writes it: "Mon 12 Oct".
+const dayWords = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? 'before' : new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(d);
+};
+export const holdBase = (says) =>
+  String(says || '')
+    .replace(/ \((seen |at your event |new since you said )[^()]*(\([^()]*\)[^()]*)*\)/g, '')
+    .trim();
 const isOwnerHold = (r) => r.rung === 'colleague' && (r.group !== 'reach' || !!r.coworker);
 
 // The record's notes as the CRM has them, one line, capped: data a draft may use ("interested in carrier check-in").
@@ -270,22 +287,32 @@ export function resolve(contact, evidence, ctx) {
   // 4. Opted out, or asked to stop, in the CRM, in the user's contacts, at an earlier event, or by email bounce.
   for (const r of crm) {
     if (r.opted_out) fire('opted_out', 'skip', 'opted out in the CRM');
-    if (r.stop_note || STOP_WORDS.test(r.notes || '')) fire('opted_out', 'skip', `CRM note: "${(r.stop_note || r.notes).slice(0, 120)}"`);
+    if (r.stop_note || STOP_WORDS.test(r.notes || '') || noteStop(r.notes)) {
+      const text = String(r.stop_note || r.notes).slice(0, 120);
+      // Only a clear stop is hold 1; a limited or mixed one is shown, quoted as data, for the user to decide.
+      if (noteStop(text) === 'limited' || (noteStop(text) == null && noteStop(r.notes) === 'limited'))
+        fire('crm_note', 'check', `a note in your CRM: "${text}" (it doesn't plainly say stop: write to them?)`);
+      else fire('opted_out', 'skip', `CRM note: "${text}"`);
+    }
     if ((r.meanings || []).includes('do_not_contact')) fire('opted_out', 'skip', `CRM status "${r.statuses[r.meanings.indexOf('do_not_contact')]}"`);
   }
   for (const e of exact.filter((x) => x.known?.stopped || x.known?.outcome === 'said stop')) fire('opted_out', 'skip', `asked not to be contacted (${e.says})`);
   if (ctx.bounced) fire('opted_out', 'skip', 'their email bounced and there is no new address');
   // A do-not-contact entry or an opt-out or stop floorboss saw before (a hold_seen line in the ledger) holds
-  // even when the file it came from no longer has it: a re-imported list without them is not the user saying
-  // they may be written to. Only the user's own decision after seeing it (decide reach or warm, whose
-  // seen_holds names it, as for any hold) releases them.
+  // even when the file it came from no longer has it: a re-imported list without them, a deleted file or a column
+  // no longer mapped is not the user saying they may be written to. Only the read-back step (lift-hold) lifts it.
+  const lifted = new Set((ctx.lifted || []).map(holdBase));
+  const hasBase = (says) => rungs.some((r) => holdBase(r.says) === holdBase(says));
   for (const h of ctx.pastHolds || []) {
-    if (rungs.some((r) => r.says === h.says)) continue;
-    if (decision && ['reach', 'warm'].includes(decision.group) && (decision.seen_holds || []).includes(h.says)) continue;
-    fire(h.rung, 'skip', `${h.says} (seen ${String(h.at).slice(0, 16).replace('T', ' ')}; no longer in the file, still held until you release them)`, {
-      sticky: true
-    });
+    if (hasBase(h.says)) continue;
+    fire(h.rung, 'skip', `${holdBase(h.says)} (seen ${dayWords(h.at)}; no longer in the file, still held)`, { sticky: true });
   }
+  // A do-not-contact entry or an opt-out at another of the user's events holds them here too, unless it was lifted there.
+  for (const h of ctx.otherHolds || [])
+    if (h.rung === 'unchecked') fire('unchecked', 'skip', h.says, { carried: true });
+    else if (!hasBase(h.says)) fire(h.rung, 'skip', `${holdBase(h.says)} (at your event ${h.event})`, { carried: true });
+  // Lifted by the user's own words (lift-hold): that hold, kept, carried or in the file, no longer stands.
+  for (let i = rungs.length - 1; i >= 0; i--) if (isNeverHold(rungs[i]) && lifted.has(holdBase(rungs[i].says))) rungs.splice(i, 1);
 
   // 5. Rejected or lost, within the window.
   const rejMonths = Number(settings.rejected_months ?? 6);
@@ -541,9 +568,11 @@ export function resolve(contact, evidence, ctx) {
   } else if (isCustomer) {
     const cr = crmOwn.find((r) => (r.meanings || []).includes('customer'));
     const wonDeal = crmOwn.find((r) => r.deal_state === 'won');
+    // Hold 2 of the CRM holds (spec 0.1.7 §7): with no customer rule set, a current customer is held and shown to the
+    // user, who says for each one (reach, warm, skip, or leave them with the account's owner).
     fire(
       'customer_rule',
-      'warm',
+      rule ? 'warm' : 'check',
       partnerRow
         ? customerWord
         : cr
@@ -630,10 +659,19 @@ export function resolve(contact, evidence, ctx) {
     .filter(
       (r) =>
         !r.sticky &&
+        !r.carried &&
         ((HARD_HOLDS.includes(r.rung) && r.group === 'skip') || (r.rung === 'colleague' && r.group !== 'reach' && !(r.holder && ownerIsUser(r.holder))))
     )
     .map((r) => ({ rung: r.rung, says: r.says }));
-  if (decision && ['reach', 'warm', 'colleague'].includes(decision.group)) {
+  // A do-not-contact entry or an opt-out in the file is never lifted by the user's word (reach, warm, colleague, a
+  // group answer): their decision is set aside and the hold stands.
+  // (An "unchecked" hold, another event's records unread, is set aside by no decision either.)
+  const neverHeld = !!decision && decision.group !== 'skip' && rungs.some((r) => r.group === 'skip' && (isNeverHold(r) || r.rung === 'unchecked'));
+  if (neverHeld) {
+    const k = rungs.findIndex((r) => r.rung === 'user');
+    if (k >= 0) rungs.splice(k, 1);
+  }
+  if (!neverHeld && decision && ['reach', 'warm', 'colleague'].includes(decision.group)) {
     const seen = new Set(decision.seen_holds || []);
     // A coworker the CRM names as owner counts too: a "reach" said before the CRM was read (a blanket "Chief
     // Digital Officers: reach") never covers a record a coworker holds. The coworker_contacts rule decides again.

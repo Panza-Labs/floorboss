@@ -42,9 +42,9 @@ test('settings: LinkedIn sending needs the warning accepted; sending needs a fol
   // A config call of Claude's own can't turn sending on: only the flow, saving the user's answer, can.
   assert.match(cli(H, 'event-context', ['config', '--set', JSON.stringify({ sending: { channels: ['email'], followups: 'scheduled' } })]).ERROR, /saved only through that question/);
   assert.match(cli(H, 'event-context', ['config', '--set', JSON.stringify({ own_email: 'me@evil.test' })]).ERROR, /saved only through that question/);
-  assert.match(set({ sending: { channels: ['linkedin'], followups: 'scheduled' } }).ERROR, /LinkedIn warning/);
+  assert.match(set({ sending: { channels: ['linkedin'], followups: 'scheduled' } }).ERROR, /never sends on LinkedIn/);
   assert.match(set({ sending: { channels: ['email'] } }).ERROR, /followups/);
-  assert.equal(set({ sending: { channels: ['email', 'linkedin'], followups: 'each_round', linkedin_ack: true } }).ERROR, undefined);
+  assert.match(set({ sending: { channels: ['email', 'linkedin'], followups: 'each_round', linkedin_ack: true } }).ERROR, /never sends on LinkedIn/);
 });
 
 test('the whole sequence is drafted and approved up front; approved first messages go out once, exactly as approved', () => {

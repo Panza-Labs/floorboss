@@ -15,7 +15,7 @@ import { pastProfile } from './fixtures/autosend-world.mjs';
 import { readback, approve } from '../lib/autosend/approval.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
 const PAUSE = /Pause the cloud task now/;
 
@@ -39,7 +39,7 @@ function approvedWorld({ events = [EVENT], repo = true } = {}) {
   for (const ev of events) {
     const dir = join(w.HOME, 'events', ev.slug);
     const rb = readback(dir, at(NOW));
-    approve(dir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+    approve(dir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   }
   return repo ? { ...w, ...remoteFor(w.HOME) } : w;
 }

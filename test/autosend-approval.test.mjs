@@ -2,6 +2,7 @@
 // it (a stale digest or any words but the sentence write nothing: case 15), "stop auto-send", the ledger lines, the
 // whole-sequence switch, the outbox card after the second yes, and Claude Code refusing every auto-send command
 // (case 16).
+import { withSeen, withoutRecord } from './fixtures/guard-seen.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
@@ -16,7 +17,7 @@ const nowMs = Date.parse(NOW);
 
 test('the ledger takes the three auto-send lines, each with what it needs', () => {
   const ok = (e) => validateEntry({ at: NOW, ...e });
-  assert.deepEqual(ok({ type: 'autosend_approved', who: 'user', id: 'c001', touch: 1, hash: 'a'.repeat(24), to: 'ana@north.example', planned_due: '2026-10-12', digest: 'b'.repeat(64), said: 'auto-send these sequences' }), []);
+  assert.deepEqual(ok({ type: 'autosend_approved', who: 'user', id: 'c001', touch: 1, hash: 'a'.repeat(24), to: 'ana@north.example', planned_due: '2026-10-12', digest: 'b'.repeat(64), said: '1' }), []);
   assert.deepEqual(ok({ type: 'autosend_revoked', who: 'user', id: 'c001', said: 'stop auto-send' }), []);
   assert.deepEqual(ok({ type: 'autosend_released', who: 'floorboss', id: 'c001', touch: 1, hash: 'a'.repeat(24), to: 'ana@north.example', run: 'r1' }), []);
   assert.ok(ok({ type: 'autosend_approved', who: 'user', id: 'c001', touch: 1, to: 'x@y.example', said: 'x' }).length, 'no hash');
@@ -109,16 +110,19 @@ test('readback leaves people out, with why: a LinkedIn step, a text changed sinc
   assert.match(why.c008, /already went/);
 });
 
-test('case 15: a stale digest, or "yes" instead of the sentence, is refused and writes nothing', () => {
+test('case 15: a stale digest, or "yes" instead of a numbered pick, is refused and writes nothing', () => {
   const { evDir } = world({ touches: 2 });
   const before = readFileSync(join(evDir, 'ledger.jsonl'), 'utf8');
   const r = readback(evDir, nowMs);
-  assert.throws(() => approve(evDir, { digest: r.digest, said: 'yes' }, nowMs), /auto-send these sequences/);
-  assert.throws(() => approve(evDir, { digest: r.digest, said: 'auto-send' }, nowMs), /auto-send these sequences/);
+  assert.throws(() => approve(evDir, { digest: r.digest, said: 'yes' }, nowMs), /numbered options/);
+  assert.throws(() => approve(evDir, { digest: r.digest, said: 'auto-send' }, nowMs), /numbered options/);
+  assert.throws(() => approve(evDir, { digest: r.digest, said: '5' }, nowMs), /numbered options/);
+  assert.throws(() => approve(evDir, { digest: r.digest, said: '4' }, nowMs), /has changes/);
+  assert.throws(() => approve(evDir, { digest: r.digest }, nowMs), /no pick/);
   // Something changed after the readback was shown: a new text for one message.
   addLines(evDir, approvedLines(evDir, PEOPLE[1], 2, { extra: ' Now edited.' }).lines);
   const mid = readFileSync(join(evDir, 'ledger.jsonl'), 'utf8');
-  assert.throws(() => approve(evDir, { digest: r.digest, said: 'auto-send these sequences' }, nowMs), /changed since the readback/);
+  assert.throws(() => approve(evDir, { digest: r.digest, said: '1' }, nowMs), /changed since the readback/);
   assert.equal(readFileSync(join(evDir, 'ledger.jsonl'), 'utf8'), mid);
   assert.ok(mid.startsWith(before));
   assert.ok(!ledgerLines(evDir).some((e) => e.type === 'autosend_approved'));
@@ -127,25 +131,26 @@ test('case 15: a stale digest, or "yes" instead of the sentence, is refused and 
 test('the second yes: one line per message, the user\'s words, the digest, the planned day; then nothing waits', () => {
   const { evDir } = world({ touches: 2 });
   const r = readback(evDir, nowMs);
-  const out = approve(evDir, { digest: r.digest, said: '  Auto-send these sequences. ' }, nowMs);
-  assert.deepEqual(out, { approved: 6, people: ['c001', 'c002', 'c003'] });
+  const out = approve(evDir, { digest: r.digest, said: '  Option 1. ' }, nowMs);
+  assert.deepEqual(out, { approved: 6, people: ['c001', 'c002', 'c003'], pick: 'auto' });
   const lines = ledgerLines(evDir).filter((e) => e.type === 'autosend_approved');
   assert.equal(lines.length, 6);
   for (const l of lines) {
     assert.equal(l.who, 'user');
     assert.equal(l.digest, r.digest);
-    assert.equal(l.said, '  Auto-send these sequences. ');
+    assert.equal(l.said, '  Option 1. ');
+    assert.equal(l.pick, 'auto');
     assert.ok(r.items.some((x) => x.id === l.id && x.touch === l.touch && x.hash === l.hash && x.to === l.to && x.planned_day === l.planned_due));
   }
   const again = readback(evDir, nowMs);
   assert.equal(again.items.length, 0, 'already approved for these texts');
-  assert.throws(() => approve(evDir, { digest: again.digest, said: 'auto-send these sequences' }, nowMs), /Nothing is waiting/);
+  assert.throws(() => approve(evDir, { digest: again.digest, said: '1' }, nowMs), /Nothing is waiting/);
 });
 
 test('stop auto-send: revoked for one person or all; a new text needs a new readback', () => {
   const { evDir } = world({ touches: 1 });
   const r = readback(evDir, nowMs);
-  approve(evDir, { digest: r.digest, said: 'auto-send these sequences' }, nowMs);
+  approve(evDir, { digest: r.digest, said: '1' }, nowMs);
   assert.deepEqual(revoke(evDir, { ids: 'c002', said: 'stop auto-send for Bo' }, nowMs), { revoked: ['c002'] });
   assert.deepEqual(readback(evDir, nowMs).items.map((x) => x.id), ['c002'], 'revoked: asked about again');
   assert.deepEqual(revoke(evDir, { ids: 'all', said: 'stop auto-send' }, nowMs).revoked, ['c001', 'c003']);
@@ -187,16 +192,18 @@ test('the outbox card after the second yes: no buttons, no copy, and says floorb
   assert.ok(!/Open in your mail app/.test(withAuto));
 });
 
-test('case 16: Claude Code refuses every auto-send command; Codex runs them', () => {
+test('case 16: Claude Code refuses every auto-send command for a Codex event, and the Codex-only commands; Codex runs them', () => {
   const { HOME } = world({ touches: 1 });
-  for (const args of [['on', '--event', 'harbor-expo', '--said', 'yes'], ['readback', '--event', 'harbor-expo'], ['approve', '--event', 'harbor-expo', '--digest', 'x', '--said', 'auto-send these sequences'], ['revoke', '--event', 'harbor-expo', '--ids', 'all', '--said', 'stop'], ['status'], ['next', '--run', 'new'], ['sync', 'start', '--who', 'laptop', '--run', 'r1'], ['setup']]) {
-    const r = autosend(HOME, args, { claude: true });
-    assert.match(r.ERROR || '', /auto-send is for Codex; Claude Code has its own sending/, args.join(' '));
+  for (const args of [['on', '--event', 'harbor-expo', '--said', 'yes', '--mode', 'drafts'], ['readback', '--event', 'harbor-expo'], ['approve', '--event', 'harbor-expo', '--digest', 'x'], ['revoke', '--event', 'harbor-expo', '--ids', 'all', '--said', 'stop'], ['drafts', 'next', '--event', 'harbor-expo', '--run', 'new'], ['status'], ['next', '--run', 'new'], ['sync', 'start', '--who', 'laptop', '--run', 'r1'], ['setup'], ['settle', '--event', 'harbor-expo', '--id', 'c001', '--touch', '1', '--went', 'yes', '--said', 'x'], ['daily-task']]) {
+    const r = autosend(HOME, withSeen(HOME, args), { claude: true });
+    assert.match(r.ERROR || '', /this auto-send command is for Codex; in Claude Code, auto-send goes through a daily Claude routine|In Claude Code, --mode is routine/, args.join(' '));
   }
   const rb = autosend(HOME, ['readback', '--event', 'harbor-expo']);
   assert.ok(!rb.ERROR, rb.ERROR);
   assert.equal(rb.people, 3);
-  const ok = autosend(HOME, ['approve', '--event', 'harbor-expo', '--digest', rb.digest, '--said-file', said(HOME, 'auto-send these sequences')]);
+  assert.match(rb.choice.numbered, /^1\. Approve and send automatically/m);
+  assert.ok(!rb.choice.ask_user_question, 'Codex shows numbered options');
+  const ok = autosend(HOME, ['approve', '--event', 'harbor-expo', '--digest', rb.digest, '--said-file', said(HOME, '1')]);
   assert.equal(ok.approved, 3, JSON.stringify(ok));
 });
 
@@ -221,7 +228,7 @@ test('review M4: a readback after 17:00 plans the first message for the next wee
 test('review M2: after "it didn\'t go" the card is no longer the cloud\'s', async () => {
   const { evDir } = world({ touches: 1 });
   const r = readback(evDir, nowMs);
-  approve(evDir, { digest: r.digest, said: 'auto-send these sequences' }, nowMs);
+  approve(evDir, { digest: r.digest, said: '1' }, nowMs);
   const { autosendLive, readEvent } = await import('../lib/autosend/common.mjs');
   const x = r.items[0];
   addLines(evDir, [{ at: NOW, type: 'autosend_released', who: 'floorboss', id: x.id, touch: 1, hash: x.hash, to: x.to, run: 'r1' }, { at: NOW, type: 'release_cleared', who: 'user', id: x.id, touch: 1, said: 'not in Sent' }]);
@@ -233,4 +240,11 @@ test('review M1: on refuses an event where Claude Code sends email from this dat
   const { HOME } = world({ touches: 1 });
   writeFileSync(join(HOME, 'config.json'), JSON.stringify({ disclaimer_ack: true, sending: { channels: ['email'] } }));
   assert.match(autosend(HOME, ['on', '--event', 'harbor-expo', '--said', 'yes']).ERROR, /Claude Code sends/);
+});
+
+// The one-use record (0.1.7): the same kind of call with no record of the guard's is refused, and changes nothing.
+test('without the guard\'s record, approve is refused in Claude Code and changes nothing', async () => {
+  const r = await withoutRecord('approve');
+  assert.match(r.error, /safety check did not see this command/);
+  assert.ok(r.unchanged);
 });

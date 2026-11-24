@@ -163,5 +163,9 @@ function finishNext(opts, ran) {
     writeJson(s.judge.prepare.file, s.judge.prepare.rows);
     delete s.judge.prepare;
   }
-  return { ...s, event: c.slug || null, ...(ran.length ? { ran } : {}), loop: s.done ? undefined : 'Do this one thing, then run flow next again.' };
+  return { ...s, event: c.slug || null, ...(ran.length ? { ran } : {}), loop: s.done
+      ? undefined
+      : s.stop
+        ? 'Stop here: show tell_user to the user word for word and wait. Go on only when they ask to try again or say it is fixed.'
+        : 'Do this one thing, then run flow next again.' };
 }

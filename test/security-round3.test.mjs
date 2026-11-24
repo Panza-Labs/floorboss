@@ -150,11 +150,12 @@ test('do-not-contact: re-importing the list without someone keeps them held unti
   assert.ok(!cli(H, 'crm-triage', ['inputs', '--event', H.slug, '--kind', 'dnc', '--file', put('dnc2.txt', 'nobody@else.test\n')]).ERROR);
   cli(H, 'crm-triage', ['load', '--event', H.slug]);
   assert.equal(groupOf(H, ana).group, 'skip');
-  assert.match(groupOf(H, ana).says, /no longer in the file, still held until you release them/);
+  assert.match(groupOf(H, ana).says, /no longer in the file, still held/);
   // The gate's rescue still refuses a hard hold; the user's own decide releases her.
-  assert.match(cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', `rescue ${ana}`]).ERROR || '', /held because/);
-  assert.ok(!cli(H, 'crm-triage', ['decide', '--event', H.slug, '--id', ana, '--group', 'reach', '--because', 'she asked us to write after all']).ERROR);
-  cli(H, 'crm-triage', ['load', '--event', H.slug]);
+  assert.match(cli(H, 'crm-triage', ['gate', '--event', H.slug, '--answers', `rescue ${ana}`]).ERROR || '', /is held: on your do-not-contact list/);
+  cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', ana]);
+  assert.ok(!cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', ana, '--answer', '1', '--said', 'she asked us to write after all']).ERROR);
+  triage(H);
   assert.equal(groupOf(H, ana).group, 'reach');
   // Two imports in a row with no load between: the first list's match was written before it was replaced.
   const H2 = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\n' });
@@ -172,13 +173,14 @@ test('stage prompt: a person once held and since cleared says what matched, when
   writeFileSync(p, 'ana@acme.test\n');
   cli(H, 'crm-triage', ['inputs', '--event', H.slug, '--kind', 'dnc', '--file', p]);
   triage(H);
-  cli(H, 'crm-triage', ['decide', '--event', H.slug, '--id', 'c001', '--group', 'reach', '--because', 'she asked us to write after all']);
+  cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', 'c001']);
+  cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', 'c001', '--answer', '1', '--said', 'she asked us to write after all']);
   triage(H); draftApprove(H);
   const sl = cli(H, 'event-outreach', ['stage-list', '--event', H.slug]);
   const [it] = JSON.parse(readFileSync(sl.file, 'utf8'));
   const r = guard(H, 'mcp__gmail__create_draft', { to: it.to, subject: it.subject, body: it.body });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(reasonOf(r), /Held before:\n"Ana Berg" \(c\d+\) matched "on your do-not-contact list[^"]*" at 2026-10-12T08:00:00\.000Z, cleared by your decide reach at 2026-10-12T08:00:00\.000Z\./);
+  assert.match(reasonOf(r), /Held before:\n"Ana Berg" \(c\d+\) matched "on your do-not-contact list[^"]*" at 2026-10-12T08:00:00\.000Z, cleared by your yes to take them off the hold at 2026-10-12T08:00:00\.000Z\./);
   assert.deepEqual(holdHistory([], 'c001'), []);
 });
 

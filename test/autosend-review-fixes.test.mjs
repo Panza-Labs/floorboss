@@ -22,7 +22,7 @@ const nextNew = nextNewWith({ next, checked });
 
 const at = (iso) => Date.parse(iso);
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 const MARKERS = ['CODEX_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_TOOL_CALL_ID', 'CODEX_SANDBOX', 'CODEX_SANDBOX_NETWORK_DISABLED'];
 const ID = ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false'];
 
@@ -30,7 +30,7 @@ function approved(opts = {}) {
   const w = world({ touches: 2, ...opts });
   process.env.FLOORBOSS_HOME = w.HOME;
   const r = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: r.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: r.digest, said: AUTO_PICK }, at(NOW));
   return w;
 }
 const waitOf = (r, id) => r.waits.find((w) => w.id === id)?.why || '';
@@ -221,7 +221,7 @@ test('finding 3: the pull fails (the laptop moved apart): approve and settle ref
   git(HOME, [...ID, 'commit', '-qm', 'laptop only']);
   cloudTouches(bare, at(NOW));
   const before = readFileSync(join(evDir, 'ledger.jsonl'), 'utf8');
-  const ap = autosend(HOME, ['approve', '--event', 'harbor-expo', '--digest', 'x', '--said-file', said(HOME, SENTENCE)], { now: '2026-10-12T08:05:00Z' });
+  const ap = autosend(HOME, ['approve', '--event', 'harbor-expo', '--digest', 'x', '--said-file', said(HOME, AUTO_PICK)], { now: '2026-10-12T08:05:00Z' });
   assert.match(ap.ERROR || '', /sync repair/);
   assert.equal(readFileSync(join(evDir, 'ledger.jsonl'), 'utf8'), before, 'nothing changed');
   const rv = autosend(HOME, ['revoke', '--event', 'harbor-expo', '--ids', 'c001', '--said-file', said(HOME, 'stop auto-send for Ana')], { now: '2026-10-12T08:06:00Z' });
@@ -238,7 +238,7 @@ test('finding 3: the cloud holds the lock: approve refuses with nothing changed;
   const c = cloneOf(bare);
   assert.deepEqual(start({ home: c, who: 'cloud', runId: 'c1', nowMs: at('2026-10-12T08:00:00Z') }), { ok: true });
   const before = readFileSync(join(evDir, 'ledger.jsonl'), 'utf8');
-  const ap = autosend(HOME, ['approve', '--event', 'harbor-expo', '--digest', 'x', '--said-file', said(HOME, SENTENCE)], { now: '2026-10-12T08:05:00Z' });
+  const ap = autosend(HOME, ['approve', '--event', 'harbor-expo', '--digest', 'x', '--said-file', said(HOME, AUTO_PICK)], { now: '2026-10-12T08:05:00Z' });
   assert.match(ap.ERROR || '', /held by the cloud/);
   assert.equal(readFileSync(join(evDir, 'ledger.jsonl'), 'utf8'), before);
   const rv = autosend(HOME, ['revoke', '--event', 'harbor-expo', '--ids', 'all', '--said-file', said(HOME, 'stop auto-send')], { now: '2026-10-12T08:06:00Z' });
@@ -264,7 +264,7 @@ test('finding 3: sync repair replays the laptop\'s own lines onto a remote that 
   // The laptop, with no sync, revokes Ana and commits it locally (what an old session did); the cloud moves on.
   addLines(evDir, [{ at: '2026-10-12T08:01:00Z', type: 'autosend_revoked', who: 'user', id: 'c001', said: 'stop Ana' }]);
   addLines(evDir, [{ at: '2026-10-12T08:01:30Z', type: 'stop', who: 'user', id: 'c002', said: 'stop' }]);
-  addLines(evDir, [{ at: '2026-10-12T08:01:40Z', type: 'autosend_approved', who: 'user', id: 'c003', touch: 1, hash: ledgerLines(evDir).find((e) => e.type === 'autosend_approved' && e.id === 'c003').hash, to: 'cy@west.example', planned_due: '2026-10-12', digest: 'd'.repeat(64), said: SENTENCE }]);
+  addLines(evDir, [{ at: '2026-10-12T08:01:40Z', type: 'autosend_approved', who: 'user', id: 'c003', touch: 1, hash: ledgerLines(evDir).find((e) => e.type === 'autosend_approved' && e.id === 'c003').hash, to: 'cy@west.example', planned_due: '2026-10-12', digest: 'd'.repeat(64), said: AUTO_PICK }]);
   git(HOME, ['add', '-A']);
   git(HOME, [...ID, 'commit', '-qm', 'laptop revoke']);
   const c = cloneOf(bare);
@@ -317,7 +317,7 @@ test('finding 4: after a list change post-yes, the readback offers the people it
   assert.deepEqual(dueNow(w.HOME, at('2026-10-12T09:00:00Z')).due, []);
   const rb = readback(w.evDir, at('2026-10-12T08:20:00Z'));
   assert.equal(new Set(rb.items.map((x) => x.id)).size, 3);
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at('2026-10-12T08:20:00Z'));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at('2026-10-12T08:20:00Z'));
   assert.deepEqual(dueNow(w.HOME, at('2026-10-12T09:00:00Z')).due.map((x) => x.id), ['c001', 'c002', 'c003']);
 });
 

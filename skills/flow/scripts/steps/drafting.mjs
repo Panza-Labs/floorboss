@@ -76,7 +76,6 @@ export function draftSteps(x) {
         (touchOf(j)?.critic?.verdict === 'FAIL' &&
           touchOf(j)?.critic?.hash === touchOf(j)?.hash &&
           !mine(j) &&
-          !e.state.people[j.id]?.touches?.[j.touch]?.fresh_attempt &&
           countFails(e, j) < 2))
   );
   // The user's own skill or agent writes the jobs it covers (delegate or blend): each gets its brief, and the
@@ -292,9 +291,9 @@ export function draftSteps(x) {
   const ratedAny = Object.values(e.state.people).some((p) => p.ratings.length) || e.state.answered.rate;
   const passed = jobs.filter((j) => j.kind === 'message' && touchOf(j)?.critic?.verdict === 'PASS' && touchOf(j).critic.hash === touchOf(j).hash);
   const carried = !ratedAny && passed.length >= 3 ? ratingsCarry(e) : null;
-  // Codex (hand-send): no 1-to-10 rating step. The chat review at approval (a sample, the user's own words, then a
-  // rewrite) is how the copy is judged there; Claude Code keeps the blind ratings.
-  if (!handSend() && !ratedAny && !carried && passed.length >= 3 && !Object.values(e.state.people).some((p) => Object.values(p.touches).some((t) => t.approved)))
+  // No 1-to-10 rating step, in any host: the chat review at approval (a sample, the user's own words, then a rewrite) is
+  // how the copy is judged. The blind ratings come back only with the blind_ratings setting on.
+  if (c.cfg.blind_ratings === true && !ratedAny && !carried && passed.length >= 3 && !Object.values(e.state.people).some((p) => Object.values(p.touches).some((t) => t.approved)))
     return step(
       'rate',
       "Before the first approval: rate a blind set of the drafts as their readers would. Your ratings, not the critic's, are the measure of the copy; anything you rate 3 or less is written again.",

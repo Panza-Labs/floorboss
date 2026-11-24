@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeJson } from '../../../lib/jsonio.mjs';
+import { EVENT_APP_HOSTS } from '../../../lib/security.mjs';
 
 // Accents folded ("Zuständiger" is "zustandiger", "Größe" is "grosse") before anything else is dropped.
 const norm = (h) =>
@@ -384,7 +385,23 @@ const ALIASES = {
 
 // Words in a cell that mean "leave this person alone". Read in every column, whatever its name.
 export const STOP_WORDS =
-  /\b(bitte keine (weiteren )?(e-?mails?|mails?|werbung|nachrichten|anrufe)|keine (weiteren )?(e-?mails?|mails?) (mehr|erhalten)|m[oö]chte keine (e-?mails?|mails?|werbung)|kontakt unerw[uü]nscht|keine kontaktaufnahme|w[uü]nscht keinen kontakt|kein newsletter|no me escriban|darse de baja|dado de baja|ne souhaite plus [eê]tre contact|bitte keine (e-?mails?|werbung|nachrichten|anrufe)|keine (e-?mails?|werbung|kontaktaufnahme) mehr|nicht (mehr )?(kontaktieren|anschreiben|kontaktiert werden)|m[oö]chte nicht (mehr )?kontaktiert werden|abgemeldet|no (me )?contact(ar|en)|no (quiere|desea) (ser )?contactad[oa]|ne (plus |pas )?(me )?contacter|d[ée]sinscrit\w*|never (to )?be contacted|never contact (me|us|them|him|her|this person|again)|(asked|wants?|wishes) (us |me )?(to )?never|stop (emailing|contacting|messaging|calling)|asked (us |me )?to stop|unsubscrib\w*|do ?n[o']?t (contact|email|pitch|message|reach out|call)|dont (contact|email|pitch|message)|no (more )?(contact|outreach|emails?)|leave (them|him|her) alone|opted? ?out|remove (me|them) from|no pitch|do not solicit)\b/i;
+  /\b(bitte keine (weiteren )?(e-?mails?|mails?|werbung|nachrichten|anrufe)|keine (weiteren )?(e-?mails?|mails?) (mehr|erhalten)|m[oö]chte keine (e-?mails?|mails?|werbung)|kontakt unerw[uü]nscht|keine kontaktaufnahme|w[uü]nscht keinen kontakt|kein newsletter|no me escriban|darse de baja|dado de baja|ne souhaite plus [eê]tre contact|bitte keine (e-?mails?|werbung|nachrichten|anrufe)|keine (e-?mails?|werbung|kontaktaufnahme) mehr|nicht (mehr )?(kontaktieren|anschreiben|kontaktiert werden)|m[oö]chte nicht (mehr )?kontaktiert werden|abgemeldet|no (me )?contact(ar|en)|no (quiere|desea) (ser )?contactad[oa]|ne (plus |pas )?(me )?contacter|d[ée]sinscrit\w*|never (to )?be contacted|never contact (me|us|them|him|her|this person|again)|(asked|wants?|wishes) (us |me )?(to )?never|stop (emailing|contacting|messaging|calling)|asked (us |me )?to stop|unsubscrib\w*|do ?n[o']?t (contact|email|pitch|message|reach out|call)|dont (contact|email|pitch|message)|no (more )?(contact|outreach|emails?)|leave (them|him|her) alone|opt(ed)?[- ]?out|remove (me |them |us )?from (the |your |our |all |this |any )?(mailing |email |e-mail )?lists?|remove (me|them) from|gdpr (erase|erasure|deletion|delete)( request)?|(erase|delete) (my|their|his|her|our) (personal )?data|no pitch|do not solicit)\b/i;
+// F4 (spec 0.1.7 §7): only a CRM note that clearly says stop, for email or for all contact, is hold 1 ('clear'). A note
+// limited to one channel or one kind of mail, or mixed ("do not call, email is fine", "unsubscribed from the newsletter
+// but asked for a demo", "kein newsletter", "no cold calls") holds them for the user's decision ('limited'). null: no stop.
+const LIMITED_STOP =
+  /\b(newsletters?|marketing|promo\w*|mailings?|cold|calls?|calling|phone|sms|texts?|whatsapp|linkedin|but|however|except|only|fine|ok(ay)? to|demo|anrufe|werbung|aber|nur|pero|solo|mais|sauf|seulement)\b/i;
+const SOFT_STOP = /\b(no|kein\w*|don['’]?t|do not)\s+(cold\s+)?(calls?|newsletters?|marketing|werbung|anrufe)\b/i;
+const CLEAR_EXTRA = /^\s*(stop|unsubscribed?|remove me)\s*[.!]?\s*$|\bremove me\b|\bno more (e-?mails?|contact)\b/i;
+export function noteStop(text) {
+  const t = String(text || '');
+  if (!t.trim()) return null;
+  const stopish = STOP_WORDS.test(t) || CLEAR_EXTRA.test(t);
+  // "remove me from your mailing list" takes them off the user's list: its "mailing" limits nothing.
+  const rest = t.replace(/remove (me |them |us )?from (the |your |our |all |this |any )?(mailing |email |e-mail )?lists?/gi, ' ');
+  if ((stopish || SOFT_STOP.test(t)) && LIMITED_STOP.test(rest)) return 'limited';
+  return stopish ? 'clear' : null;
+}
 // Text that reads like an instruction to an AI (a list note, a CRM note): data, never obeyed, and said on the card.
 // One definition, in lib/reading.mjs (the CRM owner answer reads it too, and the guard loads that file).
 export { INSTRUCTION_LIKE } from '../../../lib/reading.mjs';
@@ -494,7 +511,64 @@ const HONORIFIC = /^(mr|mrs|ms|mx|miss|dr|prof|sir|dame|herr|frau|mme|mlle|sr|sr
 const YES_NO = /^(yes|no|y|n|ja|nein|oui|non|sí|si|sim|não|true|false|0|1|x|✓|opted in|opted out|checked|unchecked)$/i;
 
 // Propose a field for every column, with three sample values and how sure the guess is.
-export function propose(headers, rows, kind) {
+const PLACEHOLDER = /^(n\/?a|-+|none|null|not shared|unknown|tbd|\?)$/i;
+// A link to a picture or a file, not to a person's page; a header that names a picture.
+const FILE_LINK = /\.(jpe?g|png|gif|webp|svg|avif|bmp|ico|pdf)(?:[?#].*)?$/i;
+const PICTURE_HEADER = /photo|picture|image|avatar|logo|headshot|thumbnail/i;
+const under = (host, root) => host === root || host.endsWith(`.${root}`);
+const hostOf = (u) => {
+  const m = /^(?:https?:\/\/)?([^/?#\s]+)/i.exec(u);
+  return m ? m[1].toLowerCase().replace(/^www\./, '') : '';
+};
+
+// What one cell of a profile column is: 'linkedin' (a person's LinkedIn page), 'app' (a person's page on an event
+// app), 'relative' (a path with no site), 'file' (a picture or a file), or 'other' (another site, a company page, a
+// handle, a word, free text).
+// standIn: the mock event's stand-in host for LinkedIn (examples/mock-event/load.mjs), read as LinkedIn on the mock only.
+const MOCK_LINKEDIN_HOST = 'example.com';
+function profileCell(v, appHosts, standIn = false) {
+  if (/\s/.test(v)) return 'other';
+  if (FILE_LINK.test(v)) return 'file';
+  if (/^\/[^/]/.test(v)) return 'relative';
+  const host = hostOf(v);
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return 'other';
+  const path = v.replace(/^(?:https?:\/\/)?[^/?#]+/i, '').replace(/[?#].*$/, '');
+  if (under(host, 'linkedin.com') || (standIn && host === MOCK_LINKEDIN_HOST)) return /^\/in\/[^/]+\/?$/i.test(path) ? 'linkedin' : 'other';
+  return appHosts.some((r) => under(host, r)) && path.length > 1 ? 'app' : 'other';
+}
+
+// Is a column whose name says profile or LinkedIn the profile link? floorboss uses two kinds of profile link: a
+// person's LinkedIn page, and a person's page on an event app (a known app's site or the event's app_url). A path with
+// no site ("/people/123") counts only when the header names the event's app. The column is read when more than half
+// of its filled cells (placeholders skipped) are such links; its other cells are left out for that person
+// (applyMapping), and picture or file links always are.
+// Returns { read, why, keep }: keep is what applyMapping needs to tell a person link (see personLink).
+export function profileColumn(cells, header = '', { appName = null, appUrl = null, mock = false } = {}) {
+  const vals = cells.filter((v) => v && !PLACEHOLDER.test(v));
+  const some = (xs) => [...new Set(xs)].slice(0, 3).join(', ');
+  const appWords = [appName, ...EVENT_APP_HOSTS.map((h) => h.split('.')[0])].filter(Boolean).map((w) => String(w).toLowerCase());
+  const keep = { app_host: appUrl ? hostOf(String(appUrl)) || null : null, relative: appWords.some((w) => String(header).toLowerCase().includes(w)), ...(mock ? { mock: true } : {}) };
+  if (PICTURE_HEADER.test(header)) return { read: false, why: `not read: "${header}" is a picture, not a profile page${vals.length ? ` (${some(vals)})` : ''}` };
+  if (!vals.length) return { read: true, why: null, keep };
+  const bad = vals.filter((v) => !personLink(v, keep));
+  if (bad.length * 2 < vals.length)
+    return {
+      read: true,
+      keep,
+      why: bad.length ? `read as the profile link; ${bad.length} of ${vals.length} cells were not LinkedIn or event-app profile links and were left out (samples: ${some(bad)})` : null
+    };
+  if (bad.every((v) => FILE_LINK.test(v))) return { read: false, why: `not read: these cells link to pictures or files, not profile pages (${some(bad)})` };
+  if (bad.every((v) => /^\/[^/]/.test(v))) return { read: false, why: `not read: these links have no site, and the column doesn't say which app they are from (${some(bad)})` };
+  return { read: false, why: `not read: floorboss only uses LinkedIn profile links and event-app profile links, and these cells are ${some(bad)}` };
+}
+// One cell: a LinkedIn person link, or a person's page on an event app (keep: {app_host, relative} from profileColumn).
+export function personLink(v, keep = {}) {
+  const hosts = [...EVENT_APP_HOSTS, ...(keep.app_host ? [keep.app_host] : [])];
+  const k = profileCell(String(v ?? '').trim(), hosts, keep.mock === true);
+  return k === 'linkedin' || k === 'app' || (k === 'relative' && !!keep.relative);
+}
+
+export function propose(headers, rows, kind, { appName = null, appUrl = null, mock = false } = {}) {
   const table = ALIASES[kind];
   if (!table) throw new Error(`Unknown mapping kind ${kind}`);
   const columns = {};
@@ -518,7 +592,9 @@ export function propose(headers, rows, kind) {
   for (const x of Object.values(exact)) taken.add(x.field);
   for (const h of headers) {
     let field = exact[h]?.field || null,
-      confidence = exact[h]?.confidence || 0;
+      confidence = exact[h]?.confidence || 0,
+      why = null,
+      keepLinks = null;
     if (field) taken.delete(field);
     // A header that says not to email or contact ("Do Not Email (Y/N)") is an opt-out, never the email column.
     if (
@@ -559,6 +635,15 @@ export function propose(headers, rows, kind) {
       field = 'email';
       confidence = 0.8;
     }
+    // A column whose name says profile or LinkedIn is the profile link only when its cells say so (profileColumn).
+    if (field === 'profile_url') {
+      const pc = profileColumn(rows.map((r) => String(r[h] ?? '').trim()), String(h), { appName, appUrl, mock });
+      if (!pc.read) {
+        field = 'ignore';
+        confidence = 0.6;
+      } else keepLinks = pc.keep;
+      why = pc.why;
+    }
     if (field === 'company_size' && rows.length && share(rows, h, (v) => !String(v).trim() || bandOf(v)) < 0.6) {
       field = 'ignore';
       confidence = 0.5;
@@ -586,7 +671,7 @@ export function propose(headers, rows, kind) {
       confidence = 1;
     }
     if (field !== 'ignore') taken.add(field);
-    const col = { field, confidence, samples };
+    const col = { field, confidence, samples, ...(why ? { why } : {}), ...(keepLinks && field === 'profile_url' ? { person_links: keepLinks } : {}) };
     if (['last_contact', 'won_at', 'rejected_at'].includes(field)) col.date_order = null; // decided below over every date column
     if (field === 'opted_out') {
       // A column that records consent means the opposite of an opt-out. Guess from its name; the user confirms.
@@ -783,6 +868,14 @@ export function applyMapping(rows, m) {
     const h = field(f)[0];
     return h ? String(r[h] ?? '').trim() : '';
   };
+  // A profile link column read by its cells (profileColumn): a cell that isn't a person link is left out, never kept.
+  const linkCol = m.columns[field('profile_url')[0]];
+  const link = (r) => {
+    const v = one(r, 'profile_url');
+    if (!v) return '';
+    if (FILE_LINK.test(v)) return '';
+    return !linkCol?.person_links || personLink(v, linkCol.person_links) ? v : '';
+  };
   const noteCols = [...field('notes'), ...(m.stop_like_cells || []).filter((x) => x.stop_rows).map((x) => x.column)].filter((h, i, a) => a.indexOf(h) === i);
   const CONTROL = new RegExp('[\\u0000-\\u001f\\u007f\\u2028\\u2029]+', 'g');
   const flat = (v) =>
@@ -798,7 +891,7 @@ export function applyMapping(rows, m) {
       title: flat(one(r, 'title')),
       company: flat(one(r, 'company')),
       email: one(r, 'email').toLowerCase(),
-      profile_url: one(r, 'profile_url'),
+      profile_url: link(r),
       phone: one(r, 'phone'),
       location: one(r, 'location'),
       booth: one(r, 'booth'),

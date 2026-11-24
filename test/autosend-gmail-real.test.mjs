@@ -83,7 +83,7 @@ function ready() {
   const w = world({ touches: 2 });
   process.env.FLOORBOSS_HOME = w.HOME;
   const r = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: r.digest, said: 'auto-send these sequences' }, at(NOW));
+  approve(w.evDir, { digest: r.digest, said: '1' }, at(NOW));
   const now = at('2026-10-12T09:00:00Z');
   return { ...w, now, item: dueNow(w.HOME, now).due[0] };
 }

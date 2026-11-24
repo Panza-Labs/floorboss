@@ -45,8 +45,7 @@ import { isMain } from '../lib/main.mjs';
 import { ranRecently, endSession, RUN_LOCK_MINUTES } from '../lib/runlock.mjs';
 import { loadEvent } from '../lib/event.mjs';
 import { loadConfig } from '../lib/config.mjs';
-import { eventRecord, followupDueDay, eventDay, sentOrGoingToday, addressBusyToday, busyWhy, homeSends } from '../lib/sendcheck.mjs';
-import { touchBefore } from '../lib/route.mjs';
+import { eventRecord, followupDueDay, eventDay, sentOrGoingToday, addressBusyToday, busyWhy, homeSends, stepBefore } from '../lib/sendcheck.mjs';
 import { isOff, logLine, readBriefState, briefStateFile, todayPage, openerFor, privateDir, oneLine, followupsInstalledFile, claudeFor, claudeRun, unattendedDir } from '../lib/unattended.mjs';
 import {
   liveOptins,
@@ -476,7 +475,8 @@ export function followupsDue(now = nowMs(), log = null, { anyHour = false } = {}
         hold('its text changed since you authorised it: it waits for you');
         continue;
       }
-      const before = touchBefore({ touches: p.touches }, a.touch);
+      // A LinkedIn step before it that hasn't gone is passed over (lib/sendcheck.mjs stepBefore, as the guard reads it).
+      const before = stepBefore(evDir, entries, { touches: p.touches }, a.id, a.touch, settings);
       if (!p.touches?.[before]?.sent) {
         // The step before it is a draft in the user's drafts folder that floorboss hasn't seen sent yet; or one an
         // unattended run let through that floorboss never heard went in (no draft id came back): it may not be there.

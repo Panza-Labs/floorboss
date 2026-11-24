@@ -25,7 +25,7 @@ const { PROFILE_TOOLS, THREAD_TOOLS } = drv;
 import { taskPrompt } from '../skills/autosend/scripts/cli.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
 const P = PEOPLE[0];
 const ITEM = { slug: SLUG, id: P.id, name: P.name, touch: 2, to: P.email, from: OWN, subject: 'One more thought', body: 'Hi', hash: 'a'.repeat(24), since_ms: at('2026-10-12T09:01:00Z'), thread_id: 'th1', reply_to_message_id: 'm1' };
@@ -47,7 +47,7 @@ function approvedWorld({ touches = 1, people = [P] } = {}) {
   const w = world({ touches, people });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   return { ...w, ...remoteFor(w.HOME) };
 }
 const T1 = '2026-10-12T09:00:00Z';
@@ -57,12 +57,12 @@ test('item 1: the approval records the sending address, and needs one', () => {
   const w = world({ touches: 1, people: [P], event: { ...EVENT, autosend_own: undefined } });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW)), /address it sends from|--own/);
+  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW)), /address it sends from|--own/);
   assert.ok(!ledgerLines(w.evDir).some((e) => e.type === 'autosend_approved'));
   const v = world({ touches: 1, people: [P] });
   process.env.FLOORBOSS_HOME = v.HOME;
   const rb2 = readback(v.evDir, at(NOW));
-  approve(v.evDir, { digest: rb2.digest, said: SENTENCE }, at(NOW));
+  approve(v.evDir, { digest: rb2.digest, said: AUTO_PICK }, at(NOW));
   assert.ok(ledgerLines(v.evDir).filter((e) => e.type === 'autosend_approved').every((e) => e.from === OWN));
   assert.equal(dueNow(v.HOME, at(T1)).due[0].from, OWN);
 });
@@ -71,7 +71,7 @@ test('item 1: an approval with no recorded sender waits, and the readback offers
   const w = world({ touches: 1, people: [P] });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  const { from: _f, ...noFrom } = { from: 1, type: 'autosend_approved', who: 'user', id: P.id, touch: 1, hash: rb.items[0].hash, to: P.email, planned_due: rb.items[0].planned_day, digest: rb.digest, said: SENTENCE };
+  const { from: _f, ...noFrom } = { from: 1, type: 'autosend_approved', who: 'user', id: P.id, touch: 1, hash: rb.items[0].hash, to: P.email, planned_due: rb.items[0].planned_day, digest: rb.digest, said: AUTO_PICK };
   addLines(w.evDir, [{ at: '2026-10-12T08:00:00Z', ...noFrom }]);
   const plan = dueNow(w.HOME, at(T1));
   assert.equal(plan.due.length, 0);
@@ -156,7 +156,7 @@ test('item 2: a follow-up with no recorded thread or message id is held with a p
   const w = world({ touches: 2, people: [P] });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   const now = at(T1);
   const it = dueNow(w.HOME, now).due[0];
   apply(w.evDir, it, { go: true }, now);
@@ -224,7 +224,7 @@ function released() {
   const w = world({ touches: 1, people: [P] });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   const now = at(T1);
   const it = dueNow(w.HOME, now).due[0];
   apply(w.evDir, it, { go: true }, now);
@@ -265,7 +265,7 @@ test('item 6: settle --went yes records --message-id and --thread-id when given'
   const w = world({ touches: 2, people: [P] });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   const now = at(T1);
   const it = dueNow(w.HOME, now).due[0];
   apply(w.evDir, it, { go: true }, now);

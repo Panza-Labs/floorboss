@@ -2,6 +2,57 @@
 
 All notable changes to floorboss are listed here. The format follows Keep a Changelog.
 
+## [0.1.7] - 2026-11-24
+
+This release also holds the 0.1.6 work, which was not published on its own.
+
+### Security
+- A checked file read could be led outside floorboss's folders in two ways: a parent folder swapped for a link
+  while the read ran, or a second name (a hard link) for another file. Both are in 0.1.5; update. The read now walks
+  to the file one folder at a time, refuses a link inside the data folder and any file with a second name, and
+  returns to the folder it started in or stops (`lib/paths.mjs`).
+- Auto-send state changes need a one-use record that only the guard writes, so the model can't turn auto-send on
+  by running the command itself. A stop never needs one.
+- The data repo's git calls are pinned to the folder's own `.git`, its remote is bound to the user's yes, and a repo
+  with program-starting git settings, links in `.git` or `objects/info/alternates` is refused.
+- SECURITY.md now states the limits of auto-send through Gmail drafts: the daily task sees only Gmail, so a queued
+  draft that is edited goes as edited, and a stop on the laptop reaches a queued draft only once its hold run has
+  labelled it.
+
+### Channels and LinkedIn
+- Setup asks which channels you use. floorboss never sends a LinkedIn message: each one is yours to send by hand, on
+  a "Due today" list, with a CRM task on its due day when a CRM is connected.
+- A by-hand LinkedIn step that was not sent never pauses the sequence. It is dropped when the next step goes.
+- A first message you skip no longer blocks the messages after it.
+
+### CRM holds
+- A CRM hold applies on every channel. A do-not-contact hold is carried across your events and checked again at
+  the last step before a send.
+
+### Approval and drafting
+- The approve step offers only what the send check would approve, by that check's own rule. Each message it would
+  refuse shows as one held line that names the real blocker and what to do.
+- Nobody leaves a run without a word: each person is offered, held with a line, or out for a stated reason.
+- Drafting stops after three tries at a message that keeps failing its checks; the same failing text saved again
+  uses up a try.
+- An approval taken back and restored can't make an already-sent message sendable again, and a redraft keeps the
+  one-message-a-day mark.
+
+### Setup
+- Guided intake: what floorboss can learn from, and who to reach at this show. Questions with a fixed set of answers
+  are choices; a typed digit picks the numbered option.
+- Setup, research and the review read the same in Claude Code and in Codex. The final approval is a choice, not a
+  typed sentence.
+- A connected CRM is confirmed by name, and a CRM that is not listed is refused.
+
+### Auto-send in Claude Code
+- Daily sending through a Claude routine: the first message goes through Claude Code's own send, the follow-ups wait
+  as Gmail drafts, and a stop on the laptop deletes the routine's queued drafts.
+
+### Known limits
+- A hold on a queued Gmail draft is not read back after the label call; an empty answer from the label tool counts
+  as done. Delete the draft, or pause the daily task, when a hold must be certain.
+
 ## [0.1.0] (unreleased)
 
 The first public version.

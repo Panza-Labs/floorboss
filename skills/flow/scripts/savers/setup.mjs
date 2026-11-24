@@ -155,9 +155,9 @@ export const SETUP_SAVERS = {
       return answers(c, { setup_reused: true });
     const AGAIN = {
       '\\b(team|colleagues?|coworkers?)\\b': ['works_alone', 'colleagues_asked', 'colleague_notes_asked'],
-      '\\b(crm|tools?|mailbox|gmail|outlook|calendar|hubspot|salesforce|pipedrive)\\b': ['tools_confirmed', 'crm_choice', 'mailbox_choice', 'calendar_choice'],
+      '\\b(crm|tools?|mailbox|gmail|outlook|calendar|hubspot|salesforce|pipedrive)\\b': ['tools_confirmed', 'crm_choice', 'mailbox_choice', 'calendar_choice', 'account_intake'],
       '\\b(company|job|employer|work at|new role)\\b': ['company_asked', 'about_you_asked', 'offer_asked', 'claims_confirmed'],
-      '\\b(voice|tone)\\b': ['samples_ok', 'samples_skipped'],
+      '\\b(voice|tone)\\b': ['samples_ok', 'samples_skipped', 'account_intake'],
       '\\b(sign|sign-off|signature|name)\\b|\\b(moved|live in|city)\\b': ['about_you_asked'],
       '\\b(offer|product|proof|sell)\\b': ['offer_asked', 'claims_confirmed'],
       '\\b(send|sending)\\b': ['sending_asked', 'sending_channels', 'send_setup_done'],
@@ -245,7 +245,7 @@ export const SETUP_SAVERS = {
     const o0 = typeof v === 'object' && v ? v : null;
     // Hand-send: the sign-off from the first name the agent knows ("Best," and the name), and no city: the home zone is
     // the computer's. A sign-off the user gives later is saved the same way, without a city.
-    if (handSend() && o0 && (o0.first_name || (o0.sign_off && !o0.city))) {
+    if (o0 && (o0.first_name || (o0.sign_off && !o0.city))) {
       const first = String(o0.first_name || '').trim().split(/\s+/)[0].slice(0, 60);
       if (o0.first_name && !first) throw new Error('The answer is {"first_name":"<first name>","from":"sender_name|account|email|user"}.');
       const sign = o0.sign_off ? String(o0.sign_off) : `Best,\n${first}`;

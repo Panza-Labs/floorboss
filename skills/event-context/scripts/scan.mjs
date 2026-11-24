@@ -9,6 +9,7 @@ import { existsSync, readFileSync, readdirSync, statSync, lstatSync, openSync, r
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { isKnownBrowser, startsBrowserPackage } from '../../../lib/security.mjs';
+import { screenTool } from '../../connectors/scripts/tasks.mjs';
 
 export const KINDS = {
   outbound:
@@ -55,6 +56,48 @@ const kindsOf = (text) =>
     .map(([k]) => k);
 // A skill or agent counts as a CRM, mailbox, calendar or browser tool only by its name ("hubspot-sync"), not
 // because its description mentions email ("emailing a deck"); writing kinds come from name and description.
+// Apps whose tools may read threads, events or people but that are no mailbox, calendar or CRM of the user's.
+const OTHER_APPS = /\b(slack|notion|linear|whatsapp|telegram|signal|imessage|messenger|teams|msteams|jira|confluence|asana|trello|clickup|monday|github|gitlab|figma|airtable|discord|miro|zendesk|intercom)\b/i;
+// A server as a person names it: "claude_ai_Gmail" is Gmail, "hubspot" is HubSpot. The raw name only where the user must type it.
+const KNOWN_NAMES = {
+  gmail: 'Gmail',
+  hubspot: 'HubSpot',
+  salesforce: 'Salesforce',
+  pipedrive: 'Pipedrive',
+  attio: 'Attio',
+  outlook: 'Outlook',
+  'microsoft 365': 'Microsoft 365',
+  ms365: 'Microsoft 365',
+  m365: 'Microsoft 365',
+  'google workspace': 'Google Workspace',
+  'google calendar': 'Google Calendar',
+  gcal: 'Google Calendar',
+  slack: 'Slack',
+  notion: 'Notion',
+  linear: 'Linear',
+  whatsapp: 'WhatsApp',
+  telegram: 'Telegram',
+  msteams: 'Microsoft Teams',
+  teams: 'Microsoft Teams'
+};
+export function personName(x) {
+  // Prefixes a host or a package adds (claude_ai_, plugin, mcp-, a trailing -mcp), and a word said twice ("plugin hubspot hubspot").
+  const words = String(x ?? '')
+    .replace(/^[a-z]+:/, '')
+    .replace(/^claude_ai_/i, '')
+    .replace(/^@[^/\s]+\//, '')
+    .split(/[\s_\-/]+/)
+    .filter((w) => w && !/^(plugin|mcp|server)$/i.test(w))
+    .filter((w, i, all) => i === 0 || w.toLowerCase() !== all[i - 1].toLowerCase());
+  const p = words.join(' ').trim();
+  if (KNOWN_NAMES[p.toLowerCase()]) return KNOWN_NAMES[p.toLowerCase()];
+  // A known app among the words names it ("pipedrive crm", "server gmail autoauth"): the rest is packaging.
+  const known = words.find((w) => KNOWN_NAMES[w.toLowerCase()]);
+  if (known) return KNOWN_NAMES[known.toLowerCase()];
+  return words.map((w) => (/[A-Z]/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
+}
+// Several servers as people name them, each name once ("claude_ai_Gmail" and "gmail" are both Gmail).
+export const personNames = (list) => [...new Map((list || []).map((x) => [personName(x).toLowerCase(), personName(x)])).values()];
 const TOOL_KINDS = new Set(['crm', 'email', 'calendar', 'browser', 'chat']);
 // A writer named for email ("cold-email-writer") writes email; it isn't a mailbox.
 const WRITER_NAME = /\b(writer|writing|copy|outreach|outbound|sequence|template|cold)\b/i;
@@ -270,8 +313,8 @@ export function summarize(items, session = null) {
   // floorboss's own skills and agents aren't the user's tools.
   const own = (x) => /^floorboss[:@]/i.test(String(x?.name || x || ''));
   const all = items.filter((x) => !own(x));
-  // A server can be given with its tool names ({"name":"claude_ai_Notion","tools":["notion-calendar-list-events"]}):
-  // a calendar or CRM inside a general app shows in its tools, not its name.
+  // A server can be given with its tool names ({"name":"google_workspace","tools":["calendar_list_events"]}): a
+  // calendar or CRM inside a general app shows in its tools, not its name (an app in OTHER_APPS, like Notion, never does).
   // The flow's scan step asks for the tool names as Claude sees them ("mcp__<server>__<tool>"): grouped by
   // server here, so a CRM or mailbox is recognised from its tools as well as its name.
   const grouped = {};
@@ -289,12 +332,22 @@ export function summarize(items, session = null) {
     // A browser is known by its tools only: a name ("file-browser", "chrome-history") could be anyone's.
     const named = kindsOf(name.replace(/[-_]/g, ' ')).filter((k) => k !== 'browser');
     const crmOnly = named.includes('crm') && !/mail|inbox|outlook|gmail/i.test(name);
-    const kinds = [...new Set([...named, ...toolKinds(tools).filter((k) => !(k === 'email' && crmOnly))])];
+    // A known app that is none of these (Slack, Notion, Linear) is counted as what it is, whatever its tools read:
+    // Slack's threads aren't a mailbox, Notion's calendar view isn't the user's calendar.
+    // Notion Mail is a mailbox, whatever Notion's other apps are.
+    const otherApp = OTHER_APPS.test(name.replace(/[-_]/g, ' ')) && !/notion[\s_-]*mail/i.test(name);
+    const kinds = [...new Set([...named, ...toolKinds(tools).filter((k) => !(k === 'email' && crmOnly) && !(otherApp && ['email', 'crm', 'calendar'].includes(k)))])];
+    // Sending is offered only where a send tool is really there (a mailbox that can only read or draft can't send).
+    const sends = tools.some((t) => /(^|[^a-z])send([^a-z]|$)/i.test(String(t).replace(/([a-z])([A-Z])/g, '$1_$2')));
     // Marked when its tools show a browser: the first scan keeps that as the only proof besides an exact known name.
     const byTools = kinds.includes('browser') ? { browser_by_tools: true } : {};
     const prev = all.find((x) => x.type === 'mcp' && x.name === name);
-    if (prev) Object.assign(prev, { kinds: [...new Set([...prev.kinds, ...kinds])], ...byTools });
-    else all.push({ type: 'mcp', name, transport: 'session', source: 'this session', kinds, ...byTools });
+    const drafts = tools.some((t) => /(^|[^a-z])create_?draft([^a-z]|$)/i.test(String(t)));
+    // A tool floorboss may add a CRM contact with (skills/connectors screenTool: a generic object tool is refused).
+    const adds = tools.some((t) => screenTool('crm.create_contact', t).ok);
+    const sendTool = { ...(sends ? { can_send: true } : {}), ...(drafts ? { can_draft: true } : {}), ...(adds ? { can_create_contact: true } : {}) };
+    if (prev) Object.assign(prev, { kinds: [...new Set([...prev.kinds, ...kinds])], ...byTools, ...sendTool });
+    else all.push({ type: 'mcp', name, transport: 'session', source: 'this session', kinds, ...byTools, ...sendTool });
   }
   for (const s of (session?.skills || []).filter((x) => !own(x)))
     if (!all.some((x) => x.type === 'skill' && x.name === (s.name || s)))
@@ -321,7 +374,15 @@ export function summarize(items, session = null) {
   const outbound = !writers.length ? 'none' : writers.some((w) => w.kinds.includes('voice') && w.kinds.includes('company_context')) ? 'full' : 'partial';
   return {
     items: all,
-    found: Object.fromEntries(Object.keys(KINDS).map((k) => [k, by(k).map((x) => `${x.type}:${x.name}`)])),
+    found: {
+      ...Object.fromEntries(Object.keys(KINDS).map((k) => [k, by(k).map((x) => `${x.type}:${x.name}`)])),
+      // The mailboxes with a send tool: the only ones offered for sending.
+      email_send: by('email').filter((x) => x.can_send === true).map((x) => `${x.type}:${x.name}`),
+      // The mailboxes with a tool that makes drafts (auto-send in Claude Code queues follow-ups as Gmail drafts).
+      // The CRMs with a tool floorboss may add people with.
+      crm_create: by('crm').filter((x) => x.can_create_contact === true).map((x) => `${x.type}:${x.name}`),
+      email_draft: by('email').filter((x) => x.can_draft === true).map((x) => `${x.type}:${x.name}`)
+    },
     outbound,
     writers: writers.map((w) => ({
       name: w.name,

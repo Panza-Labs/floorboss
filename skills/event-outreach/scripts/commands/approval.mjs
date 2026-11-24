@@ -11,9 +11,9 @@ import { touchBefore } from '../../../../lib/route.mjs';
 import { companyWords } from '../../../../lib/gate.mjs';
 import { approvalHash } from '../../../../lib/sendcheck.mjs';
 import { inOneGo } from '../../../../lib/ledger.mjs';
-import { toOf, sendRoute, whereAt } from './routes.mjs';
+import { toOf, sendRoute, whereAt, linkedinNoteCap } from './routes.mjs';
 import { ctxOf, sameSlots, wholeSequence, isOut, led } from './context.mjs';
-import { readTodo, savedDraft, ledgerTouch, staleFor, savedBeforeIt } from './saved-drafts.mjs';
+import { readTodo, savedDraft, ledgerTouch, staleFor, savedBeforeIt, firstNow } from './saved-drafts.mjs';
 import { rebuildOutbox } from './cards.mjs';
 
 // A refusal ends with a hint for Claude (can_interpret, and the people by ID): it may work out what the user meant and
@@ -42,6 +42,151 @@ const agreeOnly = (opts, stale) =>
       ? 'Stuck drafts are dropped or edited by id ("drop c004", "edit c007:2"), or "leave them for now".'
       : 'Here a held draft is approved, dropped or edited by its id only: "approve c004", "drop c007:2", "edit c009".'
   } Nothing was saved.`;
+
+// Why a draft can't be approved now (null: it can). named: the people approved by name, past a critic that failed them.
+// One rule for the gate and for what the flow offers at the approval (planApproval).
+function whyNotApprovable(c, j, d0, named) {
+  if (!d0) return { reason: 'not written yet', cause: 'unwritten' };
+  if (j.critic_held && !named.has(j.id))
+    return { held: true, cause: 'critic', reason: `failed the critic twice: edit it, drop it, or approve ${j.id} by name to send it anyway` };
+  const why = c.blocked(j.id, j.kind);
+  if (why) return { reason: `can't be contacted now: ${why}`, cause: 'blocked', blocked: why };
+  const d = savedDraft(c, j.id, j.touch, d0);
+  if (!d)
+    return {
+      cause: 'edited',
+      reason: ledgerTouch(c, j.id, j.touch).read
+        ? 'its text changed after the critic read it: save it again (save-draft) and send it to the critic again'
+        : 'its text changed after it was saved: save it again (save-draft), then the critic reads it'
+    };
+  if (j.kind === 'message' && sameSlots(d.slot_ids, j.slot_ids) === false)
+    return { reason: 'its offered times changed since it was written: it needs a new draft with the new times', cause: 'redraft' };
+  if (j.kind === 'confirmation' && d.checks?.length) return { reason: `confirmation checks failing: ${d.checks.join('; ')}`, cause: 'checks' };
+  if (j.kind === 'confirmation' && d.booked_slot && d.booked_slot !== c.state[j.id]?.booked)
+    return { reason: 'the booking changed since this confirmation was written', cause: 'redraft' };
+  if (j.kind === 'message' && d.checks?.length) return { reason: `script checks failing: ${d.checks.join('; ')}`, cause: 'checks' };
+  // A LinkedIn message is held to the note limit as it stands now, not as it stood when it was written.
+  if ((j.kind === 'message' || j.kind === 'confirmation') && j.channel === 'paste' && whereAt(c, j.id, j.kind === 'confirmation' ? 0 : j.touch) === 'LinkedIn' && String(d.body || '').length > linkedinNoteCap(c))
+    return { reason: `it is ${String(d.body || '').length} characters, over the ${linkedinNoteCap(c)} LinkedIn allows in a connection note: it needs a shorter draft`, cause: 'checks' };
+  if (j.kind === 'message' && !d.verdict)
+    return {
+      cause: 'unread',
+      reason: ledgerTouch(c, j.id, j.touch).read ? 'its text changed after the critic read it: send it to the critic again' : "the critic hasn't read it"
+    };
+  if (j.kind === 'message' && staleFor(c, j.id, j.touch, d))
+    return {
+      cause: 'redraft',
+      reason: firstNow(c, j.id, j.touch, undefined, d)
+        ? 'message 1 could not be delivered: this is now the first message, written again for your approval'
+        : savedBeforeIt(ledgerTouch(c, j.id, j.touch), touchBefore(c.state[j.id], j.touch), j.touch)
+        ? 'it was saved before the message ahead of it had any text: it needs a new draft, written for that message'
+        : 'the message before it was rewritten: it needs a new draft'
+    };
+  if (j.kind === 'message' && d.verdict.verdict === 'FAIL' && !named.has(j.id))
+    return {
+      cause: 'critic',
+      reason: `failed the critic (${d.verdict.reasons.join('; ')}); edit it, drop it, approve ${j.id} by name to send it anyway, or ask for a fresh attempt`
+    };
+  return null;
+}
+
+// What an answer does, message by message, before anything is written: approved, held for the user's word, or not
+// ready and why. approve: the people it approves; named: approved by name (past a critic that failed them); dropTouch,
+// editTouch: messages dropped or opened for editing in the same answer. The gate writes exactly this, and the flow offers
+// at the approval only what "approve all" would approve here (approvable), so the two never disagree.
+// The verdict, the checks and the text are the ledger's (savedDraft), never the working copy's: Claude may write that
+// file, and one Write there turned a critic FAIL into a PASS or cleared a failing check.
+export function planApproval(c, t, { approve, named = new Set(), dropTouch = [], editTouch = new Set() }) {
+  const whyNot = (j, d0) => whyNotApprovable(c, j, d0, named);
+  // With sending on, a person's whole sequence is approved together or not at all: a first message never goes
+  // while a follow-up of its sequence is unwritten, held or failing ("approve all" never sends first messages
+  // alone).
+  const seqOk = {};
+  if (wholeSequence(c))
+    for (const id of new Set(t.jobs.filter((j) => j.kind === 'message' && approve.has(j.id)).map((j) => j.id))) {
+      // A follow-up dropped in this same answer is out of the sequence.
+      const seq = t.jobs.filter((j) => j.id === id && j.kind === 'message' && !dropTouch.includes(`${j.id}:${j.touch}`)).sort((a, b) => a.touch - b.touch);
+      if (seq.length < 2) continue;
+      // An approved follow-up counts only while it's written for the message before it as that is now.
+      const current = (j) => !staleFor(c, j.id, j.touch, savedDraft(c, j.id, j.touch) || readJson(j.draft_file, null));
+      const bads = seq
+        .map((j) => ({
+          j,
+          w: whyNot(j, readJson(j.draft_file, null)) || (current(j) ? null : { reason: 'was written for an earlier version of the message before it' })
+        }))
+        .filter((x) => x.w && !((c.state[id]?.touches?.[x.j.touch]?.status === 'outboxed' && current(x.j)) || c.state[id]?.sent?.[x.j.touch]));
+      // What really holds the sequence first: a critic hold is lifted by approving the person by name, anything else
+      // (a message not written, failing its checks, changed) is not, so that one is named.
+      const bad = bads.find((x) => x.w.cause !== 'critic') || bads[0];
+      if (bad)
+        seqOk[id] = { reason: `its sequence isn't ready: ${bad.j.touch === 1 ? 'the first message' : `follow-up ${bad.j.touch - 1}`} ${bad.w.reason}`, blocking: bad.j, why: bad.w.reason, cause: bad.w.cause || 'redraft' };
+    }
+  const out = [];
+  const doneTouch = new Set();
+  for (const j of [...t.jobs].sort((a, b) => (a.touch || 0) - (b.touch || 0))) {
+    if (!approve.has(j.id) || editTouch.has(`${j.id}:${j.touch}`) || dropTouch.includes(`${j.id}:${j.touch}`)) continue;
+    const raw = readJson(j.draft_file, null);
+    const w = whyNot(j, raw);
+    if (w?.held) {
+      out.push({ j, raw, held: true, reason: w.reason, blocking: j, why: w.reason, cause: w.cause });
+      continue;
+    }
+    if (w) {
+      out.push({ j, raw, reason: w.reason, blocking: j, why: w.reason, cause: w.cause });
+      continue;
+    }
+    if (j.kind === 'message' && seqOk[j.id]) {
+      out.push({ j, raw, ...seqOk[j.id] });
+      continue;
+    }
+    // A follow-up is approved only with the very message before it (approved now, earlier, or already sent).
+    if (j.kind === 'message' && j.touch > 1) {
+      const beforeT = touchBefore(c.state[j.id], j.touch);
+      const prevSt = c.state[j.id]?.touches?.[beforeT]?.status;
+      if (beforeT > 0 && !(doneTouch.has(`${j.id}:${beforeT}`) || isOut(prevSt) || c.state[j.id]?.sent?.[beforeT])) {
+        // The message it waits for, by its key even when it isn't in this round's list (it is then not offered either).
+        const before = t.jobs.find((x) => x.id === j.id && x.kind === 'message' && x.touch === beforeT) || { id: j.id, touch: beforeT, kind: 'message', absent: true };
+        out.push({ j, raw, reason: `follow-up ${j.touch - 1} waits for message ${j.touch - 1} to be approved`, cause: 'waits', blocking: before, why: `message ${beforeT} isn't approved` });
+        continue;
+      }
+    }
+    out.push({ j, raw, ok: true });
+    doneTouch.add(`${j.id}:${j.touch}`);
+  }
+  return out;
+}
+
+// approvable --event <slug>: what "approve all" would approve now, and what it would refuse and why, by the gate's own
+// rule (planApproval). The flow offers only the first at its approval and names the second as held, with what to say.
+export function approvable(opts) {
+  need(opts, 'event');
+  // floorboss's own tests only (FLOORBOSS_TEST=1): the check fails (FLOORBOSS_FAIL_APPROVABLE=error) or answers
+  // something that isn't its answer (=garbage), as a broken or renamed command would.
+  if (process.env.FLOORBOSS_TEST === '1' && process.env.FLOORBOSS_FAIL_APPROVABLE === 'error') throw new Error('(test) the approval check failed.');
+  if (process.env.FLOORBOSS_TEST === '1' && process.env.FLOORBOSS_FAIL_APPROVABLE === 'garbage') {
+    process.stdout.write('not json\n');
+    process.exit(0);
+  }
+  const c = ctxOf(opts.event, opts);
+  const t = readTodo(c, null);
+  if (!t) return { offer: [], refused: [] };
+  const plan = planApproval(c, t, { approve: new Set(t.jobs.map((j) => j.id)) });
+  return {
+    offer: plan.filter((x) => x.ok).map((x) => `${x.j.id}:${x.j.touch}`),
+    refused: plan
+      .filter((x) => !x.ok)
+      .map((x) => ({
+        id: x.j.id,
+        touch: x.j.touch,
+        kind: x.j.kind,
+        name: c.byId[x.j.id]?.name || null,
+        reason: x.reason,
+        held: !!x.held,
+        cause: x.cause || null,
+        ...(x.blocking ? { blocking: `${x.blocking.id}:${x.blocking.touch}`, blocking_kind: x.blocking.kind, why: x.why, ...(x.blocking.absent ? { blocking_absent: true } : {}) } : {})
+      }))
+  };
+}
 
 function gateAnswer(opts) {
   need(opts, 'event');
@@ -236,39 +381,7 @@ function gateAnswer(opts) {
   // What a reading does, ID first and each name in quotes ("Approve c001 \"Ana Costa\"; hold back c002 \"Ana Berg\"").
   // Why a draft can't be approved now (null: it can). named: the people approved by name, past a critic that failed them.
   function whyNotNamed(j, d0, named) {
-    if (!d0) return { reason: 'not written yet' };
-    if (j.critic_held && !named.has(j.id))
-      return { held: true, reason: `failed the critic twice: edit it, drop it, or approve ${j.id} by name to send it anyway` };
-    const why = c.blocked(j.id, j.kind);
-    if (why) return { reason: `can't be contacted now: ${why}` };
-    const d = savedDraft(c, j.id, j.touch, d0);
-    if (!d)
-      return {
-        reason: ledgerTouch(c, j.id, j.touch).read
-          ? 'its text changed after the critic read it: save it again (save-draft) and send it to the critic again'
-          : 'its text changed after it was saved: save it again (save-draft), then the critic reads it'
-      };
-    if (j.kind === 'message' && sameSlots(d.slot_ids, j.slot_ids) === false)
-      return { reason: 'its offered times changed since it was written: it needs a new draft with the new times' };
-    if (j.kind === 'confirmation' && d.checks?.length) return { reason: `confirmation checks failing: ${d.checks.join('; ')}` };
-    if (j.kind === 'confirmation' && d.booked_slot && d.booked_slot !== c.state[j.id]?.booked)
-      return { reason: 'the booking changed since this confirmation was written' };
-    if (j.kind === 'message' && d.checks?.length) return { reason: `script checks failing: ${d.checks.join('; ')}` };
-    if (j.kind === 'message' && !d.verdict)
-      return {
-        reason: ledgerTouch(c, j.id, j.touch).read ? 'its text changed after the critic read it: send it to the critic again' : "the critic hasn't read it"
-      };
-    if (j.kind === 'message' && staleFor(c, j.id, j.touch, d))
-      return {
-        reason: savedBeforeIt(ledgerTouch(c, j.id, j.touch), touchBefore(c.state[j.id], j.touch), j.touch)
-          ? 'it was saved before the message ahead of it had any text: it needs a new draft, written for that message'
-          : 'the message before it was rewritten: it needs a new draft'
-      };
-    if (j.kind === 'message' && d.verdict.verdict === 'FAIL' && !named.has(j.id))
-      return {
-        reason: `failed the critic (${d.verdict.reasons.join('; ')}); edit it, drop it, approve ${j.id} by name to send it anyway, or ask for a fresh attempt`
-      };
-    return null;
+    return whyNotApprovable(c, j, d0, named);
   }
 
   function describe(r, read, mode) {
@@ -352,57 +465,17 @@ function gateAnswer(opts) {
   const done = [];
   const doneTouch = new Set();
   const heldForYou = [];
-  // Why a job can't be approved now (null: it can), without the rule about the message before it.
-  // The verdict, the checks and the text are the ledger's (savedDraft), never the working copy's: Claude may
-  // write that file, and one Write there turned a critic FAIL into a PASS or cleared a failing check.
-  const whyNot = (j, d0) => whyNotNamed(j, d0, named);
-  // With sending on, a person's whole sequence is approved together or not at all: a first message never goes
-  // while a follow-up of its sequence is unwritten, held or failing ("approve all" never sends first messages
-  // alone).
-  const seqOk = {};
-  if (wholeSequence(c))
-    for (const id of new Set(t.jobs.filter((j) => j.kind === 'message' && approve.has(j.id)).map((j) => j.id))) {
-      // A follow-up dropped in this same answer is out of the sequence.
-      const seq = t.jobs.filter((j) => j.id === id && j.kind === 'message' && !dropTouch.includes(`${j.id}:${j.touch}`)).sort((a, b) => a.touch - b.touch);
-      if (seq.length < 2) continue;
-      // An approved follow-up counts only while it's written for the message before it as that is now.
-      const current = (j) => {
-        return !staleFor(c, j.id, j.touch, savedDraft(c, j.id, j.touch) || readJson(j.draft_file, null));
-      };
-      const bad = seq
-        .map((j) => ({
-          j,
-          w: whyNot(j, readJson(j.draft_file, null)) || (current(j) ? null : { reason: 'was written for an earlier version of the message before it' })
-        }))
-        .find((x) => x.w && !((c.state[id]?.touches?.[x.j.touch]?.status === 'outboxed' && current(x.j)) || c.state[id]?.sent?.[x.j.touch]));
-      if (bad) seqOk[id] = `its sequence isn't ready: ${bad.j.touch === 1 ? 'the first message' : `follow-up ${bad.j.touch - 1}`} ${bad.w.reason}`;
-    }
   // Saved whole or not at all: the entries go in as one append at the end; a failure part-way writes none.
   const editFiles = inOneGo(c.paths.ledger, () => {
-  for (const j of [...t.jobs].sort((a, b) => (a.touch || 0) - (b.touch || 0))) {
-    if (!approve.has(j.id) || editTouch.has(`${j.id}:${j.touch}`) || dropTouch.includes(`${j.id}:${j.touch}`)) continue;
-    const raw = readJson(j.draft_file, null);
-    const w = whyNot(j, raw);
-    if (w?.held) {
-      heldForYou.push({ id: j.id, touch: j.touch, reason: w.reason });
+  for (const x of planApproval(c, t, { approve, named, dropTouch, editTouch })) {
+    const { j, raw } = x;
+    if (x.held) {
+      heldForYou.push({ id: j.id, touch: j.touch, reason: x.reason });
       continue;
     }
-    if (w) {
-      notReady.push({ id: j.id, touch: j.touch, reason: w.reason });
+    if (!x.ok) {
+      notReady.push({ id: j.id, touch: j.touch, reason: x.reason });
       continue;
-    }
-    if (j.kind === 'message' && seqOk[j.id]) {
-      notReady.push({ id: j.id, touch: j.touch, reason: seqOk[j.id] });
-      continue;
-    }
-    // A follow-up is approved only with the very message before it (approved now, earlier, or already sent).
-    if (j.kind === 'message' && j.touch > 1) {
-      const beforeT = touchBefore(c.state[j.id], j.touch);
-      const prevSt = c.state[j.id]?.touches?.[beforeT]?.status;
-      if (!(doneTouch.has(`${j.id}:${beforeT}`) || isOut(prevSt) || c.state[j.id]?.sent?.[beforeT])) {
-        notReady.push({ id: j.id, touch: j.touch, reason: `follow-up ${j.touch - 1} waits for message ${j.touch - 1} to be approved` });
-        continue;
-      }
     }
     const d = savedDraft(c, j.id, j.touch, raw);
     const to = toOf(c, { ...d, holder: j.holder || d.holder });

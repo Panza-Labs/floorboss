@@ -23,13 +23,13 @@ import { sentOrGoingToday, addressBusyToday, homeSends, verifySend } from '../li
 import { fold, legacyState } from '../lib/ledger.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 const ID = ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false'];
 function approved(opts = {}) {
   const w = world({ touches: 2, ...opts });
   process.env.FLOORBOSS_HOME = w.HOME;
   const r = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: r.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: r.digest, said: AUTO_PICK }, at(NOW));
   return w;
 }
 const waitOf = (r, id) => r.waits.find((w) => w.id === id)?.why || '';

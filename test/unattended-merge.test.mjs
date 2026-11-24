@@ -188,5 +188,6 @@ test('call_result, stage_released and stage_cleared survive the ledger merge; on
     .filter((f) => /type:\s*'(call_result|stage_released)'/.test(readFileSync(f, 'utf8')))
     .map((f) => relative(ROOT, f))
     .sort();
-  assert.deepEqual(writers, ['hooks/guard/after-call.mjs', 'hooks/guard/unattended.mjs']);
+  // (hooks/guard/autosend-drafts.mjs: the guard's own reading of a create_draft it let through after the final approval.)
+  assert.deepEqual(writers, ['hooks/guard/after-call.mjs', 'hooks/guard/autosend-drafts.mjs', 'hooks/guard/unattended.mjs']);
 });

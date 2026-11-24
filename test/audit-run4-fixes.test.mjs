@@ -10,6 +10,7 @@ import { bashRefusal, foundServer, check, listed, listedSends, browserItems, log
 import { namedCompanies, unclearSkip } from '../lib/names.mjs';
 import { gatePeople } from '../lib/gate.mjs';
 import { makeHome, drive, simplePersona, cli as simCli } from './sims/lib/driver.mjs';
+import { throughHeadsUp, say } from './fixtures/heads-up.mjs';
 
 const run = (H, skill, args) =>
   spawnSync('node', [join(ROOT, 'skills', skill, 'scripts', 'cli.mjs'), ...args], { env: { ...process.env, FLOORBOSS_HOME: H.HOME, FLOORBOSS_NOW: NOW }, encoding: 'utf8' });
@@ -265,26 +266,17 @@ test('C9: the words of the question never name a company', () => {
 
 const ODD = 'Name,Title,Company,Email\nAna Berg,COO,Companies,ana@companies.test\nBo Li,VP Ops,Globex,bo@globex.test\nCy Oh,COO,News,cy@news.test\n';
 test('C9: "skip companies" with a company called Companies is a skip of them all; "all but" is asked again', { timeout: 300000 }, () => {
+  // (Said at the research heads-up, company_briefs, since 2026-11-21: the company_research ask is gone.)
   const H = makeHome({ context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' }, attendees: ODD });
-  const asked = [];
-  const persona = simplePersona({
-    asks: {
-      setup_level: 'standard',
-      research_scale: 'none',
-      attendee_list: join(H.HOME, 'inputs', 'attendees.csv'),
-      company_research: (s) => {
-        asked.push(...s.ask.companies);
-        const f = join(H.HOME, 'work', 'all-but.txt');
-        writeFileSync(f, 'skip all but Globex');
-        assert.match(simCli(H, 'flow', ['answer', '--event', s.event, '--ask', 'company_research', '--value-file', f]).ERROR || '', /Name the companies/);
-        return 'skip companies';
-      }
-    }
+  const persona = simplePersona({ asks: { setup_level: 'standard', attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
+  const run = throughHeadsUp(H, persona, (up) => {
+    assert.ok(up.companies.includes('Companies') && up.companies.includes('Globex'), up.companies.join(' '));
+    assert.match(say(H, up, 'skip all but Globex').ERROR || '', /Name the companies/);
+    assert.ok(!say(H, up, 'skip companies').ERROR);
   });
-  const { trail, slug } = drive(H, persona, { maxSteps: 200 });
-  assert.ok(asked.includes('Companies') && asked.includes('Globex'), asked.join(' '));
-  assert.ok(!trail.includes('company_briefs'), 'no web research');
-  assert.match(readFileSync(join(H.HOME, 'events', slug, 'ledger.jsonl'), 'utf8'), /"ask":"company_research","value":"skip"/);
+  assert.deepEqual(run.companiesResearched, [], 'no web research on companies');
+  assert.ok(!run.trail.includes('company_briefs'), 'no web research');
+  assert.match(readFileSync(join(H.HOME, 'events', run.slug, 'ledger.jsonl'), 'utf8'), /"ask":"company_research","value":"skip"/);
 });
 
 test('C9: "skip the news" with a company called News skips the news for every company', { timeout: 300000 }, () => {

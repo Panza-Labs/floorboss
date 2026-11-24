@@ -11,13 +11,15 @@ const LIST = 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,V
 
 test('flow: an empty home walks to done, asking each question once and saving every answer where it belongs', { timeout: 300000 }, () => {
   const H = makeHome({ context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' }, attendees: LIST });
+  H.env = { ...H.env, TZ: 'Europe/Amsterdam' };
   const persona = simplePersona({ asks: { attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
   const { trail, slug } = drive(H, persona);
   assert.equal(trail[0], 'disclaimer');
   assert.equal(trail[1], 'scan');
-  assert.ok(trail.includes('onboarding:event') && trail.includes('onboarding:customers') && trail.includes('onboarding:free_time'), trail.join(' '));
+  assert.ok(trail.includes('onboarding:event') && trail.includes('onboarding:customers') && trail.includes('onboarding:free_time') && !trail.includes('onboarding:home_tz'), trail.join(' '));
   // Mechanical steps (mapping proposals, load, todo, batch_check) run inside flow next and no longer show here.
-  for (const s of ['attendee_list', 'map_columns_attendees', 'fit', 'gate', 'research', 'draft', 'critic', 'approve', 'done']) assert.ok(trail.includes(s), `missing step ${s}: ${trail.join(' ')}`);
+  // Research starts with a heads-up (company_briefs, then research_batch), never a question.
+  for (const s of ['attendee_list', 'map_columns_attendees', 'fit', 'gate', 'company_briefs', 'research_batch', 'draft', 'critic', 'approve', 'done']) assert.ok(trail.includes(s), `missing step ${s}: ${trail.join(' ')}`);
   assert.equal(new Set(trail.filter((s) => s.startsWith('onboarding:'))).size, trail.filter((s) => s.startsWith('onboarding:')).length, 'no onboarding question is asked twice');
   // Every answer landed where the code expects it, not where Claude guessed.
   const cfg = JSON.parse(readFileSync(join(H.HOME, 'config.json'), 'utf8'));

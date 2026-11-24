@@ -24,15 +24,16 @@ import { parseGate, TRIAGE_ANSWERS, friendlyAnswer } from '../../../lib/gate.mjs
 import { directReading, interpretedReading, interpretHint, signature, sameReading, isYes, isAgreement, bareOk, rowsHash, savePending, dropPending, clearPending, peekPending, person, shown, plainText } from '../../../lib/reading.mjs';
 import { validateMapping, writeSource, sourcePath, optOutSays, defaultStatusMeaning, ownerValues } from './sources.mjs';
 import { readMappingWords } from './mapping-words.mjs';
-import { mustMeetHits } from './shortlist.mjs';
+import { mustMeetHits, notWrittenTo } from './shortlist.mjs';
 import { parseDecisionLines, matchGroups, DECISION_FORMS } from './decisions.mjs';
 import { planEnrich, readEnriched, enrichKey } from './enrich.mjs';
-import { emailDomain, isSharedDomain } from '../../../lib/normalize.mjs';
+import { emailDomain, isSharedDomain, sameName } from '../../../lib/normalize.mjs';
+import { daysBetween } from '../../../lib/tz.mjs';
 import { parseSegments } from '../../event-context/scripts/context-check.mjs';
 import { validateCrmRecords, validateMailHistory, validateEnriched } from '../../connectors/scripts/tasks.mjs';
 import { modeFor, daysUntilEvent } from '../../event-outreach/scripts/leadtime.mjs';
 import { plannedDays, followupDay, spacingWords } from '../../../lib/spacing.mjs';
-import { HARD_HOLDS } from './resolve.mjs';
+import { HARD_HOLDS, isNeverHold, holdBase } from './resolve.mjs';
 import { plainOwnerValue, ownerQuoted, ownerSaid } from '../../../lib/names.mjs';
 import { ctxOf, log, tableFor, mappingFor, viewOf, writeDerived, segmentOf, recordHolds, INPUT_FILES, INSTRUCTION_LIKE, REMINDER } from './view.mjs';
 import { inventoryView } from '../../../lib/harness.mjs';
@@ -99,7 +100,7 @@ function mappingView(m) {
   const lines = [`# Columns of ${m.file} (${m.kind})`, '', 'Column | floorboss reads it as | sample values', '--- | --- | ---'];
   for (const [h, col] of Object.entries(m.columns))
     lines.push(
-      `${h} | ${col.field === 'ignore' ? 'not read' : col.field}${col.sense ? ` (yes means ${col.sense === 'consent' ? 'agreed to contact' : 'opted out'})` : ''}${col.date_order ? ` (${col.date_order === 'dmy' ? 'day/month' : 'month/day'})` : ''} | ${(col.samples || []).join(' · ')}`
+      `${h} | ${col.field === 'ignore' ? (col.why ? col.why : 'not read') : col.why ? `${col.field}: ${col.why}` : col.field}${col.sense ? ` (yes means ${col.sense === 'consent' ? 'agreed to contact' : 'opted out'})` : ''}${col.date_order ? ` (${col.date_order === 'dmy' ? 'day/month' : 'month/day'})` : ''} | ${(col.samples || []).join(' · ')}`
     );
   const st = Object.entries(m.values?.status || {});
   if (st.length) {
@@ -329,7 +330,17 @@ function load(opts) {
   const counts = {};
   for (const r of Object.values(v.resolved)) counts[r.group] = (counts[r.group] || 0) + 1;
   const notes = [...v.inputs.notes];
+  for (const sl of v.shared_links || [])
+    notes.push(`One profile link (${sl.link}) is shared by ${sl.people} people with different names (lines ${sl.lines.join(', ')}): floorboss didn't use it to tell them apart or to merge them.`);
   if (v.filled) notes.push(`Filled in an email or LinkedIn link for ${v.filled} people from enrichment (enriched.json).`);
+  // A do-not-contact or opt-out hold whose file no longer names them still holds: shown, for the read-back (lift-hold).
+  for (const x of v.contacts) {
+    const h = rungsOf(v.resolved[x.id]).find((r) => isNeverHold(r) && /no longer in the file/.test(r.says || ''));
+    if (h)
+      notes.push(
+        `${safe(x.name, 60)} is no longer in the file that held them (${holdSource(h.says)}), and floorboss still holds them. If they asked to hear from you again, say so, and floorboss reads it back before taking them off.`
+      );
+  }
   const lost = v.contacts.filter((x) => /\?/.test(`${x.name}${x.company}`));
   if (lost.length)
     notes.push(
@@ -526,7 +537,34 @@ const safeWhy = (says, holder, n = 120) => {
 // was given over (resolve puts any newer one first), so none of them is asked again.
 const rungsOf = (r) =>
   !r ? [] : r.rung === 'user' ? [r] : [r, ...(r.alternatives || []).map((a) => ({ rung: a.rung, group: a.would_be, says: a.says, holder: a.holder }))];
+// Hold 1 (do-not-contact or opted out): no reach, warm or group answer lifts it. Where it came from, in plain words.
+const holdSource = (says) => {
+  const b = holdBase(says);
+  const m = /^CRM note: "(.*)"$/.exec(b);
+  if (m) return `a note in your CRM says: "${safe(m[1], 80)}"`;
+  const st = /^CRM status "(.*)"$/.exec(b);
+  if (st) return `your CRM marks them "${safe(st[1], 40)}"`;
+  if (/^on your do-not-contact list/.test(b)) return 'on your do-not-contact list';
+  if (/^opted out in the CRM/.test(b)) return 'opted out in your CRM';
+  if (/^said no to contact/.test(b)) return "said no to contact on the event's list";
+  if (/^asked not to be contacted/.test(b)) return 'asked not to be contacted at one of your events';
+  return safe(plainWhy(b));
+};
+const neverRungs = (v, id) => rungsOf(heldAs(v, id)).filter((x) => isNeverHold(x));
+const uncheckedRung = (v, id) => rungsOf(heldAs(v, id)).find((x) => x.rung === 'unchecked' && x.group === 'skip');
+function neverHold(v, id) {
+  const hs = neverRungs(v, id);
+  // Another event's records unread (S1): no answer of the user's takes them on until that file reads again.
+  if (!hs.length && uncheckedRung(v, id)) return uncheckedRung(v, id).says;
+  if (!hs.length) return null;
+  const who = safe(v.contacts.find((x) => x.id === id)?.name || 'This person', 60);
+  const where = [...new Set(hs.map((h) => holdSource(h.says)))].join('; ');
+  const dncOnly = hs.every((h) => /^on your do-not-contact list/.test(holdBase(h.says)));
+  return `${who} is held: ${where}. floorboss does not write to them on any channel. ${dncOnly ? 'Check your do-not-contact list' : 'Check their record in your CRM'}. If they really asked to hear from you again, say so in your own words, and floorboss reads it back to you before it takes them off.`;
+}
 function hardHold(v, id) {
+  const never = neverHold(v, id);
+  if (never) return never;
   const h = rungsOf(heldAs(v, id)).find((x) => x.group === 'skip' && HARD_HOLDS.includes(x.rung));
   return h
     ? `${id} is held because ${safe(plainWhy(h.says))}. If you really mean to reach them, say so in your own words: decide --id ${id} --group reach --because <why>.`
@@ -554,7 +592,36 @@ function fuzzyHold(v, id, group, because) {
   return `${id} is an uncertain match (${safe(plainWhy(r.says))}): settle it in the same line, "${id} same-person ${ref} ${group}${because ? ` because ${safe(because, 60)}` : ' because <why>'}" or "${id} different-person ${group} because <why>"${/gave no answer/.test(r.says || '') ? `, or "${id} not-in-crm ${group} because <why>" where the CRM lookup gave no answer` : ''} (or skip).`;
 }
 
+// N4: every by-name path that would draft someone in a lost-deal wait (decide, decide-batch by id) asks the same one
+// read-back as the gate first. --lost-answer 1 saves what was asked; 2 keeps them held.
+// v: the view the answer was checked against (decide-batch passes the one with this answer's matches settled).
+function lostPending(c, items, v = viewOf(c)) {
+  const asks = [...new Set(items.map((x) => lostWait(v, x.id, c)).filter(Boolean))];
+  const text = `${asks.join(' ')} 1. Yes. 2. No.`;
+  writeJson(join(c.paths.derived, 'lost-pending.json'), { items, at: c.now.toISOString(), text });
+  return text;
+}
+function lostAnswer(opts) {
+  const c = ctxOf(opts.event, opts);
+  const f = join(c.paths.derived, 'lost-pending.json');
+  const p = readJson(f, null);
+  if (!p?.items?.length || c.now.getTime() - Date.parse(p.at) > 30 * 60000) throw new Error('No question about a lost deal is waiting. Nothing was saved.');
+  writeJson(f, null);
+  const a = String(opts['lost-answer']).trim();
+  if (/^(2|no)\.?$/i.test(a)) return { saved: false, say_to_user: 'They stay held until your wait after the lost deal has passed. Nothing was saved.' };
+  if (!/^(1|yes)\.?$/i.test(a)) throw new Error('Answer 1 (yes) or 2 (no). Nothing was saved.');
+  const v = viewOf(c);
+  inOneGo(c.paths.ledger, () => {
+    for (const x of p.items) {
+      log(c, { type: 'decide', who: 'user', id: x.id, group: x.group, ref: null, because: String(x.because).slice(0, 300), said: `${x.because} / ${a}`.slice(0, 300), seen_holds: seenHolds(v.resolved[x.id]) });
+      log(c, { type: 'note', who: 'user', id: x.id, text: noteText(x.because), known: x.group === 'warm', said: String(x.because).slice(0, 300) });
+    }
+  });
+  return view(opts);
+}
+
 function decide(opts) {
+  if (opts['lost-answer'] != null) return lostAnswer(opts);
   need(opts, 'event', 'id', 'group');
   const c = ctxOf(opts.event, opts);
   if (!GROUPS.includes(opts.group)) throw new Error(`--group is one of ${GROUPS.join(', ')}.`);
@@ -564,11 +631,20 @@ function decide(opts) {
   const ids = String(opts.id)
     .split(/[\s,]+/)
     .filter(Boolean);
+  if (v)
+    for (const id of ids) {
+      const why = neverHold(v, id);
+      if (why) throw new Error(`${why} Nothing was saved.`);
+    }
   if (['reach', 'warm'].includes(opts.group))
     for (const id of ids) {
       const why = fuzzyHold(v, id, opts.group, because);
       if (why) throw new Error(`${why} Nothing was saved.`);
     }
+  if (['reach', 'warm'].includes(opts.group) && ids.some((id) => lostWait(v, id, c))) {
+    const text = lostPending(c, ids.map((id) => ({ id, group: opts.group, because })));
+    return { saved: false, pending: true, say_to_user: text, next: `Show say_to_user to the user word for word and wait. Then: decide --event ${c.slug} --lost-answer <1|2>.` };
+  }
   for (const id of ids) {
     if (!c.state.people[id]) throw new Error(`${id} isn't on this list.`);
     // An answer to a check-these question settles it; it isn't a pick that keep N never cuts (view.mjs).
@@ -597,7 +673,46 @@ const userNote = (c, id, because, group, said) =>
 // The check-these answers in one go (decisions.mjs reads the lines). Everything is checked first and saved
 // whole or not at all, so a reason with a ; in it never leaves half a batch saved. Group lines ("all intern:
 // skip", "all at Acme: reach", "everyone else: …") cover the people still on check-these.
+// F6 (spec 0.1.7 §7): a group line that covers held customers decides them only after one read-back for the whole
+// group. --customers "<the user's answer>": 1 includes them, 2 leaves them out, 3 and names includes those named.
+function customersAnswer(opts) {
+  const c = ctxOf(opts.event, opts);
+  const f = join(c.paths.derived, 'group-customers.json');
+  const p = readJson(f, null);
+  if (!p || !Array.isArray(p.ids) || c.now.getTime() - Date.parse(p.at) > 30 * 60000)
+    throw new Error('No group answer about your customers is waiting. Nothing was saved.');
+  const v = viewOf(c);
+  const said = String(opts.customers).trim();
+  const name = (id) => v.contacts.find((x) => x.id === id)?.name || id;
+  let take;
+  if (/^\s*1\b/.test(said)) take = p.ids;
+  else if (/^\s*2\b/.test(said)) take = [];
+  else if (/^\s*3\b/.test(said)) {
+    const rest = said.replace(/^\s*3\.?\s*:?\s*/, '');
+    take = p.ids.filter((id) => rest.split(/[,;]|\band\b/).some((w) => w.trim() && (sameName(name(id), w.trim()) || name(id).toLowerCase().includes(w.trim().toLowerCase()))));
+    if (!take.length) throw new Error(`Name the customers to include, for example "3 ${safe(name(p.ids[0]), 40)}". Nothing was saved.`);
+  } else throw new Error('Answer 1 (include them), 2 (leave them out) or 3 with the names to include. Nothing was saved.');
+  inOneGo(c.paths.ledger, () => {
+    for (const id of p.ids)
+      log(c, {
+        type: 'decide',
+        who: 'user',
+        id,
+        group: take.includes(id) ? p.group : 'skip',
+        ref: null,
+        because: (take.includes(id) ? `${p.group} (your group answer "${p.line.slice(0, 100)}", customers included)` : `left out of your group answer "${p.line.slice(0, 100)}"`).slice(0, 300),
+        said: `${p.line} / ${said}`.slice(0, 300),
+        answered_check: true,
+        by_group: true,
+        ...(take.includes(id) ? { seen_holds: [] } : {})
+      });
+  });
+  writeJson(f, null);
+  return { decided: p.ids.length, included: take.map(name), left_out: p.ids.filter((id) => !take.includes(id)).map(name), check_these: view({ ...opts, what: 'shortlist' }).check_these };
+}
+
 function decideBatch(opts) {
+  if (opts.customers != null) return customersAnswer(opts);
   need(opts, 'event', 'text');
   const c = ctxOf(opts.event, opts);
   const v0 = viewOf(c);
@@ -625,7 +740,9 @@ function decideBatch(opts) {
   for (const d of list) {
     // An uncertain match is settled first (same person or not): "reach" on it could write to someone that
     // record says opted out. Skip is always allowed.
-    const why = ['reach', 'warm'].includes(d.group) ? fuzzyHold(v, d.id, d.group, d.because) : null;
+    const why =
+      (['reach', 'warm', 'colleague'].includes(d.group) ? neverHold(v0, d.id) || neverHold(v, d.id) : null) ||
+      (['reach', 'warm'].includes(d.group) ? fuzzyHold(v, d.id, d.group, d.because) : null);
     if (why) throw new Error(`${why} Nothing was saved.`);
   }
   // A group line never reaches past a hold a per-person reach would have to name: an uncertain match, or a stop,
@@ -647,8 +764,14 @@ function decideBatch(opts) {
           (r.alternatives || []).some((a) => HARD_HOLDS.includes(a.rung) || /skip/.test(String(a.would_be))))
       );
     };
-    return { ...g, held_back: g.ids.filter(blocked), ids: g.ids.filter((id) => !blocked(id)) };
+    // A held customer (the customer hold, on check-these) waits for the group's one read-back (customersAnswer).
+    const customer = (id) => ['reach', 'warm'].includes(g.group) && heldAs(v, id)?.rung === 'customer_rule' && heldAs(v, id)?.group === 'check';
+    const ok = g.ids.filter((id) => !blocked(id));
+    return { ...g, held_back: g.ids.filter(blocked), customers: ok.filter(customer), ids: ok.filter((id) => !customer(id)) };
   });
+  // Someone waiting after a lost deal is never in a group answer: named in its read-back, still held.
+  const lostIds = v.contacts.filter((x) => rungsOf(heldAs(v, x.id)).some(isLostWait)).map((x) => ({ ...x }));
+  const lostIn = [...new Set(matchGroups(parsed.filter((d) => !d.id && ['reach', 'warm'].includes(d.group)), lostIds, new Set(list.map((d) => d.id))).flatMap((x) => x.ids))];
   const answered = new Set(checks.map((x) => x.id));
   // Who was on check-these before this answer: a person whose match this answer settles was asked about, even
   // when the match takes them off it.
@@ -664,9 +787,14 @@ function decideBatch(opts) {
     else if (!askedBefore.has(d.id)) notAsked.push(d.id);
   }
   // The matches go in first, then the decisions that rest on them.
+  // N4: a by-id reach or warm for someone in a lost-deal wait waits for the one read-back (decide --lost-answer).
+  const lostLines = list.filter((d) => ['reach', 'warm'].includes(d.group) && !refused.some((x) => x.line === d.line.slice(0, 200)) && lostWait(v, d.id, c));
+  const lostText = lostLines.length ? lostPending(c, lostLines.map((d) => ({ id: d.id, group: d.group, because: d.because || d.line })), v) : null;
   const take = list
-    .filter((d) => !refused.some((x) => x.line === d.line.slice(0, 200)))
+    .filter((d) => !refused.some((x) => x.line === d.line.slice(0, 200)) && !lostLines.includes(d))
     .sort((a, b) => Number(!MATCH.includes(a.group)) - Number(!MATCH.includes(b.group)));
+  if (lostText && !take.length && !groups.some((g) => g.ids.length))
+    return { saved: false, pending: true, say_to_user: lostText, next: `Show say_to_user to the user word for word and wait. Then: decide --event ${c.slug} --lost-answer <1|2>.` };
   if (refused.length && !take.length && !groups.some((g) => g.ids.length)) throw new Error(`${refused.map((x) => x.why).join(' ')} Nothing was saved.`);
   // Written as one append at the end: a failure part-way writes none of it.
   inOneGo(c.paths.ledger, () => {
@@ -713,7 +841,17 @@ function decideBatch(opts) {
   const after = view({ ...opts, what: 'shortlist' });
   const still = [...take.map((d) => d.id), ...groups.flatMap((g) => [...g.ids, ...g.held_back])].filter((id) => after.check_these.some((x) => x.id === id));
   const asked = notAsked.map((id) => `${safe(byId[id]?.name || id, 60)} (${id})`);
+  const custIds = [...new Set(groups.flatMap((g) => g.customers || []))];
+  const custGroup = groups.find((g) => (g.customers || []).length);
+  if (custIds.length)
+    writeJson(join(c.paths.derived, 'group-customers.json'), { ids: custIds, group: custGroup.group, line: custGroup.line, at: c.now.toISOString() });
+  const custAsk = custIds.length
+    ? `This includes ${custIds.length} of your customers: ${custIds.map((id) => `${safe(byId[id]?.name || id, 60)}${byId[id]?.company ? ` (${safe(byId[id].company, 60)})` : ''}`).join(', ')}. 1. Include them. 2. Leave them out. 3. Pick: name the ones to include.`
+    : null;
   const told = [
+    lostText,
+    custAsk,
+    lostIn.length ? `${lostIn.map((id) => safe(byId[id]?.name || id, 60)).join(', ')} ${lostIn.length === 1 ? 'is' : 'are'} still waiting after a lost deal, so this answer leaves them out.` : null,
     asked.length ? `Not in this check: applied anyway: ${asked.join(', ')}.` : null,
     refused.length ? `Not saved: ${refused.map((x) => `"${x.line.slice(0, 80)}": ${x.why}`).join(' ')}` : null
   ]
@@ -724,6 +862,7 @@ function decideBatch(opts) {
     ...(notAsked.length ? { not_in_check: notAsked } : {}),
     ...(refused.length ? { refused } : {}),
     ...(told ? { tell_user: told } : {}),
+    ...(custAsk ? { customers_ask: custAsk, next: `Show tell_user to the user word for word and wait. Then: decide-batch --event ${c.slug} --customers "<their answer>".` } : {}),
     groups: groups.length
       ? groups.map((g) => ({
           line: g.line,
@@ -1092,6 +1231,11 @@ function holdOn(v, a) {
       const why = coworkerHold(v, id, a.verb);
       if (why) return why;
     }
+  if (['confirm', 'note'].includes(a.verb))
+    for (const id of a.ids) {
+      const why = neverHold(v, id);
+      if (why) return why;
+    }
   if (a.verb === 'confirm')
     for (const id of a.ids)
       if (!(v.resolved[id]?.alternatives || []).some((x) => x.ref))
@@ -1140,6 +1284,21 @@ const restoreReading = (r) => ({
 // decisions. Each word maps to a ledger entry; the view follows.
 // A refusal ends with a hint for Claude (can_interpret, and the people by ID): it may work out what the user meant and
 // send that back as an interpreted answer, which is always shown to the user for a yes.
+// F8 (spec 0.1.7 §7): someone waiting after a lost deal inside the user's wait. A "reach" for them by name gets one
+// read-back before it counts; a group answer never lifts the wait.
+// A wait after a lost deal or a rejection. A status the user said means "leave alone" shares the rung but is no
+// wait: a by-name answer decides it as before, with no lost-deal read-back.
+const isLostWait = (x) => x.rung === 'rejected_or_lost' && x.group === 'skip' && !/ means leave alone$/.test(x.says || '');
+function lostWait(v, id, c) {
+  const r = rungsOf(heldAs(v, id)).find(isLostWait);
+  if (!r) return null;
+  const date = /(\d{4}-\d{2}-\d{2})/.exec(r.says || '')?.[1] || null;
+  const months = date && c.today ? Math.max(0, Math.round(daysBetween(date, c.today) / 30.44)) : null;
+  const wait = Number(c.settings.rejected_months ?? 6);
+  const first = safe(String(v.contacts.find((x) => x.id === id)?.name || '').split(' ')[0] || 'Their', 40);
+  return `${first}'s deal was lost${months != null ? ` ${months === 1 ? '1 month' : `${months} months`} ago` : ''}; your wait is ${wait} months. Write to them anyway?`;
+}
+
 function gate(opts) {
   try {
     return gateAnswer(opts);
@@ -1230,7 +1389,11 @@ function gateAnswer(opts) {
       say_to_user: `${waiting.stale ? `The reading shown before can't be used: ${waiting.stale}.` : 'The reading shown before was dropped.'} Nothing was saved. Say the whole answer again, for example "ok" to keep the shortlist as shown, or "skip c002".`
     };
   };
-  if (waiting.pending && isAgreement(opts.answers)) {
+  if (waiting.pending?.lost && /^\s*(2|2\.|no)\s*$/i.test(String(opts.answers))) {
+    clearPending(c.paths.derived, 'shortlist');
+    return { saved: false, say_to_user: 'They stay held until your wait after the lost deal has passed. Nothing was saved.' };
+  }
+  if (waiting.pending && (isAgreement(opts.answers) || (waiting.pending.lost && /^\s*1\.?\s*$/.test(String(opts.answers))))) {
     // While a reading waits, any word of agreement ("yes", "ok", "sure") takes exactly it.
     taken = waiting.pending;
     g = restoreReading(taken.reading);
@@ -1251,6 +1414,20 @@ function gateAnswer(opts) {
     } catch (e) {
       if (dropPending(c.paths.derived, 'shortlist')) e.message = `The reading shown before was dropped, since this is a new answer. ${e.message} To save that reading, say it again, then "yes".`;
       throw e;
+    }
+    const lostAsks = [
+      ...new Set(
+        g.actions
+          .filter((a) => ['reach', 'warm', 'rescue', 'mine'].includes(a.verb))
+          .flatMap((a) => a.ids || [])
+          .map((id) => lostWait(v, id, c))
+          .filter(Boolean)
+      )
+    ];
+    if (lostAsks.length) {
+      const text = `${lostAsks.join(' ')} 1. Yes. 2. No.`;
+      savePending(c.paths.derived, 'shortlist', { event: c.event.slug, rows_hash: hash, created_at: c.now.toISOString(), text, answer: String(opts.answers).slice(0, 300), reading: keepReading(g), lost: true });
+      return { saved: false, pending: true, confirm: text, say_to_user: text, next: 'Show say_to_user to the user word for word and wait for their own reply (1 or 2). Never answer it for them.' };
     }
     const direct = directReading(opts.answers, { kind: 'triage', rows: people, ids: knownIds });
     if ((g.actions.length || g.defaults) && !sameReading(direct, g.comments?.length || g.refused.length ? null : signature(g))) {
@@ -1437,6 +1614,8 @@ function plan(opts) {
   return {
     people: ranked.length,
     by_channel: { email: ranked.length },
+    not_written_to:
+      notWrittenTo(v.contacts.filter((x) => v.resolved[x.id]?.group === 'unreachable' && c.state.fits[x.id]?.segment).length, c.settings.reach, c.event) || undefined,
     colleague_notes: c.settings.colleague_notes ? v.coordinate.length : v.coordinate.filter((id) => c.state.people[id]?.colleague_note).length,
     held,
     first_messages: c.today,
@@ -1765,6 +1944,64 @@ function fewTimesNote(v) {
 }
 
 export { mustMeetHits };
+// lift-hold --event <slug> --id <id or name> [--answer 1|2 --said "<the user's words>"]: the one way a person comes off a
+// do-not-contact or opt-out hold. Without --answer it gives the read-back to put to the user, word for word; the answer
+// is taken only after that read-back, within 30 minutes, with the user's own words. A changed or missing file never
+// lifts it (resolve.mjs).
+function liftHold(opts) {
+  // Each of these once: the guard's prompt and this command must read the same person, event, answer and words.
+  for (const f of ['--event', '--id', '--answer', '--said'])
+    if (process.argv.slice(2).filter((x) => x === f || x.startsWith(`${f}=`)).length > 1) throw new Error(`lift-hold takes ${f} once. Nothing was changed.`);
+  need(opts, 'event', 'id');
+  const c = ctxOf(opts.event, opts);
+  const v = viewOf(c);
+  const want = String(opts.id).trim();
+  const ct = v.contacts.find((x) => x.id === want) || v.contacts.find((x) => sameName(x.name, want));
+  if (!ct) throw new Error(`${safe(want, 60)} isn't on this list.`);
+  const hs = neverRungs(v, ct.id);
+  const name = safe(ct.name, 60);
+  if (!hs.length && uncheckedRung(v, ct.id))
+    throw new Error(`${uncheckedRung(v, ct.id).says} This isn't a hold you can lift: it ends by itself once that file can be read. Nothing was changed.`);
+  if (!hs.length) return { lifted: 0, says: `${name} isn't on a do-not-contact list or opted out here: there is nothing to take them off.` };
+  const firstSeen = (h) =>
+    (c.entries || []).filter((e) => e.type === 'hold_seen' && e.id === ct.id && holdBase(e.says) === holdBase(h.says)).map((e) => e.at)[0] || c.now.toISOString();
+  const day = (iso) => new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(iso));
+  // Said as it stands now: "is on" while the list still names them, "was on" once it doesn't; an opt-out as the CRM had it.
+  const line = (h) => {
+    const b = holdBase(h.says);
+    const gone = /no longer in the file/.test(h.says || '');
+    if (/^on your do-not-contact list/.test(b)) return gone ? `was on your do-not-contact list (${day(firstSeen(h))})` : `is on your do-not-contact list (since ${day(firstSeen(h))})`;
+    if (/^opted out in the CRM/.test(b)) return `opted out in your CRM (${day(firstSeen(h))})`;
+    return `is held: ${holdSource(h.says)} (${day(firstSeen(h))})`;
+  };
+  const was = [...new Set(hs.map(line))].join('; ');
+  const ask = `${name} ${was}. ${hs.length > 1 || !/^on your do-not-contact list/.test(holdBase(hs[0].says)) ? 'Take that hold off in floorboss?' : `Take ${name} off it in floorboss?`}`;
+  const options = [`1. Yes, ${name} asked to hear from us again.`, '2. No.'];
+  const pendingPath = join(c.paths.derived, 'lift-pending.json');
+  if (opts.answer == null) {
+    writeJson(pendingPath, { id: ct.id, at: c.now.toISOString(), ask, name: ct.name, event_name: c.event.name || c.slug });
+    return { ask, options, next: `Put this to the user word for word and wait. Then: lift-hold --event ${c.slug} --id ${ct.id} --answer <1|2> --said "<their words>".` };
+  }
+  const pending = readJson(pendingPath, null);
+  if (!pending || pending.id !== ct.id || c.now.getTime() - Date.parse(pending.at) > 30 * 60000 || pending.ask !== ask)
+    throw new Error(`Ask the user first: run lift-hold --event ${c.slug} --id ${ct.id} with no answer, and read them what it says. Nothing was changed.`);
+  const said = String(opts.said || '').trim();
+  if (String(opts.answer).trim() !== '1') {
+    writeJson(pendingPath, null);
+    return { lifted: 0, says: `${name} stays held.` };
+  }
+  if (said.length < 3) throw new Error("--said needs the user's own words. Nothing was changed.");
+  inOneGo(c.paths.ledger, () => {
+    for (const h of hs) log(c, { type: 'hold_lifted', who: 'user', id: ct.id, says: holdBase(h.says), said: said.slice(0, 300) });
+  });
+  writeJson(pendingPath, null);
+  const dncOnly = hs.every((h) => /^on your do-not-contact list/.test(holdBase(h.says)));
+  return {
+    lifted: hs.length,
+    says: `${name} is off the hold in floorboss. ${dncOnly ? 'Your do-not-contact list is unchanged: take them off it there too if it is wrong.' : 'Their record in your CRM is unchanged: change it there too if it is wrong.'}`
+  };
+}
+
 // people --event <slug>: everyone on the list by ID and name, names shown as every read-back shows them: the full list
 // a refusal's can_interpret hint points to when it cuts its own.
 function peopleList(opts) {
@@ -1793,5 +2030,6 @@ run({
   'lookup-list': lookupList,
   prefilter,
   'enrich-list': enrichList,
-  'enrich-import': enrichImport
+  'enrich-import': enrichImport,
+  'lift-hold': liftHold
 });

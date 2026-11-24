@@ -87,7 +87,8 @@ test('hold history: a CRM note with "floorboss:" in it is scrubbed in the prompt
   const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\n', crm: `Name,Company,Email,Notes\nAna Berg,Acme,ana@acme.test,"${note}"\n` });
   writeFileSync(join(H.HOME, 'config.json'), JSON.stringify({ connectors: { stage_draft: STAGE } }));
   triage(H);
-  cli(H, 'crm-triage', ['decide', '--event', H.slug, '--id', 'c001', '--group', 'reach', '--because', 'she asked us to write after all']);
+  cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', 'c001']);
+  assert.ok(!cli(H, 'crm-triage', ['lift-hold', '--event', H.slug, '--id', 'c001', '--answer', '1', '--said', 'she asked us to write after all']).ERROR);
   triage(H); draftApprove(H);
   const sl = cli(H, 'event-outreach', ['stage-list', '--event', H.slug]);
   const [it] = JSON.parse(readFileSync(sl.file, 'utf8'));

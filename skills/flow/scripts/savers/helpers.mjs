@@ -103,7 +103,7 @@ export const pathOf = (v) => expandHome(typeof v === 'string' ? v : v?.path || v
 
 // What quick setup takes as given instead of asking, said back to the user when they choose it.
 export const QUICK_ASSUMES =
-  'Quick setup assumes you work alone (no coworkers\' contacts to hold back), with no CRM and no mailbox or contacts check (nobody is held as already known), and no writing samples (the tone comes from your sign-off and offer). It asks before any web research. Follow-ups are spaced by how far off the event is (7, 4 or 2 days apart); say "3 days between follow-ups" any time to set your own. Say "standard setup" any time to change it.';
+  'Quick setup assumes you work alone (no coworkers\' contacts to hold back), with no CRM and no mailbox or contacts check (nobody is held as already known), and no writing samples (the tone comes from your sign-off and offer). Web research on the shortlisted companies and people starts on its own, with a heads-up, and "skip" stops it. Follow-ups are spaced by how far off the event is (7, 4 or 2 days apart); say "3 days between follow-ups" any time to set your own. Say "standard setup" any time to change it.';
 
 // Savers by question id. Each takes (value, c) and does what the question's answer means.
 // The user's word that nobody replied, once per channel the question named (askedChannels: the step's, never the answer's).

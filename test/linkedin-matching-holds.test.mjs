@@ -146,10 +146,10 @@ test('onboarding: several CRMs → which one is used for this outreach; the lang
   // One confirm for the tools names both CRMs; asked separately, the CRM question offers each by name.
   const listed = { ...s, ans: { ...s.ans, list_source: 'export' } };
   const t = planQuestions(listed, { batch: 20, phase: 'first' }).questions.find((x) => x.id === 'tools');
-  assert.match(t.ask, /hubspot or pipedrive/);
+  assert.match(t.ask, /hubspot or pipedrive/i);
   const q = planQuestions({ ...listed, ans: { ...listed.ans, tools_confirmed: true } }, { batch: 20, phase: 'first' }).questions.find((x) => x.id === 'crm_use');
   assert.match(q.ask, /holds your contacts/);
-  assert.deepEqual(q.options.slice(0, 2), ['hubspot', 'pipedrive']);
+  assert.deepEqual(q.options.slice(0, 2), ['HubSpot', 'Pipedrive']);
   const { NODES } = await import('../skills/event-context/scripts/onboarding-tree.mjs');
   assert.ok(NODES.some((n) => n.id === 'languages'));
 });

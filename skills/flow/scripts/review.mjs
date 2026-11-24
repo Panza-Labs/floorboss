@@ -11,6 +11,11 @@ import { need } from '../../../lib/args.mjs';
 import { readJson, writeText } from '../../../lib/jsonio.mjs';
 import { projectFolder } from '../../../lib/paths.mjs';
 import { readback } from '../../../lib/autosend/approval.mjs';
+import { choiceFor } from '../../../lib/autosend/pick.mjs';
+import { autosendReady, inClaudeCode } from '../../../lib/autosend/common.mjs';
+import { plannedDays, offWeekend, modeOn } from '../../../lib/spacing.mjs';
+import { loadConfig, effectiveSettings } from '../../../lib/config.mjs';
+import { wallParts, addDays } from '../../../lib/tz.mjs';
 import { context } from './context.mjs';
 import { plural } from '../../../lib/plural.mjs';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +26,17 @@ const draftAt = (dir, hash) => (/^[0-9a-f]{24}$/.test(String(hash || '')) ? read
 // "2026-11-20" as "Fri 20 Nov".
 const dayLabel = (d) =>
   d ? new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${d}T12:00:00Z`)) : null;
+
+// F7 (spec 0.1.7 §7): a person with an open deal the user owns (or with no owner) gets a warm draft, and one mark on
+// their line of the approval screen. No new question.
+export function dealMark(resolvedOne) {
+  const r = resolvedOne;
+  return r && ['warm', 'reach'].includes(r.group) && /^an open deal\b/.test(String(r.says || '')) ? 'you have an open deal with them' : null;
+}
+const marksOf = (e) => {
+  const res = readJson(join(e.paths.derived, 'resolved.json'), {});
+  return (id) => dealMark(res[id]);
+};
 
 // Up to four messages, each picked for what it adds: another person, a follow-up beside the first messages, another
 // group of people, another kind of ask (the draft's structure) or title. Two at least, when there are two.
@@ -80,6 +96,32 @@ const byPerson = (msgs) => {
   return [...m.values()];
 };
 
+// The planned day of each message under review (message 1 today, or the next weekday after 17:00 in the event's zone;
+// each follow-up by the event's gaps), the same plan the auto-send readback uses. Empty when the dates can't be read.
+function planFor(e, now, touches) {
+  try {
+    const ev = e.event;
+    let late = false;
+    try {
+      late = wallParts(now, ev.time_zone).hh >= 17;
+    } catch {
+      late = false;
+    }
+    const today = now.toISOString().slice(0, 10);
+    const local = new Intl.DateTimeFormat('en-CA', { timeZone: ev.time_zone || 'UTC' }).format(now);
+    const first = offWeekend(late ? addDays(local || today, 1) : local || today);
+    const days = { 1: first };
+    const n = Math.max(1, ...touches);
+    for (const { touch, due } of plannedDays(effectiveSettings(loadConfig(), ev), ev, first, modeOn(ev, first), n)) days[touch] = due;
+    return days;
+  } catch {
+    return {};
+  }
+}
+
+// The readback document's title: auto-send's words only when the setup answer was to send automatically (or none was saved).
+export const readbackTitle = (name, n, setupPick) =>
+  ['drafts', 'self'].includes(setupPick) ? `${name}: every message you approve (${n})` : `${name}: every message auto-send would send (${n})`;
 export function review(opts) {
   need(opts, 'event');
   const c = context(opts.event, opts);
@@ -87,6 +129,7 @@ export function review(opts) {
   const e = c.event;
   const contacts = Object.fromEntries((readJson(join(e.paths.derived, 'contacts.json'), []) || []).map((x) => [x.id, x]));
   const who = (id) => ({ name: contacts[id]?.name || e.state.people[id]?.name || id, title: contacts[id]?.title || null, company: contacts[id]?.company || null, segment: e.state.fits[id]?.segment || null });
+  const mark = marksOf(e);
   const evName = e.event.name || e.event.slug;
   const show = (m) => ({ id: m.id, touch: m.touch, name: m.name, title: m.title, company: m.company, to: m.to, ...(m.planned_day ? { planned_day: m.planned_day, planned: dayLabel(m.planned_day) } : {}), subject: m.subject, body: m.body });
 
@@ -97,7 +140,7 @@ export function review(opts) {
     const people = byPerson(msgs);
     const doc = writeDoc(
       c,
-      `${evName}: every message auto-send would send (${msgs.length})`,
+      readbackTitle(evName, msgs.length, e.event.autosend_setup_pick),
       people,
       `Read-only: floorboss writes this file again each time, and any change happens in the chat. ${plural(msgs.length, 'message')} to ${plural(people.length, 'person', 'people')}, each on the day shown.`
     );
@@ -106,11 +149,19 @@ export function review(opts) {
       people: people.length,
       digest: r.digest,
       sample: pickSample(msgs).map(show),
-      dates: people.map((p) => ({ id: p.id, name: p.name, to: p.to, days: p.messages.map((m) => `${dayLabel(m.planned_day)} (message ${m.touch})`) })),
+      dates: people.map((p) => ({ id: p.id, name: p.name, to: p.to, days: p.messages.map((m) => `${dayLabel(m.planned_day)} (message ${m.touch})`), ...(mark(p.id) ? { mark: mark(p.id) } : {}) })),
       refused: r.refused,
       document: doc,
-      approval_line: `Type "auto-send these sequences" to have all ${plural(msgs.length, 'message')} to ${plural(people.length, 'person', 'people')} sent on these days: the ${pickSample(msgs).length} above and the rest in ${basename(doc)}.`,
-      show: `Show every message in sample whole (subject and body), then one line per person from dates, then approval_line, and offer document to read (it's ${doc}). The digest is what approve takes: never show it.`
+      approval_line: `Here are all ${plural(msgs.length, 'message')} to ${plural(people.length, 'person', 'people')}, each on the day shown: the ${pickSample(msgs).length} above and the rest in ${basename(doc)}.`,
+      // Through a daily Claude routine, what pick 1 does, in plain words, before the user picks.
+      ...(e.event.autosend_mode === 'routine'
+        ? { how_it_goes: "If you pick sending automatically: message 1 to each person is sent from this session now, and Claude Code asks you before each one goes. Each follow-up waits in Gmail as a draft in its thread, and a daily routine in your Claude account (a scheduled task that runs in the cloud, so your laptop can be off) sends it on its day, unchanged, unless Gmail shows a reply from them or a bounce. A booking or a stop you record in floorboss takes effect when floorboss has you delete their drafts. You can see the routine at claude.ai/code/routines." }
+        : {}),
+      choice: (() => {
+        const ch = choiceFor({ slug: e.event.slug, digest: r.digest, messages: msgs.length, people: people.length, autosendReady: autosendReady(e.event), setupPick: e.event.autosend_setup_pick });
+        return inClaudeCode() ? { ask_user_question: ch.ask_user_question } : { numbered: ch.numbered };
+      })(),
+      show: `Show every message in sample whole (subject and body), then one line per person from dates (and its mark when it has one), then approval_line, and offer document to read (it's ${doc}).${e.event.autosend_mode === 'routine' ? ' Then how_it_goes, word for word.' : ''} Then ask: ${inClaudeCode() ? 'with the AskUserQuestion tool, passing choice.ask_user_question exactly as given (change no word of it)' : 'show choice.numbered word for word and ask for the number of their choice'}. The digest is what approve takes: never show it.`
     };
   }
 
@@ -129,21 +180,24 @@ export function review(opts) {
     msgs.push({ id, touch, ...who(id), to: d.to || x.approved?.to || null, subject: d.subject || '', body: d.body || '', structure: d.structure || null, channel: d.channel || 'email' });
   }
   if (!msgs.length) throw new Error('None of those messages has a draft to review.');
+  const plan = planFor(e, c.now, msgs.map((m) => m.touch));
+  for (const m of msgs) if (plan[m.touch]) m.planned_day = plan[m.touch];
   const people = byPerson(msgs);
   const sample = pickSample(msgs);
   const doc = writeDoc(
     c,
     `${evName}: every message waiting for your yes (${msgs.length})`,
     people,
-    `Read-only: floorboss writes this file again each time, and any change happens in the chat. ${plural(msgs.length, 'message')} to ${plural(people.length, 'person', 'people')}.`
+    `Read-only: floorboss writes this file again each time, and any change happens in the chat. ${plural(msgs.length, 'message')} to ${plural(people.length, 'person', 'people')}${msgs.some((m) => m.planned_day) ? ', each on the day shown' : ''}.`
   );
   return {
     total: msgs.length,
     people: people.length,
     sample: sample.map(show),
+    dates: people.map((p) => ({ id: p.id, name: p.name, to: p.to, days: p.messages.filter((m) => m.planned_day).map((m) => `${dayLabel(m.planned_day)} (message ${m.touch})`), ...(mark(p.id) ? { mark: mark(p.id) } : {}) })),
     document: doc,
     approval_line: `Approve all ${plural(msgs.length, 'message')} (the ${sample.length} above and every one in ${basename(doc)}), all except some, by name, edit or drop?`,
-    show: `Show every message in sample whole (subject and body). Then ask, plainly, for candid feedback on them overall or a rewrite of any line, and offer document to read every message (it's ${doc}). Then approval_line.`
+    show: `Show every message in sample whole (subject and body, and its planned day), then one line per person from dates (their planned days, and its mark when it has one). Then ask, plainly, for candid feedback on them overall or a rewrite of any line, and offer document to read every message (it's ${doc}). Then approval_line.`
   };
 }
 

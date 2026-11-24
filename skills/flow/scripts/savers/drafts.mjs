@@ -75,6 +75,15 @@ export const DRAFTS_SAVERS = {
   // The user says not to wait for the critic: "skip review all", "skip review c004, c007:2".
   skip_review: (v, c) => skipReview(c, String(typeof v === 'object' && v ? v.said || v.answers || '' : v)),
   // Drafts stuck after three rewrites: "drop <ids>" or "edit <id>: …" go to the gate; "leave them for now" waits a day.
+  // Codex auto-send: the user says the daily ChatGPT task is created, or not yet (asked again another day). The answer
+  // itself is kept in the ledger by flow answer.
+  // "not yet" holds for this session only: the next session asks again (steps/approval.mjs).
+  daily_task: (v, c) => {
+    const t = String(typeof v === 'object' && v ? v.answer || v.said || '' : v).trim();
+    if (/^(yes|y|yep|done|created|it'?s created)\b/i.test(t)) return ledger(c, { type: 'answered', who: 'user', ask: 'daily_task', value: 'yes', said: t.slice(0, 200) });
+    if (/^(no|not yet|later|n)\b/i.test(t)) return ledger(c, { type: 'answered', who: 'user', ask: 'daily_task', value: 'not yet', said: t.slice(0, 200), run: sessionRun() || null });
+    throw new Error('Say "yes, it\'s created" or "not yet". Nothing was saved.');
+  },
   stuck_drafts: (v, c) => {
     const t = gateWords(v, 'stuck-drafts').trim();
     if (isAgreement(t)) return cli('event-outreach', ['gate', '--event', c.slug, '--answers', t, '--agree-only', 'stuck'], c);
@@ -334,7 +343,37 @@ export const DRAFTS_SAVERS = {
     }
     return ledger(c, { type: 'answered', who: 'user', ask: 'replies_since', value, said: a.slice(0, 200), run: sessionRun() || null });
   },
+  // "Did you send the message in the task for <name>?": yes or no, for the one task asked about.
+  task_sent: (v, c, s) => {
+    const o = v && typeof v === 'object' ? v : null;
+    const text = String(o ? (o.answer ?? o.went ?? '') : v).trim();
+    // The task this answer is for must be the one being asked: the step's own, else the first waiting (the one the
+    // flow shows). An answer without a key, or for another task, is refused, so one "yes" never settles a question
+    // that wasn't shown.
+    let asked = s?.ask?.id === 'task_sent' ? s.ask.key : null;
+    if (!asked) {
+      const st = fold(readLedger(c.event.paths.ledger).entries);
+      asked = Object.values(st.people).flatMap((p) => Object.entries(p.tasks || {}).filter(([, t]) => t.ask_sent).map(([k]) => k))[0] || null;
+    }
+    if (!asked) throw new Error('No task is waiting for that answer.');
+    if (!o?.key) throw new Error(`Answer with the task's key: {"key":"${asked}","answer":"yes"|"no"}.`);
+    if (String(o.key) !== asked) throw new Error(`${o.key} isn't the task being asked about (${asked}): run flow next and answer what it asks.`);
+    if (!/^(yes|y|no|n)\b/i.test(text)) throw new Error('Answer "yes" or "no": did you send the message in that task?');
+    return cli('event-outreach', ['task-sent', '--event', c.slug, '--key', asked, '--went', /^y/i.test(text) ? 'yes' : 'no'], c);
+  },
   no_reply: (v, c, s) => {
+    // "show me the list" (or "list them", "who", "which ones"): the names of the people due, read here (the answer may
+    // come with no step), said to the user as they are; nothing is recorded, so the same question comes again.
+    if ((typeof v === 'string' && /^\s*(?:show(?: me)? the list|list them|who|which ones)\s*[?.!]*\s*$/i.test(v)) || (v && typeof v === 'object' && v.show_list)) {
+      const due = c.slug ? cli('event-outreach', ['linkedin-due', '--event', c.slug], c).ask || [] : [];
+      const names = (due.length ? due : s?.ask?.people || []).map((p) => p.name || p.id);
+      return {
+        recorded: 0,
+        say_to_user: names.length
+          ? `Due today: ${names.join(', ')}. They are also in the Due today section at the top of your outbox page. Did any of them reply on LinkedIn?`
+          : 'No LinkedIn follow-up is waiting for this answer now.'
+      };
+    }
     const o = typeof v === 'object' ? v : null;
     // Several people at once: everyone the step listed and the user didn't name had no reply.
     if (o && !o.id && (o.none || o.replied || o.stopped || Array.isArray(o.people))) {
@@ -347,7 +386,7 @@ export const DRAFTS_SAVERS = {
     }
     if (!o?.id)
       throw new Error(
-        'The answer is {"id","answer","said"}, or for several people {"none":true,"people":[ids]} / {"replied":[ids],"stopped":[ids],"people":[ids]}.'
+        'The answer is {"id","answer","said"}, or for several people {"none":true,"people":[ids]} / {"replied":[ids],"stopped":[ids],"people":[ids]}, or "show me the list" for the names of the people due.'
       );
     const said = String(o.said || o.answer).slice(0, 200);
     if (/stop/i.test(o.answer)) return ledger(c, { type: 'stop', who: 'user', id: o.id, said });

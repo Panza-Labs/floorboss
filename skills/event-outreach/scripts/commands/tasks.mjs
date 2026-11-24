@@ -15,7 +15,8 @@ import { loadConfig } from '../../../../lib/config.mjs';
 import { sendRoute, writtenInApp, appLimitReached, whereAt } from './routes.mjs';
 import { ctxOf, crmIdOf, sendingOn, led, isOut, labelOf } from './context.mjs';
 import { readTodo } from './saved-drafts.mjs';
-import { allOutboxCards } from './cards.mjs';
+import { allOutboxCards, tasksToClose, latestTask, superseded } from './cards.mjs';
+import { PASSED_WHY } from '../../../../lib/route.mjs';
 
 // The CRM tasks floorboss wants now: event-app and LinkedIn messages to send, notes for colleagues, decisions
 // for the user, and opt-outs for record owners. Written to task-list.json; the guard only lets through a
@@ -48,19 +49,19 @@ export function taskList(opts) {
     .map(([id]) => id);
   // Someone blocked since their message task was made: the task is still open in the CRM, so tell the user
   // not to send it and to close it.
-  const cancel = Object.entries(c.state)
-    .flatMap(([id, s]) =>
-      Object.entries(s.tasks || {})
-        .filter(([, t]) => t.kind === 'send' && !t.done && !s.sent?.[t.touch])
-        .map(([key]) => [id, key])
-    )
-    .map(([id, key]) => ({ id, why: c.blocked(id), key }))
-    .filter((x) => x.why)
-    .map((x) => ({
-      id: x.id,
-      tag: `cancel-${x.key}`,
-      reason: `Don't send the message in the open task for them, and close that task: they can't be contacted now (${x.why}).`
-    }));
+  const cancel = tasksToClose(c).map((x) => ({
+    id: x.id,
+    tag: `cancel-${x.key}`,
+    plain: true,
+    reason:
+      x.why === 'already went'
+        ? `The message in the open task for ${c.byId[x.id]?.name || x.id} already went: close that task, don't send it.`
+        : x.why === PASSED_WHY
+        ? `The LinkedIn message in the open task for ${c.byId[x.id]?.name || x.id} was ${PASSED_WHY}. Close that task, don't send it.`
+        : c.blocked(x.id)
+      ? `Don't send the message in the open task for them, and close that task: they can't be contacted now (${x.why}).`
+      : `Don't send the message in the open task for them, and close that task: they ${x.why}, so it isn't needed.`
+  }));
   c.config = loadConfig();
   // The app's request limit holds for notes the user sends by hand too: a send task for someone not yet written to in
   // the app takes a place, and past the limit it isn't made (the note stays in the outbox).
@@ -89,6 +90,7 @@ export function taskList(opts) {
     today,
     dayState: c.dayState,
     now: c.now.toISOString(),
+    taskOf: (id, touch) => latestTask(c.state[id], touch),
     selfSends: (card) => sendingOn(c.settings) && !!sendRoute(c, card.id, card.channel, card.touch)
   });
   const file = join(c.paths.dir, 'task-list.json');
@@ -103,6 +105,24 @@ export function taskList(opts) {
     note: stateOf(c).state !== 'ok' ? `No task to send anything is made for ${c.event.name}: ${stateOf(c).why}.` : undefined,
     rule: 'Create one task per item with the crm.create_task recipe: title, body, due and contact_ref exactly as written. Never assign, complete, update or delete a task. Then save the ids with tasks-created.'
   };
+}
+
+const SENT_SAID = /\b(sent|sent it|went|done)\b/i;
+
+// The user's answer to "Did you send the message in the task for <name>?": yes records that send, with the text the
+// task held; no counts the task as not needed, so the message gets a new task.
+export function taskSent(opts) {
+  need(opts, 'event', 'key', 'went');
+  const c = ctxOf(opts.event, opts);
+  const hit = Object.entries(c.state).map(([id, s]) => [id, s.tasks?.[opts.key]]).find(([, t]) => t?.ask_sent);
+  if (!hit) throw new Error(`No task ${opts.key} is waiting for that answer.`);
+  const [id, tk] = hit;
+  const went = /^(yes|y|sent|it went)\b/i.test(String(opts.went)) ? 'yes' : /^(no|n|not sent|didn'?t)\b/i.test(String(opts.went)) ? 'no' : null;
+  if (!went) throw new Error('Answer "yes" or "no".');
+  if (went === 'yes' && !c.state[id]?.sent?.[tk.touch])
+    led(c, { type: 'sent', id, touch: tk.touch, date: typeof tk.ask_sent === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(tk.ask_sent) ? tk.ask_sent : c.today, via: 'crm task', ...(tk.hash ? { hash: tk.hash } : {}) });
+  led(c, { type: 'task_send_settled', id, key: opts.key, went });
+  return { recorded: went === 'yes' ? 'sent' : 'not sent: a new task follows' };
 }
 
 export function tasksCreated(opts) {
@@ -148,7 +168,7 @@ export function tasksCreated(opts) {
       refused.push({ key: t.key, task_id: t.task_id, why: why || 'already recorded', next: "Close this task in the CRM: it isn't needed." });
       continue;
     }
-    led(c, { type: 'task_created', id: w.id, touch: w.touch, key: t.key, task_kind: w.kind, task_id: t.task_id });
+    led(c, { type: 'task_created', id: w.id, touch: w.touch, key: t.key, task_kind: w.kind, task_id: t.task_id, ...(w.kind === 'send' && w.hash ? { hash: w.hash, day: w.day || null } : {}) });
     // A message task created counts as in the outbox for that touch.
     if (w.kind === 'send' && !isOut(c.state[w.id]?.touches?.[w.touch]?.status)) led(c, { type: 'outboxed', id: w.id, touch: w.touch });
   }
@@ -179,6 +199,17 @@ export function taskStatus(opts) {
   const repeated = r.tasks.map((t) => t.task_id).filter((id, i, a) => a.indexOf(id) !== i);
   if (repeated.length) return { applied: false, errors: [`task ${[...new Set(repeated)].join(', ')} is listed more than once: one entry per task`] };
   const out = { sent: [], replied: [], booked: [], stopped: [], unclear: [] };
+  const sentHere = new Set();
+  // Message tasks floorboss asked (or is about to ask) the user to close: finishing one records nothing as sent.
+  const toClose = new Set(tasksToClose(c).map((x) => x.key));
+  for (const card of allOutboxCards(c)) if (card.task_changed) toClose.add(latestTask(c.state[card.id], card.touch)?.key);
+  // Whether the request to close this task still stands now (replaced, or the text, the day or the person changed).
+  const stands = (k, st) =>
+    k.kind === 'send' &&
+    (superseded(st, k.key) || toClose.has(k.key) || !!(k.hash && st.touches?.[k.touch]?.approved?.hash && st.touches[k.touch].approved.hash !== k.hash));
+  // A close request made for this task before it was finished (a cancel or a changed review task).
+  const reviewBefore = (k, st, doneMs) =>
+    [`${k.id}:review:cancel-${k.key}`, `${k.id}:review:changed-${k.key}`].some((rk) => st.tasks?.[rk] && (!st.tasks[rk].at || Date.parse(st.tasks[rk].at) <= doneMs));
   for (const t of r.tasks) {
     const k = known[t.task_id];
     const st = c.state[k.id] || {};
@@ -199,7 +230,26 @@ export function taskStatus(opts) {
     const doneMs = t.completed_at ? Math.min(Date.parse(t.completed_at), c.now.getTime()) : c.now.getTime();
     const madeMs = k.at ? Date.parse(k.at) || 0 : 0;
     const day = todayKeyIn(c.event.time_zone, new Date(Math.max(doneMs, madeMs)));
-    led(c, { type: 'task_done', id: k.id, key: k.key, date: day });
+    // Its message already went (another task for it was finished as sent, now or before): no second send.
+    if (k.kind === 'send' && (st.sent?.[k.touch] || sentHere.has(`${k.id}:${k.touch}`))) {
+      led(c, { type: 'task_done', id: k.id, key: k.key, date: day });
+      continue;
+    }
+    // "Done" means sent, unless floorboss asked the user to close this task first and that still stands. The outcome
+    // text says which when it says "sent"; anything else doubtful is asked once.
+    const sentSaid = k.kind === 'send' && SENT_SAID.test(String(t.outcome || '')) && !/\b(not|never|didn'?t|haven'?t|no)\b/i.test(String(t.outcome || ''));
+    // An outcome that says it wasn't sent, or asks ("not sent", "didn't send", "sent? no"): nothing is recorded until
+    // the user answers. (A stop is read as a stop, whatever else it says.)
+    const outText = String(t.outcome || '');
+    const negated = k.kind === 'send' && !!outText.trim() && readOutcome(outText, []).kind !== 'stop' && /\b(not|never|didn'?t|did not|haven'?t|no)\b|\?/i.test(outText);
+    const doubtful = negated || (!sentSaid && stands(k, st));
+    const unneeded = !negated && doubtful && reviewBefore(k, st, doneMs);
+    led(c, { type: 'task_done', id: k.id, key: k.key, date: day, ...(unneeded ? { unneeded: true } : {}) });
+    if (doubtful && !unneeded) {
+      led(c, { type: 'task_send_unclear', id: k.id, key: k.key, touch: k.touch, date: day });
+      out.unclear.push(k.id);
+      continue;
+    }
     // A decision task answered in the CRM: its note is read like any outcome, and the question is settled.
     if (k.kind === 'review') {
       // Only the question this review task was made for (its tag names it): a held-message or a close-the-task
@@ -218,8 +268,11 @@ export function taskStatus(opts) {
       continue;
     }
     if (k.kind !== 'send') continue;
+    // A task replaced by a newer one, or one the user was asked to close: closing it in the CRM records nothing.
+    if (unneeded) continue;
     if (!st.sent?.[k.touch]) {
-      led(c, { type: 'sent', id: k.id, touch: k.touch, date: day, via: 'crm task' });
+      led(c, { type: 'sent', id: k.id, touch: k.touch, date: day, via: 'crm task', ...(k.hash ? { hash: k.hash } : {}) });
+      sentHere.add(`${k.id}:${k.touch}`);
       out.sent.push(k.id);
     }
     const labels = (c.short.assignments?.[k.id] || []).map((x) => ({
@@ -247,7 +300,8 @@ export function taskStatus(opts) {
         out.booked.push(k.id);
       }
     }
-    if (o.kind === 'unclear') {
+    // An outcome that only says it was sent ("sent", "done") is clear: the send is recorded above.
+    if (o.kind === 'unclear' && !/^\s*(?:sent|sent it|done|it went|went)\s*[.!]?\s*$/i.test(String(t.outcome || ''))) {
       led(c, { type: 'outcome_unclear', id: k.id, key: k.key, why: o.why });
       out.unclear.push(k.id);
     }

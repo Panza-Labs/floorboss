@@ -15,12 +15,13 @@ import { modeFor, MODES, daysUntilEvent, writtenDate } from '../leadtime.mjs';
 import { plannedDays, gapKey, stateOf } from '../../../../lib/spacing.mjs';
 import { readLedger } from '../../../../lib/ledger.mjs';
 import { drafterFor } from '../drafter.mjs';
-import { touchBefore } from '../../../../lib/route.mjs';
+import { touchBefore, linkedInAt } from '../../../../lib/route.mjs';
 import { assignStructures, factSources, STRUCTURES, openingOf, OPENINGS, warmReader, FROM_RELATIONSHIP } from '../structures.mjs';
 import { sessionRun } from '../../../../lib/scope.mjs';
 import { whereAt, writtenInApp, routeOf, whereMoved, messageFields, channelChangeNote } from './routes.mjs';
+import { syncReach } from './reach.mjs';
 import { ctxOf, skillsOf, takenTest, isOut, lastSentTouch, segmentInfo, knownReader, sameSlots, labelOf, wholeSequence } from './context.mjs';
-import { readTodo, staleFor, savedDraft, draftFile, ledgerTouch, criticFails, earlierDraft, resolveInsight, touchBatch, followupDayOf } from './saved-drafts.mjs';
+import { readTodo, staleFor, savedDraft, draftFile, ledgerTouch, criticFails, earlierDraft, resolveInsight, touchBatch, followupDayOf, firstNow } from './saved-drafts.mjs';
 
 // The must-follow drafting rules (from skills/event-outreach/SKILL.md), at the top of the todo file the drafting
 // step reads.
@@ -93,8 +94,13 @@ function briefFor(brief, bound) {
     .join('\n');
 }
 
+// What a draft held after two critic fails tells the drafter (held_for_user).
+const CRITIC_HELD = "failed the critic twice: don't draft it again; the user edits, drops or approves it by ID at the gate";
+
 export function todo(opts) {
   need(opts, 'event');
+  // A choice of channels changed since (even by hand in the settings): what it moved is taken back first.
+  const changed = syncReach(opts.event, opts);
   const c = ctxOf(opts.event, opts);
   // Over, or its dates can't be read (the context's day state, read from event.json as it is: the guard's answer): an
   // empty todo, written down with the ledger's length, so the flow doesn't ask for it again and again.
@@ -211,6 +217,11 @@ export function todo(opts) {
             : c.settings.channels.includes('paste')
               ? 'paste'
               : null;
+    // Nothing is drafted on a channel the user didn't choose (reach_channels): with no step on one, they aren't written to.
+    if (!steps && Array.isArray(c.settings.reach) && !(channel === 'email' && ct.email) && !(pick === 'chat' || (!ct.email && ct.phone && (c.settings.sending?.channels || []).includes('chat'))) && !(pick === 'app' && c.settings.reach.includes('app'))) {
+      skipped.push({ id, reason: ct.email ? 'no address on the channels you chose' : "no email, and you didn't choose another channel that reaches them" });
+      continue;
+    }
     if (!steps && !channel) {
       skipped.push({ id, reason: 'no email, and paste messages are turned off in channels' });
       continue;
@@ -220,25 +231,53 @@ export function todo(opts) {
       continue;
     }
     const lastSent = lastSentTouch(st);
+    let firstPlanned = null;
     let touch = null,
       followup = false,
       anchorOnly = false;
     const t1 = st.touches[1]?.status;
-    if (!lastSent) {
+    // A LinkedIn step approved and waiting for the user to send it by hand holds nothing (owner, 0.1.7 section 12):
+    // the step after it is drafted for its own day too. One whose text needs writing again is written first.
+    const lastStep = steps ? steps.length : c.settings.touches;
+    const isLi = (t) => linkedInAt(st, t, (u) => steps?.[u - 1] || null);
+    const liWaiting = (t) => {
+      const x = st.touches?.[t];
+      if (st.sent?.[t] || x?.status !== 'outboxed' || !isLi(t)) return false;
+      return !whereMoved(c, id, t) && !staleFor(c, id, t, savedDraft(c, id, t) || readJson(draftFile(c.paths, id, t), null));
+    };
+    // The step after t, skipped steps passed over; a LinkedIn step waiting is passed over only for a step that isn't
+    // LinkedIn (lib/route.mjs wentBefore).
+    const after = (t) => {
+      let n = t + 1;
+      while (st.touches?.[n]?.skipped) n++;
+      return n;
+    };
+    const passes = (t) => liWaiting(t) && after(t) <= lastStep && !isLi(after(t));
+    // A route that starts on LinkedIn, message 1 approved and not sent: their next step comes due as below (from lastSent
+    // 0), and on its own day it is their first message (rule A1, owner 0.1.7 section 12b).
+    const liFirst = !lastSent && !st.touches[1]?.skipped && !redraft.has(id) && passes(1);
+    // Message 1 skipped (an app note the app said can't go): it is never written again; their next step comes due as a
+    // first message would (below, from lastSent 0).
+    if (!lastSent && !st.touches[1]?.skipped && !liFirst) {
       if (t1 !== 'outboxed' || redraft.has(id) || whereMoved(c, id, 1)) touch = 1;
       else if (wholeSequence(c) && c.event?.autosend === true) {
         touch = 1;
         anchorOnly = true;
       }
     } else {
-      let next = lastSent + 1;
+      let next = (lastSent || 0) + 1;
       while (st.touches?.[next]?.skipped) next++;
+      while (next < lastStep && passes(next)) next = after(next);
       // Its day by the one rule (lib/spacing.mjs followupDay): the user's gap or the table's after the last send, null
       // once it would land after the event; and only while the sequence has that many steps.
       const due = next <= (steps ? steps.length : c.settings.touches) ? followupDayOf(c, id, next).day : null;
-      if (due && due <= today && (st.touches[next]?.status !== 'outboxed' || whereMoved(c, id, next) || staleFor(c, id, next, savedDraft(c, id, next) || readJson(draftFile(c.paths, id, next), null)))) {
+      // Every step before it was skipped: it is their first message (owner answer A1), written and approved ahead of its
+      // day. After LinkedIn steps that never went: from its own planned day (saved-drafts.mjs firstNow).
+      const firstContact = next <= lastStep && firstNow(c, id, next, undefined, savedDraft(c, id, next) || readJson(draftFile(c.paths, id, next), null));
+      if (due && (due <= today || firstContact) && (st.touches[next]?.status !== 'outboxed' || whereMoved(c, id, next) || staleFor(c, id, next, savedDraft(c, id, next) || readJson(draftFile(c.paths, id, next), null)))) {
         touch = next;
-        followup = true;
+        followup = !firstContact;
+        if (firstContact) firstPlanned = due;
       }
     }
     if (!touch) continue;
@@ -286,6 +325,8 @@ export function todo(opts) {
       mode,
       mode_guidance: MODES[mode].label,
       followup,
+      // A first message on a later step (every step before it was skipped) keeps its planned day.
+      ...(firstPlanned ? { planned_due: firstPlanned, planned_gap: gapKey(c.settings) } : {}),
       // The sequence's last message: a short closing note (event-outreach SKILL.md, "The last touch").
       ...(followup && touch === (steps ? steps.length : c.settings.touches) ? { last_touch: true } : {}),
       followup_note: followup ? channelChangeNote(c, id, touch) || "Send in the same thread, only if they haven't replied." : null,
@@ -328,7 +369,7 @@ export function todo(opts) {
       // Failed the critic twice: held for the user, never offered with the drafts that are ready for a yes.
       critic_held: held || undefined,
       held_for_user: held
-        ? "failed the critic twice: don't draft it again; the user edits, drops or approves it by ID at the gate"
+        ? CRITIC_HELD
         : leftOut
           ? "left out at the last gate: don't draft it again; the user approves, edits or drops it by ID"
           : undefined,
@@ -368,21 +409,31 @@ export function todo(opts) {
         // once piles up drafts nobody needs yet, and every rewrite of a first email would leave its follow-ups stale.
         const beforeT = touchBefore(c.state[j.id], t);
         const prevT = c.state[j.id]?.touches?.[beforeT];
+        // No earlier message (every step before it was skipped): ready as a first message is.
         const prevReady =
-          !!prevT?.hash &&
+          beforeT === 0 ||
+          (!!prevT?.hash &&
           ((prevT.critic?.verdict === 'PASS' && prevT.critic.hash === prevT.hash) ||
             prevT.status === 'outboxed' ||
             prevT.review_skipped ||
-            !!c.state[j.id]?.sent?.[beforeT]);
+            !!c.state[j.id]?.sent?.[beforeT]));
         const channel = steps ? (steps[t - 1] === 'email' ? 'email' : 'paste') : j.channel;
         // Past the app's limit the sequence stops here: what follows would follow a note never sent.
         if (!laterAppFits(j.id, t, channel)) {
           skipped.push(appBackup(j.id, t));
           break;
         }
+        // Held for its own critic fails, never for the first message's (j is that message's job, its hold included).
+        const fuPrior = readJson(draftFile(c.paths, j.id, t), null);
+        const fuL = ledgerTouch(c, j.id, t);
+        const fuV = fuPrior ? fuL.verdict(fuL.hash) : null;
+        const fuHeld = fuV?.verdict === 'FAIL' && criticFails(c, j.id, t) >= 2;
+        if (fuHeld) heldForUser.push({ id: j.id, touch: t, reasons: fuV.reasons });
         jobs.push({
           ...j,
           ...messageFields(c, j.id, t, channel, true),
+          critic_held: fuHeld || undefined,
+          held_for_user: fuHeld ? CRITIC_HELD : j.critic_held ? undefined : j.held_for_user,
           channel,
           channel_changed: !!channelChangeNote(c, j.id, t) || undefined,
           touch: t,
@@ -563,6 +614,8 @@ export function todo(opts) {
     })
   });
   return {
+    // A channel choice changed since (even by hand): what it took back, said to the user in one line.
+    ...(changed ? { channels_changed: changed } : {}),
     event,
     mode,
     mode_guidance: MODES[mode].label,

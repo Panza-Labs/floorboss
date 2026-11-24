@@ -45,7 +45,7 @@ The guard is split by topic, so a reviewer can take one file at a time:
 
 | File | What it covers |
 |---|---|
-| `hooks/guard.mjs` | The entry point the hooks run. It reads the call, picks the rules that apply and allows it, asks you, or blocks it. It also holds the rules for Bash and agents during a run, and the ask-once logic for sends, staged drafts, CRM tasks, lookups and browser windows. |
+| `hooks/guard.mjs` | The entry point the hooks run. It reads the call, picks the rules that apply and allows it, asks you, or blocks it. It also holds the rules for Bash and agents during a run, and the ask-once logic for sends, staged drafts, CRM tasks, lookups and browser windows. After an AskUserQuestion call it records your pick at the final approval (`lib/autosend/pick.mjs`), so the approve command reads your answer, never the agent's. |
 | `hooks/guard/check.mjs` | The decision for one connected-tool (MCP) call: the run lock, the saved recipe, lookups, the browser, sends and staged drafts. |
 | `hooks/guard/connectors.mjs` | What a connected tool does, judged by its name. Whether its arguments fit the saved recipe. Which servers floorboss was given. |
 | `hooks/guard/test-calls.mjs` | The one test draft, task or contact that setup tries a connection with. |
@@ -61,6 +61,8 @@ The guard is split by topic, so a reviewer can take one file at a time:
 | `hooks/guard/after-call.mjs` | What is recorded after a call has run. |
 | `hooks/guard/unattended.mjs` | Unattended follow-up drafts: the opt-in and authorisation prompts and what their post hook writes, the run's ticket, the CRM judgements, and the guard's "allow", only in a ticketed run when every check holds, for three calls: the mailbox read and the CRM read for a person on the ticket, and that person's authorised draft. |
 | `hooks/guard/witness.mjs` | What the guard reads itself in a mailbox's or CRM's raw answer in an unattended run. |
+| `hooks/guard/autosend-drafts.mjs` | Auto-send through a daily Claude routine: Gmail's create_draft only for the step the run after your final approval is on, exactly as you approved it (to, subject, body, thread, message), once; get_draft only for a draft the guard saw made that way; delete_draft only (`draftId` alone) for such a draft whose auto-send was stopped on the laptop, so the routine can't send it, and the step stays off the outbox until the guard reads that it is gone. Each asks you. |
+| `hooks/guard/routine-trigger.mjs` | RemoteTrigger in the session that ran floorboss: create or update only with the routine body floorboss printed, once; reads only of the routine it saved. After the call (PostToolUse) it records the routine id in RemoteTrigger's own answer, and routine-saved takes only that id. Each asks you. |
 | `hooks/guard/shared.mjs` | Small helpers the rules share. |
 | `hooks/plugin-root.mjs` | The folder the plugin is installed in, which the file and shell rules compare paths against. |
 
@@ -126,6 +128,13 @@ What it can't decide: that the model called the tool it was told to, with those 
 answers it saved are the tools' own; that nobody edited the data repo. The user's controls: the Gmail connection's
 permissions in ChatGPT, a mailbox they accept this for, a repo token scoped to one private repo, pausing the
 scheduled task, and "stop auto-send" in Codex.
+
+In drafts mode (approved messages not sent at once wait as Gmail drafts with a `floorboss/due-` label, and the daily task sends them) the task sees
+only Gmail, never floorboss's records. So your approval ends when the draft is made: anyone with access to your
+mailbox can edit a queued draft and it goes as edited, and a draft made by hand with a due label is sent too. A stop
+you tell floorboss on the laptop (a revoke, a reply, an opt-out, a booking) reaches a queued draft only when its short
+hold run puts `floorboss/held-check` on that draft; until then the daily task may still send it. Pause the task in
+chatgpt.com to stop it at once.
 
 floorboss's scripts run `git` on the data folder in this mode (pull, commit, push to the user's own remote). They make
 no other network call. The task prompt signs git in with a global credential helper that reads the `GITHUB_TOKEN`
@@ -507,6 +516,10 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
   their company brief (your customer rule's "hold" or "ask" still applies to them). This is deliberate: anyone can put a company's name on a list row. Give the account an
   addressed record in the CRM to bind the people at its domain.
 
+- **Taking someone off a do-not-contact hold.** The guard asks you before `lift-hold` takes anyone off, but only for
+  the plugin's own script; outside a live run, a renamed copy of the plugin or a hand-built `node -e` call could still
+  write the lift with no prompt, the same limit as the auto-send record.
+
 - **Your environment.** Some of floorboss's checks rely on settings Claude can't put on its own commands (the
   guard refuses a floorboss script call with anything before `node`). Whoever controls the environment Claude
   Code starts in (a shell profile, a settings `env` block) could change them; so could a shell command run
@@ -660,6 +673,50 @@ user installs (the release process, CI, the marketplace file) is as welcome as o
   early rather than late. A lookup allowed more than a day after floorboss let it through isn't counted.
 - **What you say through Claude.** An answer reaches floorboss as text Claude passes on. floorboss saves an
   answer only for the question it's asking right then, but it can't tell your words from words Claude made up.
+- **How the guard knows floorboss's scripts.** The guard reads the text of a command. It recognises the plain forms
+  floorboss itself writes, and many other spellings of the same script: a second name for the folder, a link, extra
+  slashes, a different letter case. A shell can still reach a script in ways the guard doesn't follow, such as a
+  brace group (`{ cd …; node cli.mjs on; }`), `pushd`, `find -exec`, `xargs`, or another program that starts node.
+  Outside a floorboss run, a copy of the plugin in another folder, a file the model writes, or a path built while
+  the command runs (`node -e`) isn't recognised as floorboss's script and gets none of its rules. Inside a run such
+  commands are refused.
+- **The one-use record (0.1.7).** In Claude Code, the auto-send commands that change something (`on`, `approve`,
+  `draft-gone`, `drafts`, `routine-checked`, `routine-saved`, `remote --confirm`) run only if the guard looked at exactly that
+  command a moment before. When the guard recognises one of them and its rules let it go on (allowed, or asked), it
+  writes a record in `autosend/seen-by-guard/` in the data folder: the hash of the command's words after the script
+  (the verb, the event, the ids, the touch, every flag) and, for `draft-gone`, the hash of your words it showed you.
+  The command takes the record (once), checks it is less than 3 minutes old and for these words, and otherwise
+  says the safety check did not see it and changes nothing. A shell form the guard doesn't follow gets no record,
+  so it changes nothing; a subagent is refused by the guard in the plain form and gets no record in any other.
+  Claude Code doesn't tell the guard what you answered at its prompt. A record goes when the guard judges any shell
+  command of the same session, after its own call ran, when it is 3 minutes old, and at session start;
+  so after a Deny, a form the guard doesn't follow in the same session finds no record. Only the main conversation's
+  shell calls clear: a subagent's shell call (which carries the same session) clears nothing and waits, refused with
+  "floorboss is waiting for the user's answer to a prompt", while your prompt is open. If the records folder can't be
+  read, shell commands that aren't floorboss's go on; floorboss's own commands stop with what to do. `draft-gone` refuses if its words file changed after the guard showed it to you.
+  The guard refuses a Write or Edit into that folder (by what the folder is on disk, so another spelling or a link
+  counts), a connected tool's write there, and a shell command that names the folder.
+  What it does not stop: the records are plain files with no secret in them (a key the model could read would add
+  nothing). A model that writes a record file itself, through a shell form the guard doesn't follow (a name built
+  while the command runs, a script it wrote), can still forge one. The command trusts its environment to say where it
+  runs: Claude Code's mark (`CLAUDECODE`) anywhere in it, even emptied or next to a Codex mark, is read as Claude
+  Code, but a command that removes the mark altogether (`env -u`, `unset`) through a form the guard doesn't follow
+  runs as Codex would. There, only Codex's own checks apply: a daily-routine event's commands refuse, and nothing
+  is sent without the guard's check on the Gmail call. An event sent through a daily Claude routine now needs the
+  record for those commands (`on` included) whatever the environment says, so removing the mark can't move a
+  routine event to Gmail drafts or approve it under Codex's rules. A Codex user who shares the folder can still stop
+  it at once with `revoke`. An event that left the routine follows the host's rules again.
+  A stop (`revoke`) never needs a record, in any host, so stopping always works: it can only make less go out.
+  While your prompt for a command is open, another command can use its record: one the model sends at the same
+  moment in a form the guard doesn't follow, one started earlier in the background (or before the session's first
+  floorboss command, so before the session was held), or one from another session that shares the data folder.
+  A record you denied can be used from another Claude Code session on the same computer for up to 3 minutes, by a
+  command in a form the guard doesn't follow. If you answer a prompt after 3 minutes, the command says the safety
+  check did not see it; run it again. After a call ran, the guard removes its record by
+  the call's id (`tool_use_id`).
+  So the record is a check on the forms we know of, not a wall.
+  For `remote --confirm` the record holds the address without its token.
+  Codex has no guard, never sets `CLAUDECODE`, and needs no record: it works as before.
 
 ## What floorboss has to take on trust
 

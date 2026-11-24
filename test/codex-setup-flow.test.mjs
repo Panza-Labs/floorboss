@@ -148,9 +148,11 @@ test('5. hand-send with no match to name: check_these asks only write or skip', 
   assert.equal(ct.question, "floorboss isn't sure these people are buyers: write to them or skip? A word on why helps.");
   assert.doesNotMatch(ct.answer_format, /same-person|different-person|not-in-crm/);
   for (const p of ct.people) assert.deepEqual(p.answers, ['reach', 'skip']);
-  // A person with a match to name keeps the matching question; Claude Code keeps its own words.
+  // A person with a match to name keeps the matching question.
   assert.match(checkTheseQuestion({ ob: { ans: {} } }, CODEX, [{ rung: 'fuzzy' }]), /same person as the one shown beside them/);
-  assert.match(checkTheseQuestion({ ob: { ans: {} } }, { CLAUDECODE: '1' }, [{ rung: 'fit' }]), /^For each person in check-these: same-person/);
+  // Claude Code reads the same; only a connected CRM keeps the old wording.
+  assert.match(checkTheseQuestion({ ob: { ans: {} } }, { CLAUDECODE: '1' }, [{ rung: 'fit' }]), /^floorboss isn't sure these people are buyers/);
+  assert.match(checkTheseQuestion({ ob: { ans: { crm_choice: 'connector' } } }, { CLAUDECODE: '1' }, [{ rung: 'fit' }]), /^For each person in check-these: same-person/);
 });
 
 test('6. hand-send availability: days, times not free and scheduling rules; slots follow them', { timeout: 600000 }, () => {
@@ -279,16 +281,31 @@ test('9. hand-send: new addresses in a reloaded list don\'t reopen the shortlist
   for (const m of rv.sample) assert.match(m.to, /2\.example$/, m.to);
 });
 
-test('Claude Code: the setup questions, check_these and the research question are as they were', { timeout: 600000 }, () => {
+test('Claude Code: the same setup questions, check_these wording and research heads-up as Codex', { timeout: 600000 }, () => {
   const H = homeFor(false);
-  const r = run(H, persona(H, { asks: { about_you: { sign_off: 'Best, Gary', sender_name: 'Gary', city: 'Austin' }, company_research: 'skip' } }), (s) => s.step === 'approve');
+  const r = run(H, persona(H), (s) => s.step === 'approve');
   const asks = asked(r.steps);
-  const q = (id) => asks.find((a) => a.id === id)?.question;
-  assert.match(q('about_you'), /^How do you sign your messages \(your name, and company if you add it\), and which city do you live in\?/);
-  assert.equal(q('check_these'), 'For each person in check-these: same-person (name the CRM row), different-person, not-in-crm (the CRM lookup gave no answer and the CRM has nobody for them), reach, warm or skip, with a word on why.');
-  assert.match(q('company_research'), /^Before drafting, floorboss looks up each shortlisted company on the web/);
-  assert.match(q('free_time'), /^When are you free to meet\? Say it the way you'd say it \(times are event time; say if you mean another zone\)\.$/);
-  assert.equal(cfgOf(H).home_tz, 'America/Chicago', 'from the city they gave');
+  // No sign-off or home-zone question: the zone is the computer's, the sign-off "Best," and the first name.
+  assert.deepEqual(asks.filter((a) => ['about_you', 'home_tz'].includes(a.id)).map((a) => a.id), []);
+  assert.equal(cfgOf(H).home_tz, ZONE, "the computer's own zone");
+  assert.match(voiceOf(H), /\*\*Sign-off:\*\* Best, Gary/);
+  assert.equal(asks.find((a) => a.id === 'check_these').question, "floorboss isn't sure these people are buyers: write to them or skip? A word on why helps.");
+  // Research starts with a heads-up, not a question.
+  assert.ok(!asks.some((a) => ['company_research', 'research_scale'].includes(a.id)), asks.map((a) => a.id).join(' '));
+  const briefs = r.steps.find((s) => s.step === 'company_briefs');
+  assert.match(briefs.tell_user, /Looking up the \d+ shortlisted compan/);
+  // Questions are the user's words only: notes for the model are in their own fields, with the same why clause.
+  for (const a of asks) assert.doesNotMatch(String(a.question), /\b(Look it up|Propose|Once they say|Say in one line)\b/, `${a.id}: ${a.question}`);
+  const goal = asks.find((a) => a.id === 'goal');
+  assert.ok(goal.how_to_ask && goal.for_agent, 'goal splits question, how_to_ask and for_agent');
+  assert.ok(goal.question.includes(HAND_SEND_WHY.goal));
+  assert.equal(asks.find((a) => a.id === 'free_time').question.includes(HAND_SEND_WHY.free_time), true);
   const s = approveStep(H);
-  assert.deepEqual(s.run_first.slice(2), ['open', '--event', 'test-expo', '--review', '--no-open']);
+  assert.deepEqual(s.run_first.slice(2, 5), ['review', '--event', 'test-expo']);
+});
+
+test('the setup questions say "customer list (CRM)" and drop the table jargon', async () => {
+  const { levelOptions } = await import('../skills/event-context/scripts/onboarding-tree.mjs');
+  assert.match(levelOptions({ ans: {}, cfg: {}, inv: null }).join(' '), /customer list \(CRM\)/);
+  assert.doesNotMatch(readFileSync(join(ROOT, 'skills/event-context/scripts/onboarding-tree.mjs'), 'utf8'), /what-you-bring has no/);
 });

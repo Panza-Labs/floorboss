@@ -792,7 +792,7 @@ test('a meeting confirmation goes through the guard on a day another message wen
 });
 
 test('send-outcome --went yes for a browser note whose guard stopped before its release is refused: it went in the browser, not by email', () => {
-  const H = ready({ route: ['linkedin', 'email'], sending: { channels: ['email', 'linkedin'], followups: 'scheduled', linkedin_ack: true } });
+  const H = ready({ event: { app_name: 'Grip' }, route: ['app', 'email'], sending: { channels: ['email', 'app'], followups: 'scheduled' } });
   const ana = idOf(H, 'Ana Berg');
   approveRounds(H);
   assert.equal(eventRecord(H.dir).folded.people[ana].touches[1].approved?.via, 'browser');
@@ -1002,8 +1002,9 @@ test('two people who share an inbox address (info@, or one address the merge kep
 
 test('the send list: Bob\'s LinkedIn note let through holds Ana\'s at the same event, where both are listed with info@ and their own links, never', () => {
   const H = ready({
-    route: ['linkedin', 'linkedin'],
-    sending: { channels: ['email', 'linkedin'], followups: 'scheduled', linkedin_ack: true },
+    event: { app_name: 'Grip' },
+    route: ['app', 'app'],
+    sending: { channels: ['email', 'app'], followups: 'scheduled' },
     attendees: `Name,Title,Company,Email,LinkedIn\nAna Berg,COO,Acme,info@acme.test,${LI}\nBob Day,CFO,Acme,info@acme.test,${BOB_LI}\n`
   });
   const a = idOf(H, 'Ana Berg'),
@@ -1018,7 +1019,7 @@ test('the send list: Bob\'s LinkedIn note let through holds Ana\'s at the same e
   assert.ok(listed().includes(`${a} ${LI}`) && listed().includes(`${b} ${BOB_LI}`), JSON.stringify(listed()));
   const appr = eventRecord(H.dir).folded.people[b].touches[1].approved;
   assert.equal(appr.to, BOB_LI);
-  appendFileSync(join(H.dir, 'ledger.jsonl'), `${JSON.stringify({ at: at('2026-10-12', '08:30'), type: 'send_released', who: 'guard', id: b, touch: 1, hash: appr.hash, via: 'browser', where: 'LinkedIn', to: appr.to })}\n`);
+  appendFileSync(join(H.dir, 'ledger.jsonl'), `${JSON.stringify({ at: at('2026-10-12', '08:30'), type: 'send_released', who: 'guard', id: b, touch: 1, hash: appr.hash, via: 'browser', where: 'Grip', to: appr.to })}\n`);
   const after = list();
   assert.deepEqual(listed(), [`${a} ${LI}`], `her note is still listed, his is not: ${JSON.stringify(after).slice(0, 400)}`);
   assert.ok(!(after.waiting || []).some((w) => w.id === a), `and she is not held: ${JSON.stringify(after.waiting)}`);

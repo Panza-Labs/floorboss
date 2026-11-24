@@ -1,10 +1,12 @@
-// Quick setup says what it takes as given (working alone, no CRM, no samples) and asks before any web research:
-// "skip" gives each shortlisted company a "not researched" brief, and no researcher is started.
+// Quick setup says what it takes as given (working alone, no CRM, no samples). Web research starts on its own, with a
+// heads-up (the owner's choice, 2026-11-21: it is not asked first): "skip" gives each shortlisted company a "not
+// researched" brief, and no researcher is started.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeHome, drive, simplePersona, cli, ROOT } from './sims/lib/driver.mjs';
+import { makeHome, simplePersona, cli, ROOT } from './sims/lib/driver.mjs';
+import { throughHeadsUp, say } from './fixtures/heads-up.mjs';
 import { levelOptions } from '../skills/event-context/scripts/onboarding-tree.mjs';
 
 const LIST = 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\nBo Li,VP Ops,Globex,bo@globex.test\n';
@@ -13,20 +15,30 @@ test('quick setup: the option says what it assumes', () => {
   const quick = levelOptions({ inv: { found: {} }, ans: {} })[0];
   assert.match(quick, /^quick/);
   assert.match(quick, /work alone/);
-  assert.match(quick, /no CRM/);
+  // (The option says "no customer list (CRM)" since the guided intake: same assumption, plainer words.)
+  assert.match(quick, /no customer list \(CRM\)/);
   assert.match(quick, /no writing samples/);
-  assert.match(quick, /asks before any web research/);
+  // Updated 2026-11-21: research is a heads-up, not a question, so the option no longer says it asks first.
+  assert.match(quick, /web research.*starts on its own.*"skip" and it stops/i);
+  assert.doesNotMatch(quick, /asks before/);
 });
 
-test('quick setup: asks before researching companies; "skip" starts no researcher and says so in each brief', { timeout: 300000 }, () => {
+test('quick setup: research starts with a heads-up; "skip" starts no researcher and says so in each brief', { timeout: 300000 }, () => {
+  // Updated 2026-11-21: quick no longer asks before researching; it says what it will look up and "skip" stops it. The
+  // checks are the same: after "skip" no researcher starts and each brief says it was not researched.
   const H = makeHome({ context: { from: join(ROOT, 'examples/mock-event/context/buyers'), name: 'buyers' }, attendees: LIST });
-  const persona = simplePersona({ asks: { setup_level: 'quick', company_research: 'skip company research', attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
-  const agents = [];
-  const { trail, slug } = drive(H, persona, { onStep: (s) => { if (s.agents) agents.push(...s.agents.map((a) => a.name)); } });
-  assert.ok(trail.includes('company_research'), trail.join(' '));
+  const persona = simplePersona({ asks: { setup_level: 'quick', attendee_list: join(H.HOME, 'inputs', 'attendees.csv') } });
+  let up = null;
+  const { trail, slug, companiesResearched, peopleResearched } = throughHeadsUp(H, persona, (step) => {
+    up = step;
+    assert.ok(!step.ask, 'a heads-up, not a question');
+    assert.match(step.tell_user, /Say "skip" to draft without it\./);
+    assert.ok(!say(H, step, 'skip company research').ERROR);
+  });
+  assert.ok(up.companies.includes('Acme') && up.companies.includes('Globex'), up.companies.join(' '));
   assert.ok(!trail.includes('company_briefs'), 'no web research after "skip"');
-  assert.ok(!agents.includes('floorboss:attendee-researcher'), agents.join(' '));
-  assert.ok(trail.indexOf('company_research') < trail.indexOf('draft'), 'asked before drafting');
+  assert.deepEqual(companiesResearched, [], 'no company researcher');
+  assert.ok(!trail.includes('research_scale') && !trail.includes('company_research'), 'no research question');
   const dir = join(H.HOME, 'events', slug, 'companies');
   const briefs = readdirSync(dir).filter((f) => f.endsWith('.md'));
   assert.ok(briefs.length >= 1);
@@ -52,5 +64,5 @@ test('quick setup: choosing it says back what it assumes', () => {
   writeFileSync(join(H.HOME, 'work', 'level.txt'), 'quick');
   const r = cli(H, 'flow', ['answer', '--ask', 'setup_level', '--value-file', join(H.HOME, 'work', 'level.txt')]);
   assert.ok(!r.ERROR, r.ERROR);
-  assert.match(r.result.assumes, /work alone.*no CRM.*no writing samples.*asks before any web research/s);
+  assert.match(r.result.assumes, /work alone.*no CRM.*no writing samples.*starts on its own/s);
 });

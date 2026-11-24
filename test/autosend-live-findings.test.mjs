@@ -76,7 +76,7 @@ test('live 2: after a send, the next person waits for the gap before their searc
   const w = world({ touches: 1, people: PEOPLE.slice(0, 2) });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: 'auto-send these sequences' }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: '1' }, at(NOW));
   const { bare } = remoteFor(w.HOME);
   const X = cloneOf(bare, 'g');
   const t0 = '2026-10-12T09:00:00Z';

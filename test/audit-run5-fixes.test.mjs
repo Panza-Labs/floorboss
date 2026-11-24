@@ -134,14 +134,13 @@ test('a window for app notes opens only the app; LinkedIn needs a LinkedIn note 
   triage(lin);
   draftApprove(lin);
   listAt(lin, NOW);
-  assert.equal(browserList(lin)[0].where, 'LinkedIn');
-  openWin(lin, NOW, false);
-  assert.equal(nav(lin, 'https://www.linkedin.com/in/ana').status, 0, 'a LinkedIn note opens LinkedIn');
-  assert.equal(nav(lin, 'https://app.grip.events/people/ana').status, 2, 'and not the app');
-  const ev = JSON.parse(readFileSync(join(lin.dir, 'event.json'), 'utf8'));
-  ev.settings.sending.linkedin_ack = false;
-  writeFileSync(join(lin.dir, 'event.json'), JSON.stringify(ev));
-  assert.equal(nav(lin, 'https://www.linkedin.com/in/ana').status, 2, 'without its warning accepted, LinkedIn stays shut');
+  // 0.1.7: floorboss never sends on LinkedIn, so a LinkedIn step is never on the browser list.
+  assert.ok(!existsSync(join(lin.dir, 'derived', 'browser-send-list.json')) || !browserList(lin).some((x) => x.where === 'LinkedIn'));
+  // With an old linkedin_ack still in the settings, no send window opens for LinkedIn, and the guard refuses typing in
+  // the browser during the run.
+  writeFileSync(join(lin.HOME, 'active.json'), JSON.stringify({ at: NOW }));
+  assert.match(cli(lin, 'event-outreach', ['browser-send', '--event', lin.slug, '--said', 'go ahead, send them on LinkedIn']).ERROR || '', /Nothing approved to send in the browser/);
+  assert.equal(type(lin, 'Hi Ana').status, 2, 'nothing is typed on LinkedIn');
 });
 
 test('beside approve all, a name left unresolved holds the approval: nothing is approved', () => {
@@ -203,14 +202,13 @@ test('moving the route after approval means approving again: an app note is not 
   writeFileSync(join(H.dir, 'event.json'), JSON.stringify(ev));
   const list = listAt(H, NOW);
   assert.equal(list.in_browser, 0, JSON.stringify(list));
-  assert.match(list.waiting.find((w) => w.id === ana && w.touch === 1).why, /approve it again/);
+  assert.match(list.waiting.find((w) => w.id === ana && w.touch === 1).why, /you send this one yourself on LinkedIn/);
   const { jobs } = todoJobs(H);
   assert.ok(jobs.some((j) => j.id === ana && j.touch === 1), 'it comes back to be approved again');
   const g = cli(H, 'event-outreach', ['gate', '--event', H.slug, '--answers', `approve ${ana}`]);
   assert.ok(g.approved >= 1, JSON.stringify(g));
   const relist = listAt(H, NOW);
-  assert.equal(relist.in_browser, 1, JSON.stringify(relist));
-  assert.equal(browserList(H)[0].where, 'LinkedIn');
+  assert.equal(relist.in_browser, 0, JSON.stringify(relist));
 });
 
 test('the own-channel check reads that inbox: LinkedIn being read does not clear an app follow-up', () => {
@@ -232,7 +230,7 @@ test('the own-channel check reads that inbox: LinkedIn being read does not clear
 
 test('a step sent back or dropped holds the next approved step out of the mailbox drafts, files and tasks; a skip does not', () => {
   const mk = () => {
-    const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\n', settings: { sending: { channels: ['linkedin'], followups: 'scheduled', linkedin_ack: true }, route: ['email', 'email', 'email'] } });
+    const H = setup({ attendees: 'Name,Title,Company,Email\nAna Berg,COO,Acme,ana@acme.test\n', settings: { sending: { channels: ['chat'], followups: 'scheduled', linkedin_ack: true }, route: ['email', 'email', 'email'] } });
     writeFileSync(join(H.HOME, 'config.json'), JSON.stringify({ connectors: {} }));
     triage(H);
     draftApprove(H);
@@ -384,9 +382,9 @@ test('a route step floorboss sends itself gets no CRM task; a LinkedIn step floo
   const t2 = cli(H, 'event-outreach', ['task-list', '--event', H.slug], later(14));
   assert.equal(t2.by_kind?.send || 0, 0, JSON.stringify(t2));
   sentMark(H, ana, 2, { channel: 'Grip' }, later(14));
-  // The LinkedIn step's task comes on its day: its gap after the app note really went (Mon 26 Oct, 15 days out: 4).
+  // The LinkedIn step's task is made as soon as its day is known (owner decision 0.1.7: LinkedIn tasks are made early, due on their day, Mon 26 Oct here).
   const early = cli(H, 'event-outreach', ['task-list', '--event', H.slug], later(14));
-  assert.equal(early.by_kind?.send || 0, 0, JSON.stringify(early));
+  assert.equal(early.by_kind?.send || 0, 1, JSON.stringify(early));
   const t3 = cli(H, 'event-outreach', ['task-list', '--event', H.slug], later(18));
   assert.equal(t3.by_kind?.send || 0, 1, JSON.stringify(t3));
 });
@@ -524,7 +522,7 @@ test('an app route step is not shown as a LinkedIn card in the outbox', () => {
   assert.doesNotMatch(render({ routed: 'app' }), /data-li="1"/);
   assert.match(render({}), /data-li="1"/, 'a LinkedIn step still is');
   // Through the real outbox: a routed app step names the app, not the LinkedIn link it also has.
-  const S = { sending: { channels: ['linkedin'], followups: 'scheduled', linkedin_ack: true }, route: ['email', 'app'], ...NOTES };
+  const S = { sending: { channels: ['chat'], followups: 'scheduled' }, route: ['email', 'app'], ...NOTES };
   const H = setup({ attendees: 'Name,Title,Company,Email,LinkedIn\nAna Berg,COO,Acme,ana@acme.test,https://www.linkedin.com/in/ana\n', event: { app_name: 'Grip' }, settings: S });
   triage(H);
   draftApprove(H);
@@ -746,12 +744,12 @@ test('sendRoute variant: a LinkedIn step goes in LinkedIn for someone with a pho
   draftApprove(H);
   const list = listAt(H, NOW);
   const ana = idOf(H, 'Ana Berg');
-  assert.ok(browserList(H).some((x) => x.id === ana && x.where === 'LinkedIn'), JSON.stringify(list));
+  assert.equal(list.waiting[0].why, 'you send this one yourself on LinkedIn', JSON.stringify(list));
   assert.ok(JSON.parse(readFileSync(join(H.dir, 'derived', 'send-list.json'), 'utf8')).some((x) => x.id === idOf(H, 'Bo Li') && x.via === 'chat.send'), JSON.stringify(list));
 });
 
 test('taskList variant: an app step with app sending off is a task, and is not doubled', () => {
-  const S = { sending: { channels: ['linkedin'], followups: 'scheduled', linkedin_ack: true }, route: ['email', 'app'], crm_log: 'tasks', ...NOTES };
+  const S = { sending: { channels: ['chat'], followups: 'scheduled', linkedin_ack: true }, route: ['email', 'app'], crm_log: 'tasks', ...NOTES };
   const H = setup({ attendees: 'Name,Title,Company,Email,LinkedIn\nAna Berg,COO,Acme,ana@acme.test,https://www.linkedin.com/in/ana\n', event: { app_name: 'Grip' }, settings: S });
   triage(H);
   draftApprove(H);

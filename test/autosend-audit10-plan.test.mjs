@@ -23,12 +23,12 @@ import { followupDayOf } from '../skills/event-outreach/scripts/commands/saved-d
 import { offersCopy, mailOf } from '../skills/event-outreach/scripts/outbox.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 function approved(opts = {}) {
   const w = world({ touches: 2, ...opts });
   process.env.FLOORBOSS_HOME = w.HOME;
   const r = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: r.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: r.digest, said: AUTO_PICK }, at(NOW));
   return w;
 }
 
@@ -63,7 +63,7 @@ test('finding 2: a follow-up planned again after a missed day: on the days the p
     // The user asks for it to be planned again (a fresh readback and yes, with their word it wasn't sent).
     const rb = readback(w.evDir, at('2026-10-21T09:30:00Z'));
     assert.deepEqual(rb.items.map((x) => [x.touch, x.planned_day, !!x.missed]), [[2, '2026-10-21', true]]);
-    approve(w.evDir, { digest: rb.digest, said: SENTENCE, notSentSaid: 'I did not send it' }, at('2026-10-21T09:30:00Z'));
+    approve(w.evDir, { digest: rb.digest, said: AUTO_PICK, notSentSaid: 'I did not send it' }, at('2026-10-21T09:30:00Z'));
     for (const d of ['2026-10-21T10:00:00Z', '2026-10-22T09:30:00Z']) {
       assert.equal(dueHere(d), true, `the planner has it due on ${d}`);
       assert.deepEqual(card(d), { buttons: false, missed: false }, `no hand-send buttons on ${d}`);

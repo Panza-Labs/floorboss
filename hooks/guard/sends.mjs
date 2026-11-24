@@ -5,13 +5,13 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { home } from '../../lib/paths.mjs';
-import { verifySend, eventRecord, eventDay, approvalHash, eventStateAt, followupNotToday, addressBusyToday, busyWhy, homeSends, lentChanged } from '../../lib/sendcheck.mjs';
-import { touchBefore } from '../../lib/route.mjs';
+import { verifySend, eventRecord, eventDay, approvalHash, eventStateAt, followupNotToday, addressBusyToday, busyWhy, homeSends, lentChanged, stepBefore, writtenAgainst } from '../../lib/sendcheck.mjs';
 import { contactable } from '../../lib/ledger.mjs';
 import { loadEvent, isMockSlug } from '../../lib/event.mjs';
 import { createHash } from 'node:crypto';
 import { nowMs as clockNow } from '../../lib/clock.mjs';
 import { readJsonStrict, recent, fold, leaves } from './shared.mjs';
+import { pickHold } from '../../lib/autosend/common.mjs';
 
 export const refusedSends = [];
 // Today's send lists across events, each item checked against the record (approval fingerprint, draft,
@@ -39,11 +39,13 @@ export function listedSends() {
     if (!Array.isArray(v) || !v.length) return [];
     sends ||= homeSends(dir);
     let settings;
+    let event;
     try {
       // The mock event's made-up people never reach a real connector.
       const loaded = loadEvent(slug);
       if (loaded.event.mock === true || isMockSlug(slug)) return [];
       settings = loaded.settings;
+      event = loaded.event;
     } catch {
       return [];
     }
@@ -51,7 +53,11 @@ export function listedSends() {
     const nowMs = clockNow();
     return v
       .map((x) => {
-        const r = verifySend(x, { evDir: join(dir, slug), settings, ...rec, nowMs, sends });
+        const r0 = verifySend(x, { evDir: join(dir, slug), settings, ...rec, nowMs, sends });
+        // The user's pick at the final approval stands against the list: a list written before pick 2 or 3 (or, at an
+        // event sending through a daily Claude routine, before any pick) sends nothing of those messages.
+        const held = r0.ok && x && typeof x === 'object' ? pickHold(event, rec.entries, x.id, Number(x.touch ?? 1), r0.hash, x.to) : null;
+        const r = held ? { ok: false, why: held } : r0;
         // Kept to explain a refusal: "check their replies again" says more than "not listed".
         if (!r.ok && x && typeof x === 'object')
           refusedSends.push({ to: String(x.to || ''), body: String(x.body || ''), name: x.name || x.id, id: x.id, why: r.why });
@@ -124,8 +130,15 @@ export function stageRefusal(evDir, item, nowMs = Date.now()) {
     const busy = addressBusyToday(evDir, item.to, nowMs, item.id);
     if (busy) return busyWhy(busy, folded.people[item.id]?.name || item.id, item.to);
   }
-  // A follow-up goes in only after the message before it went, and each step's draft goes in once.
-  if (kind === 'message' && touch > 1 && !st.sent?.[touchBefore(st, touch)]) return "the message before it hasn't gone";
+  // A follow-up goes in only after the message before it went, and each step's draft goes in once. A LinkedIn step the
+  // user sends by hand that hasn't gone is passed over (owner, 0.1.7 section 12b): the spacing, one a day and every
+  // other check here still hold, counted from the message that went (lib/sendcheck.mjs stepBefore).
+  const before = kind === 'message' && touch > 1 ? stepBefore(evDir, eventRecord(evDir).entries, st, item.id, touch) : 0;
+  if (before > 0 && !st.sent?.[before]) return "the message before it hasn't gone";
+  // Nothing before it went (every step before it skipped, or LinkedIn steps that never went), and this text was written
+  // as a follow-up to one of them: it never goes (owner answer A1), as at the send (lib/sendcheck.mjs verifySend).
+  if (kind === 'message' && touch > 1 && before === 0 && writtenAgainst(eventRecord(evDir).entries, item.id, touch, st.touches?.[touch]?.approved?.hash))
+    return 'it was written as a follow-up to a message that never went: it is written again as a first message, for your next approval';
   if (st.touches?.[touch]?.staged) return 'its draft is already in your drafts';
   // An unattended run let its draft in (the guard's own record of it, written before the call ran).
   if (st.touches?.[touch]?.stage_released) return 'its draft already went into your drafts on its own (an unattended run): check your drafts folder';

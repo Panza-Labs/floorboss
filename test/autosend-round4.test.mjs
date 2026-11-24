@@ -19,12 +19,12 @@ import { sentHome, runAs } from './fixtures/codex-sent.mjs';
 import { MOCK } from './fixtures/r2.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 function approved(opts = {}) {
   const w = world({ touches: 2, ...opts });
   process.env.FLOORBOSS_HOME = w.HOME;
   const r = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: r.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: r.digest, said: AUTO_PICK }, at(NOW));
   return w;
 }
 const waitOf = (r, id) => r.waits.find((w) => w.id === id)?.why || '';
@@ -41,7 +41,7 @@ test('item 1: message 1 sent by hand ends auto-send for the rest of that sequenc
   const mine = rb.items.filter((x) => x.id === 'c001');
   assert.deepEqual(mine.map((x) => x.touch), [2]);
   // (Bo's and Cy's first messages missed their day meanwhile: the user's word that they weren't sent by hand.)
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE, notSentSaid: "I didn't send Bo's or Cy's" }, at('2026-10-16T08:30:00Z'));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK, notSentSaid: "I didn't send Bo's or Cy's" }, at('2026-10-16T08:30:00Z'));
   const due = dueNow(w.HOME, at(`${mine[0].planned_day}T10:00:00Z`)).due.find((x) => x.id === 'c001');
   assert.equal(due?.touch, 2, JSON.stringify(dueNow(w.HOME, at(`${mine[0].planned_day}T10:00:00Z`)).waits.find((x) => x.id === 'c001')));
   // A send auto-send made, settled as "it went" on the laptop, doesn't end anything.
@@ -105,11 +105,15 @@ test('item 5: the data repo\'s .gitignore lets nothing through by itself (the re
   for (const f of odd) assert.equal(sync.DATA_RE.test(f), false, f);
 });
 
-test('item 6a: check_these reads as at 8e9f440 in Claude Code; plain choices only in hand-send with no CRM', () => {
+test('item 6a: check_these reads the same in both hosts: the old wording with a CRM, plain choices with none', () => {
+  // Updated 2026-11-21 (one product for both hosts): Claude Code no longer keeps the 8e9f440 wording when there is no CRM;
+  // with a CRM both hosts keep it as it was.
   const OLD = 'For each person in check-these: same-person (name the CRM row), different-person, not-in-crm (the CRM lookup gave no answer and the CRM has nobody for them), reach, warm or skip, with a word on why.';
-  assert.equal(checkTheseQuestion({ ob: { ans: {} } }, { CLAUDECODE: '1' }), OLD);
+  assert.equal(checkTheseQuestion({ ob: { ans: { crm_choice: 'connector' } } }, { CLAUDECODE: '1' }), OLD);
   assert.equal(checkTheseQuestion({ ob: { ans: { crm_choice: 'connector' } } }, { CODEX_SESSION_ID: 's' }), OLD);
-  assert.match(checkTheseQuestion({ ob: { ans: {} } }, { CODEX_SESSION_ID: 's' }), /same person as the one shown beside them/);
+  const plain = checkTheseQuestion({ ob: { ans: {} } }, { CODEX_SESSION_ID: 's' });
+  assert.match(plain, /same person as the one shown beside them/);
+  assert.equal(checkTheseQuestion({ ob: { ans: {} } }, { CLAUDECODE: '1' }), plain);
 });
 
 test('item 6b and 6c: in Claude Code, replies_since and todo.json are as at 8e9f440; in Codex "recorded" takes the count as it is now', { timeout: 600000 }, () => {
@@ -150,7 +154,7 @@ test('item 7: an offered time already past holds the message; the hours are chec
   const m = approvedLines(w.evDir, PEOPLE[0], 1, { at: '2026-10-12T07:30:00Z', extra: ' Monday at 08:00 suits?', slot_ids: ['s20261012-0800'] });
   addLines(w.evDir, m.lines);
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   assert.ok(!('slot_ids' in JSON.parse(readFileSync(join(w.evDir, 'drafts', `${m.hash}.json`), 'utf8'))));
   assert.match(waitOf(dueNow(w.HOME, at('2026-10-12T09:00:00Z')), 'c001'), /already past/);
   // Before 09:00 in Lisbon (the review moved finding 6's check to 16:30Z): nothing goes, the hours say why.

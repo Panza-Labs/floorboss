@@ -51,7 +51,9 @@ test('scan: servers are read by what their tools do; sending offers only what th
   for (const r of ['sending']) { const st = { ...s, ans: { setup_level: 'full', inventory_confirmed: true, goal_type: 'selling', meetings_wanted_asked: true, must_meet_asked: true, app_limit_asked: true, works_alone: true, accounts_asked: true, dnc_asked: true, crm_choice: 'none', known_asked: true, list_source: 'export', contact_details: 'later', import_context: 'no', posture: 'x', seller_framing: 'no', segments_confirmed: true, material_asked: true, insights_asked: true, offer_asked: true, claims_confirmed: true, samples_ok: true, app_notes_asked: true, basics_asked: true, about_you_asked: true }, cfg: { company_caps: { mode: 'scale' }, goal: 'x', own_company: 'A', home_tz: 'Europe/London', drafting_mode: 'floorboss', context_profile: 'p', languages: ['English'] } }; all.push(planQuestions(st)); }
   const sending = all[0].questions.find((x) => x.id === 'sending');
   assert.match(sending.ask, /Nothing in your setup can send/);
-  assert.deepEqual(sending.options, ['nowhere: I\'ll send them myself']);
+  // Updated 2026-11-21: with nothing connected, sending also offers "I'll connect my mailbox first" (it sends nothing and
+  // matches no channel); the only way floorboss would send is still not offered.
+  assert.deepEqual(sending.options, ["I'll connect my mailbox first", 'nowhere: I\'ll send them myself']);
 });
 
 test('free times: "all day every day" is working hours each day; German dates', () => {

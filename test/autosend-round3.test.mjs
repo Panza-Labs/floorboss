@@ -16,12 +16,12 @@ import { HAND_SEND_ASKS } from '../skills/flow/scripts/steps/wording.mjs';
 import { autosendNews } from '../skills/flow/scripts/steps/replies.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 function approved(opts = {}) {
   const w = world({ touches: 2, ...opts });
   process.env.FLOORBOSS_HOME = w.HOME;
   const r = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: r.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: r.digest, said: AUTO_PICK }, at(NOW));
   return w;
 }
 const waitOf = (r, id) => r.waits.find((w) => w.id === id)?.why || '';
@@ -44,8 +44,8 @@ test('item 2: a first message whose day and the day after went by is offered aga
   assert.equal(new Set(rb.items.map((x) => x.id)).size, 3);
   assert.equal(rb.items.find((x) => x.id === 'c001' && x.touch === 1).planned_day, '2026-10-15');
   // It was the user's on the outbox meanwhile: the yes needs their word it wasn't sent by hand (round 4, item 1).
-  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at('2026-10-15T08:30:00Z')), /If you sent it yourself, tell me 'sent'/);
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE, notSentSaid: "I didn't send them" }, at('2026-10-15T08:30:00Z'));
+  assert.throws(() => approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at('2026-10-15T08:30:00Z')), /If you sent it yourself, tell me 'sent'/);
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK, notSentSaid: "I didn't send them" }, at('2026-10-15T08:30:00Z'));
   assert.deepEqual(dueNow(w.HOME, at('2026-10-15T09:00:00Z')).due.map((x) => x.id), ['c001', 'c002', 'c003']);
   // Still in its window: nothing to re-plan.
   const w2 = approved();
@@ -96,7 +96,7 @@ test('item 6: an auto-send message offering a time someone else booked is held, 
   writeFileSync(join(w.evDir, 'slots.json'), JSON.stringify({ slots: [{ id: 's20261103-1000', start: '2026-11-03T10:00:00Z', end: '2026-11-03T10:30:00Z' }] }));
   addLines(w.evDir, approvedLines(w.evDir, PEOPLE[0], 1, { at: '2026-10-12T07:30:00Z', extra: ' Tuesday at 10:00 suits?', slot_ids: ['s20261103-1000'] }).lines);
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: 'auto-send these sequences' }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: '1' }, at(NOW));
   assert.ok(dueNow(w.HOME, at('2026-10-12T09:00:00Z')).due.some((x) => x.id === 'c001'));
   addLines(w.evDir, [{ at: '2026-10-12T08:30:00Z', type: 'booked', who: 'user', id: 'c002', slot: 's20261103-1000', start: '2026-11-03T10:00:00Z', blocks: ['s20261103-1000'], said: 'Bo booked Tuesday 10:00' }]);
   const r = dueNow(w.HOME, at('2026-10-12T09:00:00Z'));

@@ -81,15 +81,20 @@ export function mergeRows(rows, { sharedDomains = [] } = {}) {
       else byEmail.set(r.email, i);
     }
   });
-  // 2. The same personal profile link.
+  // 2. The same personal profile link, for the same name (a nickname or an initial counts). One link on people with
+  //    different names (a default picture, a company page) tells nobody apart: it merges nobody and is reported.
   const byProfile = new Map();
   people.forEach((r, i) => {
     const k = profileKey(r.profile_url);
-    if (k) {
-      if (byProfile.has(k)) union(byProfile.get(k), i, `same profile ${k}`);
-      else byProfile.set(k, i);
-    }
+    if (k) (byProfile.get(k) || byProfile.set(k, []).get(k)).push(i);
   });
+  const sharedLinks = [];
+  for (const [k, idx] of byProfile) {
+    if (idx.length < 2) continue;
+    const named = (i, j) => nameMatchKey(people[i].name) === nameMatchKey(people[j].name) || sameName(people[i].name, people[j].name, { initials: true });
+    if (idx.every((i) => named(idx[0], i))) for (const i of idx.slice(1)) union(idx[0], i, `same profile ${k}`);
+    else sharedLinks.push({ link: k, people: idx.length, lines: idx.map((i) => people[i].line) });
+  }
   // 3. The same name at the same or a related company; a nickname, an initial or a small typo of the same
   //    surname at the same company. Two different personal addresses don't stop a merge (work and private).
   const bySurname = new Map();
@@ -157,7 +162,7 @@ export function mergeRows(rows, { sharedDomains = [] } = {}) {
     seen.add(v.company_key);
     visitOut.push({ company: v.company, company_key: v.company_key, booth: v.booth || '', notes: v.notes || '' });
   }
-  return { contacts, visit: visitOut, skipped };
+  return { contacts, visit: visitOut, skipped, shared_links: sharedLinks };
 }
 
 // Keys that identify a person across loads: each address, the personal profile link, and name + company.
@@ -165,7 +170,7 @@ export function personKeys(c, shared = new Set()) {
   // A shared inbox (sales@, or one address on two people the merge kept apart) says nothing about who it is.
   const keys = (c.emails || [c.email]).filter((e) => e && !SHARED_INBOX.test(e) && !shared.has(e)).map((e) => `e:${e}`);
   const pk = profileKey(c.profile_url);
-  if (pk) keys.push(`u:${pk}`);
+  if (pk && !shared.has(`u:${pk}`)) keys.push(`u:${pk}`);
   if (c.name && c.company_key) keys.push(`n:${normPersonName(c.name)}|${c.company_key}`);
   return keys;
 }
@@ -185,6 +190,10 @@ export function assignIds(contacts, people) {
   const taken = new Set();
   const seen = new Map();
   for (const c of contacts) for (const e of new Set((c.emails || [c.email]).filter(Boolean))) seen.set(e, (seen.get(e) || 0) + 1);
+  for (const c of contacts) {
+    const pk = profileKey(c.profile_url);
+    if (pk) seen.set(`u:${pk}`, (seen.get(`u:${pk}`) || 0) + 1);
+  }
   const shared = new Set([...seen].filter(([, n]) => n > 1).map(([e]) => e));
   for (const c of contacts) {
     const keys = personKeys(c, shared);

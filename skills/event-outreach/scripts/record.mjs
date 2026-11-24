@@ -237,7 +237,9 @@ export function planRecord(items, ctx) {
       case 'skipped': {
         let t = item.touch != null ? Number(item.touch) : Math.max(0, ...Object.keys(st.sent).map(Number)) + 1;
         if (item.touch == null) while (ctx.state[id]?.touches?.[t]?.skipped) t++;
-        if (!Number.isInteger(t) || t < 2 || t > 10) {
+        // Message 1 can be skipped only when it was an app note the app said can't go (gone from the event, messages off).
+        const appSaidNo = t === 1 && ['not_found', 'messages_off'].includes(ctx.state[id]?.touches?.[1]?.app_result?.result);
+        if (!Number.isInteger(t) || (t < 2 && !appSaidNo) || t > 10) {
           errors.push(`${where}: only a follow-up can be skipped (message 2 or later); to leave someone out, record "cut"`);
           return;
         }
@@ -251,6 +253,15 @@ export function planRecord(items, ctx) {
           return;
         }
         entries.push({ type: 'step_skipped', ...base, touch: t });
+        // Every step before the next one is now skipped: the next becomes their first message (owner answer A1), and
+        // its approval as a follow-up no longer counts.
+        {
+          const tt = ctx.state[id]?.touches || {};
+          let n = t + 1;
+          while (tt[n]?.skipped) n++;
+          const allSkipped = Array.from({ length: n - 1 }, (_, i) => i + 1).every((k) => k === t || tt[k]?.skipped);
+          if (allSkipped && tt[n]?.approved && !st.sent?.[n] && !tt[n]?.released) entries.push({ type: 'approval_withdrawn', ...base, touch: n, reason: 'every message before it was skipped: this is now the first message' });
+        }
         lines.push(`message ${t} to ${who} skipped; the next step goes on its day`);
         break;
       }
@@ -588,6 +599,10 @@ export function planRecord(items, ctx) {
         lines.push(`cut: ${who}`);
         break;
       case 'added':
+        if (ctx.heldWhy?.(id)) {
+          notes.push(`${who} is held (${text(ctx.heldWhy(id), 160)}), so floorboss doesn't add them`);
+          return;
+        }
         if (onList) {
           notes.push(`${who} is already on the shortlist`);
           return;

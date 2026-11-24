@@ -108,7 +108,8 @@ function makePersona(spec, H, g, data, friction) {
     accounts: existsSync(join(data, 'accounts.csv')) ? join(data, 'accounts.csv') : 'none',
     company: { own_company: spec.own.company, own_domains: [spec.own.domain] },
     colleagues: { colleagues: spec.own.colleagues || [] },
-    crm_name: (s) => simCrmNameAnswer(s.ask?.question || '', spec.own.user),
+    // The reading waiting for a yes is in the agent's notes (for_agent) since the split of questions from notes (2026-11-21): the agent shows it to the user word for word, so the simulated user reads both.
+    crm_name: (s) => simCrmNameAnswer(`${s.ask?.question || ''} ${s.ask?.for_agent || ''}`, spec.own.user),
     team: (spec.own.colleagues || []).length ? 'my team too' : 'just me',
     coworker_contacts: spec.coworkers || 'leave them alone (recommended)',
     // The specs' expected groups were written for a 12-month lost-deal window.

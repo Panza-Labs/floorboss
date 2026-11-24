@@ -134,10 +134,9 @@ function config(opts) {
       if (!sd || typeof sd !== 'object' || Array.isArray(sd))
         throw new Error('sending is {"channels": [...], "followups": "scheduled"|"each_round", "linkedin_ack": true|false}.');
       for (const ch of sd.channels || [])
-        if (!['email', 'chat', 'app', 'linkedin'].includes(ch)) throw new Error('sending.channels holds "email", "chat", "app" and/or "linkedin".');
+        if (ch === 'linkedin') throw new Error("floorboss never sends on LinkedIn: the user sends LinkedIn messages by hand. sending.channels holds \"email\", \"chat\" and/or \"app\".");
+        else if (!['email', 'chat', 'app'].includes(ch)) throw new Error('sending.channels holds "email", "chat" and/or "app".');
       if (sd.followups != null && !['scheduled', 'each_round'].includes(sd.followups)) throw new Error('sending.followups is "scheduled" or "each_round".');
-      if ((sd.channels || []).includes('linkedin') && sd.linkedin_ack !== true)
-        throw new Error('Sending on LinkedIn needs the user to have read and accepted the LinkedIn warning (sending.linkedin_ack: true).');
       if ((sd.channels || []).length && !sd.followups)
         throw new Error('With sending on, say how follow-ups go: sending.followups "scheduled" or "each_round".');
       if (sd.unattended != null) throw new Error('There is no unattended sending: Claude Code asks before every message, so someone has to be there.');
@@ -381,6 +380,16 @@ function onboarding(opts) {
       'crm_activity_failed',
       'optout_default_set',
       'inbox_read_asked',
+      // The guided intake (flow steps/intake.mjs).
+      'account_intake',
+      'show_intake',
+      'intake_site',
+      'intake_names_done',
+      'intake_confirmed',
+      'crm_connect',
+      'crm_verify_missed',
+      'crm_verify_other',
+      'material_source',
       ...Object.values(ALIAS),
       ...NODES.flatMap((n) =>
         [
@@ -522,11 +531,14 @@ function scanCmd(opts) {
   const found = inv.found || {};
   const keep = {
     ...inv,
-    items: inv.items.map(({ type, name, source, kinds, description, path, tools, tools_risk }) => ({
+    items: inv.items.map(({ type, name, source, kinds, description, path, tools, tools_risk, can_send, can_draft, can_create_contact }) => ({
       type,
       name,
       source,
       kinds,
+      ...(can_send ? { can_send: true } : {}),
+      ...(can_draft ? { can_draft: true } : {}),
+      ...(can_create_contact ? { can_create_contact: true } : {}),
       description: description ? String(description).slice(0, 160) : undefined,
       path: path || undefined,
       ...(type === 'agent' ? { tools: tools ?? null, tools_risk } : {})

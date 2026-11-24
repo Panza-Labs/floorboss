@@ -26,6 +26,14 @@ as one plain paragraph (no ">" marks, no line breaks): don't reword, shorten, su
 > your recipients, your industry's rules, and LinkedIn's and event platforms' terms. Nothing here is legal
 > advice. See "Your responsibility" in the README.
 
+**Daily sending, first.** If an event's follow-ups go out through a daily Claude routine (a scheduled task in the
+user's Claude account that runs in the cloud, so emails go with the laptop off), the first command of the session,
+before any other floorboss command, is `node "${CLAUDE_PLUGIN_ROOT}/skills/autosend/scripts/cli.mjs" routine-status`.
+It has to come first: once floorboss's own steps run, this session's Gmail reads wait until it ends, and RemoteTrigger
+goes through only with the body floorboss printed.
+If it returns `check`, make each of its reads (Gmail reads only), run its `then`, and tell the user its `say` word for
+word. If an event has `update_due`, run its `routine_body` command and do what that says. With no events, go on.
+
 **How it runs.** The order of steps isn't in this file; the code decides. Run
 `node "${CLAUDE_PLUGIN_ROOT}/skills/flow/scripts/cli.mjs" next --new-run` the first time (a new run asks which event it's for when there are events already), then `next` (add `--event <slug>` once the event is known) and do the one thing it returns, then run it
 again, until it says `done`. The skill at `${CLAUDE_PLUGIN_ROOT}/skills/flow/SKILL.md` says what each kind of

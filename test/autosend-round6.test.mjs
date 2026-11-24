@@ -17,7 +17,7 @@ import { query } from '../lib/autosend/replycheck.mjs';
 import { stepMark, readEvent } from '../lib/autosend/common.mjs';
 
 const at = (iso) => Date.parse(iso);
-const SENTENCE = 'auto-send these sequences';
+const AUTO_PICK = '1'; // the user's pick: 1, approve and send automatically
 const CLI = join(ROOT, 'skills/autosend/scripts/cli.mjs');
 
 // A cloud run's command, in its own process (each cloud run is its own container: nothing but the data repo is shared).
@@ -37,7 +37,7 @@ function pushed({ touches = 1, people = [PEOPLE[0]] } = {}) {
   const w = world({ touches, people });
   process.env.FLOORBOSS_HOME = w.HOME;
   const rb = readback(w.evDir, at(NOW));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   return { ...w, ...remoteFor(w.HOME) };
 }
 // Run X: search, release, the send shown; the model sends, then the run dies before `sent`.
@@ -124,7 +124,7 @@ test('finding 2: after a hand send recorded days later, the reply check searches
   const THU = '2026-10-15T09:00:00Z';
   addLines(w.evDir, [{ at: THU, type: 'sent', who: 'user', id: 'c001', touch: 1, via: 'email.send', channel: 'email', date: '2026-10-12', source: 'user', said: 'I sent it Monday', message_id: 'h1', thread_id: 'ht1' }]);
   const rb = readback(w.evDir, at(THU));
-  approve(w.evDir, { digest: rb.digest, said: SENTENCE }, at(THU));
+  approve(w.evDir, { digest: rb.digest, said: AUTO_PICK }, at(THU));
   const due = ledgerLines(w.evDir).find((e) => e.type === 'autosend_approved' && e.touch === 2).planned_due;
   const it = dueNow(w.HOME, at(`${due}T09:00:00Z`)).due.find((x) => x.id === 'c001');
   assert.ok(it, 'message 2 is due');
@@ -164,7 +164,7 @@ test('item 3: revoke with no event named stops auto-send at every auto-send even
   for (const slug of [SLUG, 'dock-fair']) {
     const dir = join(w.HOME, 'events', slug);
     const rb = readback(dir, at(NOW));
-    approve(dir, { digest: rb.digest, said: SENTENCE }, at(NOW));
+    approve(dir, { digest: rb.digest, said: AUTO_PICK }, at(NOW));
   }
   const r = autosend(w.HOME, ['revoke', '--ids', 'all', '--said-file', said(w.HOME, 'stop auto-send')]);
   assert.ok(!r.ERROR, r.ERROR);

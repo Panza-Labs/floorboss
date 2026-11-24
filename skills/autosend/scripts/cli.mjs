@@ -17,10 +17,13 @@ import { writeJson } from '../../../lib/jsonio.mjs';
 import { append } from '../../../lib/ledger.mjs';
 import { eventStateAt } from '../../../lib/sendcheck.mjs';
 import { plainAddress } from '../../event-outreach/scripts/mailto.mjs';
-import { refusedHere, eventDirOf, eventJson, autosendEvents, readEvent, unsettled, stepMark, draftOf, ledgerOf, claudeSendsEmail, liveApproval, handSentCommand } from '../../../lib/autosend/common.mjs';
+import { refusedHere, NOT_HERE, eventDirOf, eventJson, autosendEvents, readEvent, unsettled, stepMark, draftOf, ledgerOf, claudeSendsEmail, liveApproval, handSentCommand, hostWhy, autosendReady, inClaudeCode, ROUTINE, oldRoutineDrafts } from '../../../lib/autosend/common.mjs';
+import { choiceFor, latestPick } from '../../../lib/autosend/pick.mjs';
+import { approvedNext, approvedAnswer, runFlowOf, loadRun, FLOW as APPROVED_FLOW, Refused as ApprovedRefused } from '../../../lib/autosend/approved-drafts.mjs';
+import { harness } from '../../../lib/harness.mjs';
 import { readback, approve, revoke } from '../../../lib/autosend/approval.mjs';
 import { dueNow } from '../../../lib/autosend/plan.mjs';
-import { start, end, unlock, repair, laptopWrite, initRepo, publishedWhy, readLock, isRepo, remoteUrl, headOf, pinWhy, redact, repoConfigWhy, LOCK_LIVE_MS, PAUSE_STEPS } from '../../../lib/autosend/sync.mjs';
+import { start, end, unlock, repair, laptopWrite, initRepo, publishedWhy, readLock, isRepo, remoteUrl, headOf, pinWhy, redact, repoConfigWhy, confirmRemote, bareUrl, dataRemote, LOCK_LIVE_MS, PAUSE_STEPS } from '../../../lib/autosend/sync.mjs';
 import { next, checked, sent, sendGapMs } from './driver.mjs';
 import { holdWords, draftsNext, draftsAnswer, overdueDays, overdueQuery, overdueFrom, heldQuery, heldFrom, TOOLS as DRAFT_TOOLS, MODE as DRAFTS_MODE, Refused as DraftsRefused } from '../../../lib/autosend/drafts.mjs';
 import { dailyTaskText, chatgptLink, dayTime, DEFAULT_TIME, TASK_NAME } from '../../../lib/autosend/dailytask.mjs';
@@ -29,6 +32,9 @@ import { tmpdir } from 'node:os';
 import { systemZone } from '../../../lib/tz.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { ROUTINE_HANDLERS } from './routine.mjs';
+import { needsRecord, takeRecord, guardRunsHere, routineEvent, NOT_SEEN } from '../../../lib/autosend/guard-record.mjs';
+import { routineStopWords, routineDeletes, dueAfterToday } from '../../../lib/autosend/routine.mjs';
 
 const FLOORBOSS = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -43,17 +49,23 @@ const laptopOnly = (what) => {
 };
 // A laptop change to auto-send state, through the sync (lib/autosend/sync.mjs laptopWrite): pull, the lock, the
 // write, push. keep: a revoke, which is written here even when it can't be pushed.
-const synced = (what, keep, fn) => laptopWrite({ home: home(), nowMs: nowOf(), keep, what }, fn);
+const synced = (what, keep, fn, keepUnbound = keep) => laptopWrite({ home: home(), nowMs: nowOf(), keep, keepUnbound, what }, fn);
 const pushWords = (w) => ({ pushed: w.pushed, ...(w.say ? { say: w.say } : {}) });
 
 // The event folder for --event, which must be set to auto-send (except for `on`).
-function eventOf(opts, { on = false } = {}) {
+// switched: also an event switched away from the daily routine whose routine still has drafts (draft-gone, in Claude
+// Code only).
+function eventOf(opts, { on = false, switched = false } = {}) {
   need(opts, 'event');
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(opts.event))) throw new Error('--event is an event slug.');
   const dir = eventDirOf(home(), opts.event);
   const ev = eventJson(dir);
   if (!ev) throw new Error(`No event "${opts.event}" in the data folder.`);
   if (!on && ev.autosend !== true) throw new Error(`"${opts.event}" isn't set to auto-send: ask the user first, then run on --event ${opts.event}.`);
+  // In Claude Code only an event set to send through a daily Claude routine; in Codex never one.
+  const wasRoutine = switched && inClaudeCode() && oldRoutineDrafts(ev, readEvent(dir).entries).length > 0;
+  const host = on || wasRoutine ? null : hostWhy(ev);
+  if (host) throw new Error(`${host}.`);
   return { dir, ev };
 }
 // After a laptop command changed what the outbox may offer, its page is rebuilt (best effort).
@@ -72,62 +84,96 @@ async function on(opts) {
   laptopOnly('Turning auto-send on');
   const { dir, ev } = eventOf(opts, { on: true });
   need(opts, 'said');
+  // --mode drafts: through Gmail drafts and one daily ChatGPT task (lib/autosend/drafts.mjs), no data repo. Without
+  // it, the cloud task with the data repo (0.1.4). --mode routine: Claude Code only, through Gmail drafts and one daily
+  // Claude routine (lib/autosend/routine.mjs); Codex never.
+  const claude = inClaudeCode();
+  const mode = opts.mode === undefined || opts.mode === true ? (claude ? ROUTINE : ev.autosend_mode || 'cloud') : String(opts.mode);
+  if (claude ? mode !== ROUTINE : !['cloud', DRAFTS_MODE].includes(mode)) throw new Error(claude ? 'In Claude Code, --mode is routine.' : '--mode is drafts or cloud.');
   // Claude Code sending email from this same data folder could send a step the cloud sends too (its guard doesn't read
-  // auto-send's marks): one or the other, never both. The planner holds every send if it comes on later.
-  if (claudeSendsEmail(h0(), ev))
+  // auto-send's marks): one or the other, never both. The planner holds every send if it comes on later. (Through a
+  // daily Claude routine, Claude Code's own sending is how message 1 goes: claudeSendsEmail says so.)
+  if (claudeSendsEmail(h0(), { ...ev, autosend_mode: mode }))
     throw new Error('Claude Code sends email for this data folder (its sending setting is on): auto-send can\'t be on as well. Turn Claude Code\'s email sending off first, in Claude Code.');
   // The Gmail account it sends from is required: the approval records it, and every cloud run checks the connected
   // account against it first (gmail_get_profile).
-  // --mode drafts: through Gmail drafts and one daily ChatGPT task (lib/autosend/drafts.mjs), no data repo. Without
-  // it, the cloud task with the data repo (0.1.4).
-  const mode = opts.mode === undefined || opts.mode === true ? ev.autosend_mode || 'cloud' : String(opts.mode);
-  if (!['cloud', DRAFTS_MODE].includes(mode)) throw new Error('--mode is drafts or cloud.');
   const own = opts.own == null || opts.own === true ? ev.autosend_own || null : String(opts.own).trim().toLowerCase();
   if (own == null) throw new Error("Missing --own: the Gmail address auto-send sends from (the account connected in ChatGPT). Ask the user for it.");
   if (!plainAddress(own)) throw new Error('--own is the user\'s own address (the Gmail account it sends from), one plain address.');
   const w = synced('autosend on', false, () => {
     const now = eventJson(dir) || ev;
-    writeJson(join(dir, 'event.json'), { ...now, autosend: true, autosend_said: String(opts.said).slice(0, 200), autosend_own: own, autosend_mode: mode });
+    // Leaving a daily Claude routine: the routine keeps the drafts it was given up to now, so they stay held and get
+    // delete steps until each is gone (common.mjs oldRoutineDrafts; audit run 11).
+    const leaving = now.autosend_mode === ROUTINE && mode !== ROUTINE;
+    // --setup-pick: what the user answered at setup (auto | drafts | self), named in the final choice as their default.
+    const sp = ['auto', 'drafts', 'self'].includes(String(opts['setup-pick'])) ? { autosend_setup_pick: String(opts['setup-pick']) } : {};
+    writeJson(join(dir, 'event.json'), { ...now, autosend: true, autosend_said: String(opts.said).slice(0, 200), autosend_own: own, autosend_mode: mode, ...sp, ...(leaving ? { autosend_routine_until: new Date(nowOf()).toISOString() } : {}) });
   });
+  const stop = ev.autosend_mode === ROUTINE && mode !== ROUTINE ? routineStopWords(dir, opts.event, nowOf()) : null;
   return {
     autosend: true,
     event: opts.event,
     own,
     ...pushWords(w),
     mode,
-    ...(w.pushed === null && mode !== DRAFTS_MODE ? { say: "Your data isn't in a repo yet: do setup step 1 first (init, then setup). Auto-send can't run until then." } : {}),
-    next: 'Run flow next: every planned follow-up of each sequence is drafted, read by the critic and approved before the readback.'
+    ...(w.pushed === null && mode === 'cloud' ? { say: "Your data isn't in a repo yet: do setup step 1 first (init, then setup). Auto-send can't run until then." } : {}),
+    ...(stop ? { drafts_delete: stop.drafts_delete, delete_say: stop.say } : {}),
+    next: `${stop ? 'First tell the user delete_say and do what it says (each drafts_delete step once). ' : ''}Run flow next: every planned follow-up of each sequence is drafted, read by the critic and approved before the readback.`
   };
 }
 
 async function readbackCmd(opts) {
   laptopOnly('The readback');
-  const { dir } = eventOf(opts);
+  const { dir, ev } = eventOf(opts);
   const r = readback(dir, nowOf());
+  const people = new Set(r.items.map((x) => x.id)).size;
+  const choice = choiceFor({ slug: opts.event, digest: r.digest, messages: r.items.length, people, autosendReady: autosendReady(ev), setupPick: ev.autosend_setup_pick });
+  const claude = inClaudeCode();
+  // Gmail drafts the daily routine was given whose yes no longer stands: deleted first (the readback holds them).
+  const stop = ev.autosend_mode === ROUTINE ? routineStopWords(dir, opts.event, nowOf()) : null;
+  const ask = claude
+    ? 'Then ask with the AskUserQuestion tool, passing choice.ask_user_question exactly as given (change no word of it). floorboss records the pick the user makes there itself. Then run approve --event <slug> --digest <digest> (no words of yours: approve reads the recorded pick).'
+    : 'Then show choice.numbered word for word and ask the user to reply with the number of their choice. Put their reply in a file and run approve with --digest and --said-file.';
   return {
-    people: new Set(r.items.map((x) => x.id)).size,
+    people,
     messages: r.items.length,
     digest: r.digest,
     text: r.text,
     refused: r.refused,
+    choice: claude ? { ask_user_question: choice.ask_user_question } : { numbered: choice.numbered },
     // A message whose day went by (it was on the outbox): the user may have sent it. Their "sent" is recorded with
     // exactly this command, never settle (which is for a step auto-send let go).
     ...(r.items.some((x) => x.missed) ? { hand_sent: r.items.filter((x) => x.missed).map((x) => ({ id: x.id, touch: x.touch, record: handSentCommand(opts.event, x.id, x.touch) })) } : {}),
-    show: `Show the user \`text\` word for word, then the people left out and why. Ask them to type "auto-send these sequences" if they want exactly these sent on these days. Put their words in a file and run approve with --digest and --said-file.${r.items.some((x) => x.missed) ? " If they say they sent a message in hand_sent themselves, record it with that item's \`record\` command (never settle) and run readback again; if they say it wasn't sent, put those words in a file too and add --not-sent-said-file." : ''}`
+    ...(stop ? { drafts_delete: stop.drafts_delete, delete_say: stop.say } : {}),
+    show: `${stop ? 'First tell the user delete_say and do what it says (each drafts_delete step once). ' : ''}Show the user \`text\` word for word, then the people left out and why. ${ask} If they answer in words of their own (for example "approve all except Dana"), read them back in plain words and confirm, then do what they ask and show the readback again: those words approve nothing by themselves. If they have changes, ask what to change, redraft, and show what changed.${r.items.some((x) => x.missed) ? " If they say they sent a message in hand_sent themselves, record it with that item's \`record\` command (never settle) and run readback again; if they say it wasn't sent, put those words in a file too and add --not-sent-said-file." : ''}`
   };
 }
 
+// The next step after each pick, in plain words for the agent.
+function afterPick(slug, ev, pick, w) {
+  const cmd = (...a) => (inClaudeCode() ? `node "${join(FLOORBOSS, 'skills', 'autosend', 'scripts', 'cli.mjs')}" ${a.join(' ')}` : a.join(' '));
+  if (pick === 'self') return "Nothing is sent by floorboss. Tell the user: every message is on the outbox page with its copy buttons, to send from their own mail app on its day.";
+  if (pick === 'drafts') return `Now run ${cmd('drafts', 'next', '--event', slug, '--run', 'new', '--for', 'drafts')} and follow each step: each message goes into Gmail Drafts, nothing is sent.`;
+  if (ev.autosend_mode === ROUTINE) return `Now run ${cmd('drafts', 'next', '--event', slug, '--run', 'new')} and follow each step: message 1 to each person is sent from this session (Claude Code asks before each one), and every follow-up becomes a Gmail draft in its thread. Then the daily routine is set up.`;
+  if (ev.autosend_mode === DRAFTS_MODE) return `Now run drafts next --event ${slug} --run new and follow each step: the first emails due today are sent now, every other message becomes a labelled Gmail draft that the daily task sends on its day.`;
+  return w.pushed === null ? 'The data folder is not a checkout of your repo yet: the README setup, step 1.' : 'It is in your repo: the cloud task sends from its next run on.';
+}
+
 async function approveCmd(opts) {
-  laptopOnly('The auto-send approval');
-  const { dir } = eventOf(opts);
-  need(opts, 'digest', 'said');
+  laptopOnly('The final approval');
+  const { dir, ev } = eventOf(opts);
+  need(opts, 'digest');
+  // In Claude Code the pick is the one floorboss's guard recorded from the AskUserQuestion answer; elsewhere the
+  // user's own reply (--said, a number or an option's words).
+  const claude = inClaudeCode();
+  if (!claude) need(opts, 'said');
+  const recorded = claude ? latestPick(home(), opts.event) : null;
+  if (claude && !recorded) throw new Error("No pick of the user's is recorded for this event: run readback, ask with its choice through the AskUserQuestion tool, then approve. Nothing was approved.");
   // --not-sent-said: the user's word that a missed message (on their outbox since its day went by) wasn't sent by hand.
   const notSentSaid = typeof opts['not-sent-said'] === 'string' ? opts['not-sent-said'] : null;
-  const w = synced(`autosend approve ${opts.event}`, false, () => approve(dir, { digest: opts.digest, said: opts.said, notSentSaid }, nowOf()));
+  const w = synced(`autosend approve ${opts.event}`, false, () => approve(dir, { digest: opts.digest, ...(claude ? { recorded } : { said: opts.said }), notSentSaid }, nowOf()));
   await rebuild(opts.event);
-  if (eventJson(dir)?.autosend_mode === DRAFTS_MODE)
-    return { ...w.result, ...pushWords(w), next: `Now run drafts next --event ${opts.event} --run new and follow each step: the first emails due today are sent now, every other message becomes a labelled Gmail draft that the daily task sends on its day.` };
-  return { ...w.result, ...pushWords(w), next: w.pushed === null ? 'The data folder is not a checkout of your repo yet: the README setup, step 1.' : 'It is in your repo: the cloud task sends from its next run on.' };
+  return { ...w.result, ...pushWords(w), next: afterPick(opts.event, ev, w.result.pick, w) };
 }
 
 async function revokeCmd(opts) {
@@ -136,7 +182,7 @@ async function revokeCmd(opts) {
   // No event named: "stop auto-send" for every auto-send event in the data folder (ids all only: ids are per event).
   const all = opts.event === undefined || opts.event === true;
   if (all && opts.ids !== 'all') throw new Error('With no --event, revoke stops every auto-send event: --ids all. To stop some people, name their event.');
-  const evs = all ? autosendEvents(home()) : [{ slug: opts.event, dir: eventOf(opts).dir }];
+  const evs = all ? autosendEvents(home()).filter((e) => !hostWhy(e.event)) : [{ slug: opts.event, dir: eventOf(opts).dir }];
   // Each event's stop is written (and pushed) on its own: one that fails loses none of the others. A revoke always
   // wins: it is written here whatever happens, and if it can't reach your repo the answer says so and how to pause the
   // scheduled task.
@@ -160,19 +206,55 @@ async function revokeCmd(opts) {
   const holds = done.map((d) => holdWords(eventDirOf(home(), d.slug), d.slug, nowOf())).filter(Boolean);
   const holdNext = holds.length ? ` ${holds.map((h) => h.say).join(' ')} Tell the user this plainly, and if a hold step can't be confirmed, give them the drafts to delete by hand.` : '';
   const holdOut = holds.length ? { drafts_hold: holds.map((h) => h.drafts_hold).join(' ; ') } : {};
+  // Through a daily Claude routine: its queue is its own prompt and Gmail is its state, so the stop reaches it only when
+  // the person's queued drafts are deleted (routine.mjs routineStopWords). Until then those steps stay off the outbox.
+  const routineDone = done.filter((d) => eventJson(eventDirOf(home(), d.slug))?.autosend_mode === ROUTINE);
+  const deletes = routineDone.map((d) => routineStopWords(eventDirOf(home(), d.slug), d.slug, nowOf())).filter(Boolean);
+  const deleteOut = deletes.length ? { drafts_delete: deletes.flatMap((x) => x.drafts_delete) } : {};
+  const routineNext = deletes.length
+    ? ` Auto-send is stopped for them here. ${deletes.map((x) => x.say).join(' ')} Tell the user this plainly.`
+    : routineDone.length
+      ? ` No Gmail draft of theirs is queued for the daily routine. Run routine-body --event ${routineDone.map((d) => d.slug).join(' / ')} and pass its remote_trigger to RemoteTrigger unchanged, then routine-saved, so the routine's list matches.`
+      : '';
+  const others = done.length > routineDone.length;
   const next0 = notPushed.length
     ? "Tell the user `say` first, word for word: the cloud task doesn't know yet. Don't offer these messages to send by hand until the task is paused."
-    : `Those messages are back on the outbox page${all ? 's' : ''}, to send by hand. Tell the user to pause or delete the scheduled task too, if they want nothing more sent.`;
-  const next = `${next0}${holdNext}`;
-  if (!all) return { ...done[0].w.result, ...pushWords(done[0].w), ...holdOut, next };
+    : others || !deletes.length
+      ? `Those messages are back on the outbox page${all ? 's' : ''}, to send by hand${deletes.length ? ', except the ones whose Gmail drafts the daily routine could still send (below)' : ''}.${others ? ' Tell the user to pause or delete the scheduled task too, if they want nothing more sent.' : ''}`
+      : 'Those messages come back to the outbox page, to send by hand, once their drafts are deleted.';
+  const next = `${next0}${holdNext}${routineNext}`;
+  if (!all) return { ...done[0].w.result, ...pushWords(done[0].w), ...holdOut, ...deleteOut, next };
   return {
     revoked: Object.fromEntries(done.map((d) => [d.slug, d.w.result.revoked])),
     events: done.map((d) => d.slug),
     pushed: done.every((d) => d.w.pushed === true) ? true : done.some((d) => d.w.pushed === false) ? false : null,
     ...(notPushed.length ? { say: notPushed.map((d) => `${d.slug}: ${d.w.say}`).join(' ') } : {}),
     ...holdOut,
+    ...deleteOut,
     next
   };
+}
+
+// draft-gone --event <slug> --id <c…> --touch <n> --said <the user's words>: a daily Claude routine event, a step whose
+// auto-send was stopped and whose Gmail draft floorboss can't confirm gone (a delete that said not found for a draft
+// due today or earlier: the routine may have sent it). Only the user's own word that they checked Gmail Sent and
+// Drafts and it is in neither releases it: recorded gone (autosend_draft_deleted, who user, with their words), and the
+// step is theirs again. Never from a tool's answer or a file the session wrote.
+async function draftGone(opts) {
+  laptopOnly('Releasing a stopped draft');
+  const { dir, ev } = eventOf(opts, { switched: true });
+  if (ev.autosend_mode !== ROUTINE && !(inClaudeCode() && oldRoutineDrafts(ev, readEvent(dir).entries).length)) throw new Error('draft-gone is for an event sending through a daily Claude routine, or one switched away from it whose routine still has drafts.');
+  need(opts, 'id', 'touch', 'said');
+  const touch = Number(opts.touch);
+  const said = String(opts.said).trim();
+  if (said.length < 6) throw new Error("Put the user's own words in the file: what they found when they looked in Gmail Sent and Drafts.");
+  const x = routineDeletes(dir, nowOf()).find((d) => d.id === String(opts.id) && d.touch === touch);
+  if (!x) throw new Error(`${opts.id} message ${touch} isn't waiting on a stopped Gmail draft: nothing to release.`);
+  // Not yet past its day: the routine can't have sent it, so its delete step settles it (audit run 11).
+  if (dueAfterToday(dir, x.due, nowOf())) throw new Error(`${opts.id} message ${touch} isn't due yet, so the routine can't have sent it: run its delete step (drafts_delete) instead.`);
+  const w = synced(`autosend draft-gone ${opts.event} ${x.id} ${touch}`, false, () => append(ledgerOf(dir), { type: 'autosend_draft_deleted', who: 'user', id: x.id, touch, draft_id: x.draft_id, how: 'the user checked Gmail Sent and Drafts', said: said.slice(0, 200) }, new Date(nowOf())), true);
+  await rebuild(opts.event);
+  return { ...(w.say ? { say: w.say } : {}), released: `${x.id} message ${touch}`, draft_id: x.draft_id, next: `Recorded in the user's words. Message ${touch} to ${x.to} is back on the outbox page, theirs to send by hand. If that draft ever turns up in Gmail Drafts again, they should delete it, or the daily routine could still send it.` };
 }
 
 // status: the lock, every auto-send step that may have gone unrecorded (to settle), and what is due or waiting now.
@@ -302,6 +384,9 @@ async function setup(opts) {
   // The pin is the code that will run: a floorboss folder with changes not committed has none.
   const dirty = pinWhy(FLOORBOSS);
   if (dirty) throw new Error(`${dirty}. Commit or undo them (or use a clean copy of floorboss), then run setup again. Nothing was set up.`);
+  // The user confirmed this repo: floorboss pushes the data folder to it and nowhere else from now on.
+  const rec = confirmRemote({ home: h, url });
+  if (rec.stop) throw new Error(`${rec.stop}. Nothing was set up.`);
   const sha = headOf(FLOORBOSS);
   const unpublished = publishedWhy(FLOORBOSS, sha);
   return {
@@ -313,6 +398,21 @@ async function setup(opts) {
     task_prompt: taskPrompt({ sha, dataRepo: `${m[1]}/${m[2]}` }),
     show: 'Give the user task_prompt to paste into a new standalone scheduled task (Work in Cloud), schedule RRULE:FREQ=HOURLY, and the README steps 2 to 4 (token, Gmail connection, internet access).'
   };
+}
+
+// remote --confirm <url>: the user's yes that the data folder's repo is theirs (asked when floorboss has none recorded,
+// or when the repo changed). Only the url the data folder's remote has now can be confirmed.
+async function remoteCmd(opts) {
+  laptopOnly('Confirming the repo');
+  need(opts, 'confirm');
+  const h = home();
+  const unsafe = repoConfigWhy(h);
+  if (unsafe) throw new Error(`Refused: ${unsafe}.`);
+  const now = isRepo(h) ? dataRemote(h)?.url || null : null;
+  if (!now || bareUrl(now) !== bareUrl(String(opts.confirm))) throw new Error(`${redact(bareUrl(String(opts.confirm)))} isn't the data folder's remote (${now ? redact(bareUrl(now)) : 'it has none'}). Nothing was recorded.`);
+  const r = confirmRemote({ home: h, url: now });
+  if (r.stop) throw new Error(`${r.stop}. Nothing was recorded.`);
+  return { confirmed: true, repo: redact(bareUrl(now)) };
 }
 
 // init --remote https://github.com/<you>/<repo>: README setup step 1 (lib/autosend/sync.mjs initRepo), on the user's yes.
@@ -382,8 +482,24 @@ async function sentCmd(opts) {
 async function drafts(opts, argv) {
   laptopOnly('Auto-send through Gmail drafts');
   const verb = argv[1];
+  if (typeof opts.event === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(opts.event)) {
+    const host = hostWhy(eventJson(eventDirOf(home(), opts.event)));
+    if (host) throw new Error(`${host}.`);
+  }
   const cli = ['env', `FLOORBOSS_HOME=${home()}`, 'node', join(FLOORBOSS, 'skills', 'autosend', 'scripts', 'cli.mjs')];
+  // After the final approval (lib/autosend/approved-drafts.mjs): every run in Claude Code (whose guard holds a command
+  // to start with node), and pick 2's run (--for drafts) in Codex.
+  const claude = inClaudeCode();
+  const ccli = claude ? ['node', join(FLOORBOSS, 'skills', 'autosend', 'scripts', 'cli.mjs')] : cli;
   try {
+    const approved = typeof opts.run === 'string' && !['new', 'hold'].includes(opts.run) ? runFlowOf(home(), opts.run) === APPROVED_FLOW : opts.run === 'new' && (claude || opts.for === 'drafts');
+    if (claude && opts.run === 'hold') throw new Error(`${NOT_HERE}.`);
+    if (approved && verb === 'next') return approvedNext(home(), { event: opts.event, run: String(opts.run), kind: opts.for === 'drafts' ? 'drafts' : 'auto', host: harness(), nowMs: nowOf(), cli: ccli });
+    if (approved && verb === 'answer') {
+      need(opts, 'run', 'file');
+      return approvedAnswer(home(), { run: String(opts.run), file: resolve(String(opts.file)), nowMs: nowOf() });
+    }
+    if (claude) throw new Error(`${NOT_HERE}.`);
     if (verb === 'next') {
       need(opts, 'run');
       if (opts.run === 'new' || opts.run === 'hold') need(opts, 'event');
@@ -394,7 +510,7 @@ async function drafts(opts, argv) {
       return draftsAnswer(home(), { run: String(opts.run), file: resolve(String(opts.file)), nowMs: nowOf() });
     }
   } catch (e) {
-    if (e instanceof DraftsRefused) throw new Error(`${e.message}. Nothing was changed.`);
+    if (e instanceof DraftsRefused || e instanceof ApprovedRefused) throw new Error(`${e.message}. Nothing was changed.`);
     throw e;
   }
   throw new Error('drafts next or drafts answer.');
@@ -462,10 +578,11 @@ async function dailyTask(opts) {
   };
 }
 
-export const HANDLERS = { drafts, 'daily-task': dailyTask, 'overdue-checked': overdueChecked, 'held-checked': heldChecked, init, on, readback: readbackCmd, approve: approveCmd, revoke: revokeCmd, status, settle, setup, sync, next: nextCmd, checked: checkedCmd, sent: sentCmd };
+export const HANDLERS = { ...ROUTINE_HANDLERS, drafts, 'draft-gone': draftGone, 'daily-task': dailyTask, 'overdue-checked': overdueChecked, 'held-checked': heldChecked, init, on, readback: readbackCmd, approve: approveCmd, revoke: revokeCmd, status, settle, setup, sync, remote: remoteCmd, next: nextCmd, checked: checkedCmd, sent: sentCmd };
 
 export async function main(argv = process.argv.slice(2)) {
-  const no = refusedHere();
+  // The command decides only between the daily Claude routine's commands and the rest (argv[0], as typed).
+  const no = refusedHere(process.env, argv[0]);
   if (no) {
     process.stderr.write(`floorboss: ${no}.\n`);
     process.exit(1);
@@ -476,6 +593,43 @@ export async function main(argv = process.argv.slice(2)) {
   } catch (err) {
     process.stderr.write(`floorboss: ${err.message}\n`);
     process.exit(1);
+  }
+  // The one-use record (lib/autosend/guard-record.mjs). Where floorboss's guard runs (Claude Code, as lib/harness.mjs
+  // reads it: a Codex mark wins, so a Codex that inherited CLAUDECODE is Codex), a command that changes auto-send
+  // state runs only if the guard examined exactly these words a moment before. Read-only commands never need one.
+  // An event sent through a daily Claude routine now is Claude Code's alone: its commands need the record whatever
+  // the environment says (Codex never has one, so Codex is unchanged).
+  const routineHere = () => {
+    try {
+      // `on` too: moving an event off the routine needs the record in any host (owner's decision; revoke still stops it).
+      if (typeof opts.event === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(opts.event)) return routineEvent(eventJson(eventDirOf(home(), opts.event)));
+      // drafts with --run and no --event: the run's own event (lib/autosend/approved-drafts.mjs loadRun).
+      if (sub === 'drafts' && typeof opts.run === 'string' && /^[\w-]{1,64}$/.test(opts.run)) {
+        let slug = null;
+        try {
+          slug = loadRun(home(), opts.run).slug;
+        } catch {
+          slug = null;
+        }
+        if (typeof slug === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) return routineEvent(eventJson(eventDirOf(home(), slug)));
+      }
+      // Only the events the command touches: remote --confirm touches none.
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  if (needsRecord(sub) && (guardRunsHere(process.env) || routineHere())) {
+    let why;
+    try {
+      why = takeRecord(home(), argv, { said: sub === 'draft-gone' && typeof opts.said === 'string' ? opts.said : null }, Date.now());
+    } catch {
+      why = NOT_SEEN;
+    }
+    if (why) {
+      process.stderr.write(`floorboss: ${why}.\n`);
+      process.exit(1);
+    }
   }
   const h = HANDLERS[sub];
   if (!h) {

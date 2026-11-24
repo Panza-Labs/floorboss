@@ -39,7 +39,9 @@ test('standard setup: who you are and what you know are asked, saved, and the cr
   assert.ok(asked.about, `about was never asked: ${trail.join(' ')}`);
   assert.match(asked.about.question, /who are you to the people you write to/);
   assert.ok(asked.insights, `insights were never asked: ${trail.join(' ')}`);
-  assert.match(asked.insights.question, /^what-you-bring has no "what you know that they don't" table/);
+  // Updated 2026-11-21: the question is the plain one for the user (the file name moved to the agent's notes), and still
+  // says there is nothing yet and asks for one to three things, or "none".
+  assert.match(asked.insights.question, /^You haven't told me anything you know that .+ don't, so drafts will lean on questions\. Optional: one to three things you know from your work.*Or "none"\.$/);
   const now = readFileSync(wyb, 'utf8');
   assert.match(now, /\*\*About me:\*\* Sam Rivera, founder of Lanecraft/);
   const rows = parseInsights(now);

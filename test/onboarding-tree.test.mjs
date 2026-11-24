@@ -57,6 +57,7 @@ const ANSWER = (st, own = {}) => ({
   drafting_mode: () => { st.cfg.drafting_mode = own.drafting_mode || 'delegate'; },
   drafter: () => { st.cfg.drafter = { name: 'acme-sdr', gaps: [] }; }, drafter_sample: () => { st.ans.drafter_sample_ok = true; }, seller_framing: () => { st.ans.seller_framing = 'no'; },
   offer: () => { st.ans.offer_asked = true; }, true_claims: () => { st.ans.claims_confirmed = true; }, samples: () => { st.ans.samples_ok = true; }, languages: () => { st.cfg.languages = ['German', 'English']; }, basics: () => { st.ans.basics_asked = true; },
+  reach_channels: () => { st.ans.reach_asked = true; st.cfg.reach = own.reach || []; },
   sending: () => { st.ans.sending_asked = true; st.ans.sending_channels = own.channels || []; }, send_setup: () => { st.ans.send_setup_done = true; }, followups_mode: () => { st.cfg.sending = { followups: 'scheduled' }; },
   touches: () => { st.ans.touches_asked = true; },
   message_route: () => { st.ans.message_route_asked = true; }, followup_gap: () => { st.ans.followup_gap_asked = true; }, crm_log: () => { st.cfg.crm_log = 'tasks'; }, colleague_notes: () => { st.ans.colleague_notes_asked = true; st.cfg.colleague_notes = false; },
@@ -122,20 +123,21 @@ test('tree: setup levels — quick asks the fewest and reads nothing connected, 
   const inv = () => summarize([{ type: 'mcp', name: 'hubspot', kinds: ['crm'] }, { type: 'mcp', name: 'claude_ai_Gmail', kinds: ['email'] }, { type: 'mcp', name: 'gcal', kinds: ['calendar'] }]);
   const first = planQuestions({ inv: inv(), cfg: {}, ev: null, ans: {}, slots: 0, list: null }, { batch: 1 }).questions[0];
   assert.equal(first.id, 'setup_level', 'how much setup comes first');
-  assert.match(first.options[0], /^quick: .*hubspot isn't checked/, 'quick says plainly the CRM is not checked');
+  assert.match(first.options[0], /^quick: .*HubSpot isn't checked/, 'quick says plainly the CRM is not checked');
   assert.match(first.options[1], /^standard \(recommended\)/);
   // A first-time user's what-you-bring has no "About me" and no insights yet: both are asked (quick setup goes without them).
   const walkAt = (level) => { const s = { inv: inv(), cfg: {}, ev: { ...EV, time_zone: 'America/Chicago' }, ans: {}, slots: 0, list: null, level, bring: {} }; return { asked: run(s, { alone: true, channels: ['email'] }), s }; };
   const q = walkAt('quick'), st = walkAt('standard'), f = walkAt('full');
-  for (const id of ['tools', 'crm_name', 'customers', 'lost_deals', 'team', 'samples', 'basics', 'sending', 'home_tz']) assert.ok(!ids(q.asked).includes(id), `quick asked ${id}`);
+  for (const id of ['tools', 'crm_name', 'customers', 'lost_deals', 'team', 'samples', 'basics', 'home_tz']) assert.ok(!ids(q.asked).includes(id), `quick asked ${id}`);
+  // Whether floorboss sends is asked at every level (one product: the user's choice, never a level's).
+  assert.ok(ids(q.asked).includes('sending'), 'quick asks whether floorboss sends');
   assert.equal(q.s.ans.crm_choice, 'none');
-  assert.deepEqual(q.s.ans.sending_channels, []);
-  assert.ok(ids(st.asked).includes('tools') && !ids(st.asked).includes('sending'), st.asked.join(' '));
+  assert.ok(ids(st.asked).includes('tools') && ids(st.asked).includes('sending'), st.asked.join(' '));
   assert.ok(ids(f.asked).includes('sending'));
   assert.ok(q.asked.length < st.asked.length && st.asked.length < f.asked.length, `${q.asked.length} ${st.asked.length} ${f.asked.length}`);
   const quickIds = ids(q.asked);
   assert.equal(quickIds.filter((id) => id === 'touches').length, 1, 'quick asks for the touch count once');
-  assert.ok(quickIds.filter((id) => id !== 'touches').length <= 8, `quick: ${q.asked.join(' ')}`);
+  assert.ok(quickIds.filter((id) => !['touches', 'sending', 'send_setup', 'followups_mode'].includes(id)).length <= 9, `quick: ${q.asked.join(' ')}`);
   if (process.env.SHOW_LEVELS) console.log(JSON.stringify({ quick: q.asked, standard: st.asked, full: f.asked }));
   // The README's counts are this walk's (a seller working alone with a CRM, mailbox and calendar connected).
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
